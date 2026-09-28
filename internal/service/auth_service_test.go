@@ -88,6 +88,14 @@ func (m *mockTenantUserRepo) UpdateStatus(ctx context.Context, tenantID, id uuid
 	return appErrors.NewNotFound("user not found")
 }
 
+func (m *mockTenantUserRepo) GetAdminByTenantID(ctx context.Context, tenantID uuid.UUID) (*domain.TenantUser, error) {
+	if m.user != nil && m.user.TenantID == tenantID && m.user.Role == "admin" {
+		return m.user, nil
+	}
+	return nil, appErrors.NewNotFound("admin not found")
+}
+
+
 // MockBlacklistRepo
 type mockBlacklistRepo struct {
 	revoked map[string]bool

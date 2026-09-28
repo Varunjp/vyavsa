@@ -153,6 +153,13 @@ func (m *Metrics) DecInFlight() {
 	m.httpRequestsInFlight.Dec()
 }
 
+// IncTenantsCreated increments the total tenants created counter
+func (m *Metrics) IncTenantsCreated() {
+	if m != nil && m.tenantsCreatedTotal != nil {
+		m.tenantsCreatedTotal.Inc()
+	}
+}
+
 // RegisterDBPoolMetrics registers dynamic PostgreSQL pool metrics collectors
 func (m *Metrics) RegisterDBPoolMetrics(pool *pgxpool.Pool) {
 	collector := &dbPoolCollector{pool: pool}
