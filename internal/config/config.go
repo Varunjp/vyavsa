@@ -1,60 +1,266 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
 
+// Config holds all application configuration
 type Config struct {
-	AppEnv  string
-	AppPort string
-
-	DatabaseURL string
-
-	RedisAddr string
-	RedisDB   int
-
-	LogLevel    string
-	ServiceName string
+	App      AppConfig
+	Database DatabaseConfig
+	Redis    RedisConfig
+	JWT      JWTConfig
+	Log      LogConfig
+	Metrics  MetricsConfig
+	CORS     CORSConfig
 }
 
-func Load() Config {
-	_ = godotenv.Load()
-	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
+// AppConfig holds HTTP server and general application settings
+type AppConfig struct {
+	Name            string
+	Env             string
+	Port            string
+	ShutdownTimeout time.Duration
+}
 
-	return Config{
-		AppEnv:  getEnv("APP_ENV", "development"),
-		AppPort: getEnv("APP_PORT", "8080"),
+// DatabaseConfig holds PostgreSQL connection and pool parameters
+type DatabaseConfig struct {
+	Host            string
+	Port            string
+	Name            string
+	User            string
+	Password        string
+	SSLMode         string
+	MaxConns        int32
+	MinConns        int32
+	MaxConnLifetime time.Duration
+	MaxConnIdleTime time.Duration
+	AutoMigrate     bool
+}
 
-		DatabaseURL: getEnv(
-			"DATABASE_URL",
-			"postgres://postgres:postgres@localhost:5432/billbook",
-		),
+// RedisConfig holds Redis connection parameters
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
+}
 
-		RedisAddr: getEnv("REDIS_ADDR", "localhost:6379"),
-		RedisDB:   redisDB,
+// JWTConfig holds authentication token settings
+type JWTConfig struct {
+	Secret        string
+	AccessExpiry  time.Duration
+	RefreshExpiry time.Duration
+}
 
-		LogLevel: getEnv(
-			"LOG_LEVEL",
-			"info",
-		),
+// LogConfig holds structured logging settings
+type LogConfig struct {
+	Level  string
+	Format string // "json" or "text"
+}
 
-		ServiceName: getEnv(
-			"SERVICE_NAME",
-			"bill-book-api",
-		),
+// MetricsConfig holds Prometheus metrics settings
+type MetricsConfig struct {
+	Enabled bool
+	Path    string
+}
+
+// CORSConfig holds Cross-Origin Resource Sharing settings
+type CORSConfig struct {
+	AllowedOrigins []string
+}
+
+// ConnectionString returns the PostgreSQL DSN URL
+func (d *DatabaseConfig) ConnectionString() string {
+	// If a full DATABASE_URL environment variable was provided, parse and return it
+	if envURL := os.Getenv("DATABASE_URL"); envURL != "" {
+		return envURL
 	}
 
+	userInfo := url.UserPassword(d.User, d.Password)
+	hostPort := fmt.Sprintf("%s:%s", d.Host, d.Port)
+
+	query := url.Values{}
+	query.Set("sslmode", d.SSLMode)
+
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     userInfo,
+		Host:     hostPort,
+		Path:     d.Name,
+		RawQuery: query.Encode(),
+	}
+
+	return u.String()
 }
+
+// Addr returns the Redis Host:Port address
+func (r *RedisConfig) Addr() string {
+	if envAddr := os.Getenv("REDIS_ADDR"); envAddr != "" {
+		return envAddr
+	}
+	return fmt.Sprintf("%s:%s", r.Host, r.Port)
+}
+
+// Load loads configuration from environment variables, optionally reading from .env file
+func Load() (*Config, error) {
+	// Best-effort load from .env file (does not overwrite existing environment variables)
+	_ = godotenv.Load()
+
+	cfg := &Config{
+		App: AppConfig{
+			Name:            getEnv("APP_NAME", "vyavsa-bill-book-api"),
+			Env:             getEnv("APP_ENV", "development"),
+			Port:            getEnv("APP_PORT", "8080"),
+			ShutdownTimeout: getDurationEnv("APP_SHUTDOWN_TIMEOUT", 10*time.Second),
+		},
+		Database: DatabaseConfig{
+			Host:            getEnv("DATABASE_HOST", "localhost"),
+			Port:            getEnv("DATABASE_PORT", "5432"),
+			Name:            getEnv("DATABASE_NAME", "billbook"),
+			User:            getEnv("DATABASE_USER", "postgres"),
+			Password:        getEnv("DATABASE_PASSWORD", "postgres"),
+			SSLMode:         getEnv("DATABASE_SSLMODE", "disable"),
+			MaxConns:        getInt32Env("DATABASE_MAX_CONNS", 25),
+			MinConns:        getInt32Env("DATABASE_MIN_CONNS", 5),
+			MaxConnLifetime: getDurationEnv("DATABASE_MAX_CONN_LIFETIME", 30*time.Minute),
+			MaxConnIdleTime: getDurationEnv("DATABASE_MAX_CONN_IDLE_TIME", 5*time.Minute),
+			AutoMigrate:     getBoolEnv("DATABASE_AUTO_MIGRATE", true),
+		},
+		Redis: RedisConfig{
+			Host:     getEnv("REDIS_HOST", "localhost"),
+			Port:     getEnv("REDIS_PORT", "6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getIntEnv("REDIS_DB", 0),
+		},
+		JWT: JWTConfig{
+			Secret:        getEnv("JWT_SECRET", "super-secret-development-key-change-in-production-min-32-chars"),
+			AccessExpiry:  getDurationEnv("JWT_ACCESS_EXPIRY", 15*time.Minute),
+			RefreshExpiry: getDurationEnv("JWT_REFRESH_EXPIRY", 7*24*time.Hour),
+		},
+		Log: LogConfig{
+			Level:  getEnv("LOG_LEVEL", "info"),
+			Format: getEnv("LOG_FORMAT", ""), // Defaults to json in prod, text in dev
+		},
+		Metrics: MetricsConfig{
+			Enabled: getBoolEnv("PROMETHEUS_ENABLED", true),
+			Path:    getEnv("PROMETHEUS_PATH", "/metrics"),
+		},
+		CORS: CORSConfig{
+			AllowedOrigins: getSliceEnv("CORS_ALLOWED_ORIGINS", []string{"*"}),
+		},
+	}
+
+	// Default Log Format based on environment if not explicitly set
+	if cfg.Log.Format == "" {
+		if cfg.App.Env == "production" {
+			cfg.Log.Format = "json"
+		} else {
+			cfg.Log.Format = "text"
+		}
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// Validate performs fail-fast validation on configuration
+func (c *Config) Validate() error {
+	if c.App.Name == "" {
+		return fmt.Errorf("APP_NAME cannot be empty")
+	}
+	if c.App.Port == "" {
+		return fmt.Errorf("APP_PORT cannot be empty")
+	}
+	if c.Database.Name == "" {
+		return fmt.Errorf("DATABASE_NAME cannot be empty")
+	}
+	if c.Database.User == "" {
+		return fmt.Errorf("DATABASE_USER cannot be empty")
+	}
+	if c.Database.MaxConns <= 0 {
+		return fmt.Errorf("DATABASE_MAX_CONNS must be greater than 0")
+	}
+	if c.Database.MinConns < 0 {
+		return fmt.Errorf("DATABASE_MIN_CONNS cannot be negative")
+	}
+	if c.Database.MinConns > c.Database.MaxConns {
+		return fmt.Errorf("DATABASE_MIN_CONNS cannot exceed DATABASE_MAX_CONNS")
+	}
+	if c.App.Env == "production" && len(c.JWT.Secret) < 32 {
+		return fmt.Errorf("JWT_SECRET must be at least 32 characters in production")
+	}
+
+	return nil
+}
+
+// Helper utilities for environment variable parsing
 
 func getEnv(key, fallback string) string {
-	value := os.Getenv(key)
-
-	if value == "" {
-		return fallback
+	if val := os.Getenv(key); val != "" {
+		return strings.TrimSpace(val)
 	}
+	return fallback
+}
 
-	return value
+func getIntEnv(key string, fallback int) int {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return i
+		}
+	}
+	return fallback
+}
+
+func getInt32Env(key string, fallback int32) int32 {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.ParseInt(strings.TrimSpace(val), 10, 32); err == nil {
+			return int32(i)
+		}
+	}
+	return fallback
+}
+
+func getBoolEnv(key string, fallback bool) bool {
+	if val := os.Getenv(key); val != "" {
+		if b, err := strconv.ParseBool(strings.TrimSpace(val)); err == nil {
+			return b
+		}
+	}
+	return fallback
+}
+
+func getDurationEnv(key string, fallback time.Duration) time.Duration {
+	if val := os.Getenv(key); val != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
+			return d
+		}
+	}
+	return fallback
+}
+
+func getSliceEnv(key string, fallback []string) []string {
+	if val := os.Getenv(key); val != "" {
+		parts := strings.Split(val, ",")
+		res := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				res = append(res, trimmed)
+			}
+		}
+		if len(res) > 0 {
+			return res
+		}
+	}
+	return fallback
 }
