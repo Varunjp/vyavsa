@@ -1,0 +1,27 @@
+services:
+  api:
+    environment:
+      APP_ENV: production
+      LOG_FORMAT: json
+      LOG_LEVEL: warn
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  postgres:
+    restart: always
+
+  redis:
+    restart: always
+
+  prometheus:
+    restart: always
+
+  grafana:
+    restart: always
