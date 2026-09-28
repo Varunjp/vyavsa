@@ -12,6 +12,7 @@ type PlatformPlanRepository interface {
 	Create(ctx context.Context, plan *domain.PlatformPlan) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.PlatformPlan, error)
 	GetByName(ctx context.Context, name string) (*domain.PlatformPlan, error)
+	GetDefaultFreePlan(ctx context.Context) (*domain.PlatformPlan, error)
 	List(ctx context.Context, page, pageSize int, status string) ([]domain.PlatformPlan, int64, error)
 	Update(ctx context.Context, plan *domain.PlatformPlan) error
 	Archive(ctx context.Context, id uuid.UUID) error
