@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Varunjp/vyavsa/internal/auth"
+	"github.com/Varunjp/vyavsa/internal/config"
 	"github.com/Varunjp/vyavsa/internal/domain"
 	"github.com/Varunjp/vyavsa/internal/dto"
 	"github.com/Varunjp/vyavsa/internal/logger"
@@ -199,11 +200,96 @@ func (m *mockTenantUserRepoFull) UpdateStatus(ctx context.Context, tenantID, id 
 	return nil
 }
 
-func TestTenantService_Onboarding(t *testing.T) {
+func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 	ctx := context.Background()
 	log := logger.Default().Logger
 	appMetrics := metrics.New()
 	hasher := auth.NewBcryptHasher()
+	jwtManager := auth.NewJWTManager(config.JWTConfig{
+		Secret:        "test-secret-at-least-32-bytes-long",
+		AccessExpiry:  15 * time.Minute,
+		RefreshExpiry: 24 * time.Hour,
+	})
+
+	t.Run("RegisterTenant registers new tenant with same email for admin user", func(t *testing.T) {
+		tenantRepo := newMockTenantRepo()
+		userRepo := newMockTenantUserRepoFull()
+		summaryRepo := newMockFinancialSummaryRepo()
+		subRepo := newMockSubscriptionRepo()
+		planRepo := newMockPlanRepo()
+		transactor := &mockTransactor{}
+
+		// Seed a Free Starter plan
+		freePlan := &domain.PlatformPlan{
+			PlanName: "Free Starter",
+			Price:    decimal.Zero,
+			Status:   "active",
+		}
+		require.NoError(t, planRepo.Create(ctx, freePlan))
+
+		svc := NewTenantService(
+			tenantRepo,
+			userRepo,
+			summaryRepo,
+			subRepo,
+			planRepo,
+			transactor,
+			hasher,
+			jwtManager,
+			appMetrics,
+			log,
+		)
+
+		req := dto.TenantRegisterRequest{
+			Name:      "Balaji Kirana Store",
+			Email:     "balaji@kirana.com",
+			Password:  "Kirana@12345",
+			Phone:     "+919876500000",
+			AdminName: "Rohan Balaji",
+		}
+
+		resp, err := svc.RegisterTenant(ctx, req)
+		require.NoError(t, err)
+		assert.Equal(t, "Balaji Kirana Store", resp.Tenant.Name)
+		assert.Equal(t, "balaji@kirana.com", resp.Tenant.Email)
+		assert.Equal(t, "Rohan Balaji", resp.AdminUser.Name)
+		assert.Equal(t, "balaji@kirana.com", resp.AdminUser.Email) // Same email verified!
+		assert.Equal(t, "admin", resp.AdminUser.Role)
+		assert.Equal(t, "Free Starter", resp.Subscription.CurrentPlanName)
+		assert.True(t, resp.FinancialSummary.CashBalance.IsZero())
+		assert.True(t, resp.FinancialSummary.BankBalance.IsZero())
+		require.NotNil(t, resp.Tokens)
+		assert.NotEmpty(t, resp.Tokens.AccessToken)
+		assert.NotEmpty(t, resp.Tokens.RefreshToken)
+		assert.Equal(t, "balaji@kirana.com", resp.Tokens.User.Email)
+		assert.Equal(t, resp.Tenant.ID, *resp.Tokens.User.TenantID)
+	})
+
+	t.Run("RegisterTenant defaults admin_name to business name when omitted", func(t *testing.T) {
+		tenantRepo := newMockTenantRepo()
+		userRepo := newMockTenantUserRepoFull()
+		summaryRepo := newMockFinancialSummaryRepo()
+		subRepo := newMockSubscriptionRepo()
+		planRepo := newMockPlanRepo()
+		transactor := &mockTransactor{}
+
+		freePlan := &domain.PlatformPlan{PlanName: "Free Starter", Price: decimal.Zero, Status: "active"}
+		require.NoError(t, planRepo.Create(ctx, freePlan))
+
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
+
+		req := dto.TenantRegisterRequest{
+			Name:     "Quick Mart",
+			Email:    "info@quickmart.com",
+			Password: "Password@123",
+		}
+
+		resp, err := svc.RegisterTenant(ctx, req)
+		require.NoError(t, err)
+		assert.Equal(t, "Quick Mart", resp.Tenant.Name)
+		assert.Equal(t, "Quick Mart", resp.AdminUser.Name)
+		assert.Equal(t, "info@quickmart.com", resp.AdminUser.Email)
+	})
 
 	t.Run("OnboardTenant successfully executes all steps atomically", func(t *testing.T) {
 		tenantRepo := newMockTenantRepo()
@@ -229,6 +315,7 @@ func TestTenantService_Onboarding(t *testing.T) {
 			planRepo,
 			transactor,
 			hasher,
+			jwtManager,
 			appMetrics,
 			log,
 		)
@@ -266,6 +353,33 @@ func TestTenantService_Onboarding(t *testing.T) {
 		assert.True(t, detail.FinancialSummary.CashBalance.IsZero())
 	})
 
+	t.Run("OnboardTenant defaults admin email to tenant email when admin_email is omitted", func(t *testing.T) {
+		tenantRepo := newMockTenantRepo()
+		userRepo := newMockTenantUserRepoFull()
+		summaryRepo := newMockFinancialSummaryRepo()
+		subRepo := newMockSubscriptionRepo()
+		planRepo := newMockPlanRepo()
+		transactor := &mockTransactor{}
+
+		plan := &domain.PlatformPlan{PlanName: "Pro Tier", Price: decimal.NewFromFloat(499), Status: "active"}
+		require.NoError(t, planRepo.Create(ctx, plan))
+
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
+
+		req := dto.OnboardTenantRequest{
+			Name:          "Single Email Mart",
+			Email:         "single@mart.com",
+			AdminPassword: "Password@123",
+			PlanID:        plan.ID,
+		}
+
+		resp, err := svc.OnboardTenant(ctx, req)
+		require.NoError(t, err)
+		assert.Equal(t, "single@mart.com", resp.Tenant.Email)
+		assert.Equal(t, "single@mart.com", resp.AdminUser.Email)
+		assert.Equal(t, "Single Email Mart", resp.AdminUser.Name)
+	})
+
 	t.Run("OnboardTenant fails when plan does not exist", func(t *testing.T) {
 		tenantRepo := newMockTenantRepo()
 		userRepo := newMockTenantUserRepoFull()
@@ -274,7 +388,7 @@ func TestTenantService_Onboarding(t *testing.T) {
 		planRepo := newMockPlanRepo()
 		transactor := &mockTransactor{}
 
-		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, appMetrics, log)
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
 
 		req := dto.OnboardTenantRequest{
 			Name:          "Test Store",
@@ -282,7 +396,7 @@ func TestTenantService_Onboarding(t *testing.T) {
 			AdminName:     "Admin",
 			AdminEmail:    "admin@store.com",
 			AdminPassword: "password123",
-			PlanID:        uuid.New(), // Random non-existent plan
+			PlanID:        uuid.New(),
 		}
 
 		_, err := svc.OnboardTenant(ctx, req)
@@ -290,50 +404,6 @@ func TestTenantService_Onboarding(t *testing.T) {
 		var appErr *appErrors.AppError
 		require.ErrorAs(t, err, &appErr)
 		assert.Equal(t, appErrors.CodeValidation, appErr.Code)
-	})
-
-	t.Run("OnboardTenant fails when tenant email already exists", func(t *testing.T) {
-		tenantRepo := newMockTenantRepo()
-		userRepo := newMockTenantUserRepoFull()
-		summaryRepo := newMockFinancialSummaryRepo()
-		subRepo := newMockSubscriptionRepo()
-		planRepo := newMockPlanRepo()
-		transactor := &mockTransactor{}
-
-		plan := &domain.PlatformPlan{
-			PlanName: "Free",
-			Price:    decimal.Zero,
-			Status:   "active",
-		}
-		require.NoError(t, planRepo.Create(ctx, plan))
-
-		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, appMetrics, log)
-
-		req := dto.OnboardTenantRequest{
-			Name:          "First Store",
-			Email:         "common@store.com",
-			AdminName:     "Admin 1",
-			AdminEmail:    "admin1@store.com",
-			AdminPassword: "password123",
-			PlanID:        plan.ID,
-		}
-		_, err := svc.OnboardTenant(ctx, req)
-		require.NoError(t, err)
-
-		// Second store with same email
-		req2 := dto.OnboardTenantRequest{
-			Name:          "Second Store",
-			Email:         "common@store.com",
-			AdminName:     "Admin 2",
-			AdminEmail:    "admin2@store.com",
-			AdminPassword: "password123",
-			PlanID:        plan.ID,
-		}
-		_, err = svc.OnboardTenant(ctx, req2)
-		require.Error(t, err)
-		var appErr *appErrors.AppError
-		require.ErrorAs(t, err, &appErr)
-		assert.Equal(t, appErrors.CodeConflict, appErr.Code)
 	})
 
 	t.Run("UpdateTenantStatus modifies status", func(t *testing.T) {
@@ -347,7 +417,7 @@ func TestTenantService_Onboarding(t *testing.T) {
 		plan := &domain.PlatformPlan{PlanName: "Free", Price: decimal.Zero, Status: "active"}
 		require.NoError(t, planRepo.Create(ctx, plan))
 
-		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, appMetrics, log)
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
 
 		resp, err := svc.OnboardTenant(ctx, dto.OnboardTenantRequest{
 			Name:          "Status Store",

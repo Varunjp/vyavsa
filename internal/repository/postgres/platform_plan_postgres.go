@@ -93,6 +93,34 @@ func (r *PlatformPlanPostgres) GetByName(ctx context.Context, name string) (*dom
 	return &plan, nil
 }
 
+func (r *PlatformPlanPostgres) GetDefaultFreePlan(ctx context.Context) (*domain.PlatformPlan, error) {
+	query := `
+		SELECT id, plan_name, COALESCE(note, ''), price, status, created_at, updated_at
+		FROM platform_plans
+		WHERE status = 'active' AND price = 0
+		ORDER BY created_at ASC
+		LIMIT 1
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var plan domain.PlatformPlan
+	err := exec.QueryRow(ctx, query).Scan(
+		&plan.ID,
+		&plan.PlanName,
+		&plan.Note,
+		&plan.Price,
+		&plan.Status,
+		&plan.CreatedAt,
+		&plan.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("default free subscription plan not found")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get default free plan: %w", err))
+	}
+	return &plan, nil
+}
+
 func (r *PlatformPlanPostgres) List(ctx context.Context, page, pageSize int, status string) ([]domain.PlatformPlan, int64, error) {
 	if page < 1 {
 		page = 1

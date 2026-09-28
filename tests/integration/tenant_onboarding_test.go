@@ -126,4 +126,29 @@ func TestTenantEndpointsIntegration(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 	})
+
+	t.Run("POST /api/v1/auth/tenant/register with invalid payload returns 422 Validation Error", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"name":"My Store","email":"invalid-email"}`)
+		req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/tenant/register", body)
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+		assert.Contains(t, w.Body.String(), "VALIDATION_ERROR")
+	})
+
+	t.Run("POST /api/v1/tenants/register alias with invalid payload returns 422 Validation Error", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"name":""}`)
+		req, _ := http.NewRequest(http.MethodPost, "/api/v1/tenants/register", body)
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+		assert.Contains(t, w.Body.String(), "VALIDATION_ERROR")
+	})
 }
+

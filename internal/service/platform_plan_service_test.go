@@ -50,6 +50,15 @@ func (m *mockPlanRepo) GetByName(ctx context.Context, name string) (*domain.Plat
 	return nil, appErrors.NewNotFound("plan not found")
 }
 
+func (m *mockPlanRepo) GetDefaultFreePlan(ctx context.Context) (*domain.PlatformPlan, error) {
+	for _, p := range m.plans {
+		if p.Status == "active" && p.Price.IsZero() {
+			return p, nil
+		}
+	}
+	return nil, appErrors.NewNotFound("default free plan not found")
+}
+
 func (m *mockPlanRepo) List(ctx context.Context, page, pageSize int, status string) ([]domain.PlatformPlan, int64, error) {
 	var result []domain.PlatformPlan
 	for _, p := range m.plans {

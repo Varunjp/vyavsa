@@ -179,6 +179,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		planRepo,
 		transactor,
 		hasher,
+		jwtManager,
 		s.metrics,
 		s.log.Logger,
 	)
@@ -194,8 +195,12 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	{
 		authGroup.POST("/platform/login", authHandler.PlatformLogin)
 		authGroup.POST("/tenant/login", authHandler.TenantLogin)
+		authGroup.POST("/tenant/register", tenantHandler.Register)
 		authGroup.POST("/refresh", authHandler.RefreshToken)
 	}
+
+	// Public Tenant Self-Registration (also accessible under /api/v1/tenants/register)
+	apiV1.POST("/tenants/register", tenantHandler.Register)
 
 	// Public Subscription Plans Catalog (viewable without authentication)
 	apiV1.GET("/plans", planHandler.List)
