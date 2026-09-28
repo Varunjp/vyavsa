@@ -146,3 +146,16 @@ func FromError(err error) *AppError {
 
 	return NewInternal(err)
 }
+
+// IsNotFound checks whether the error is a NOT_FOUND AppError
+func IsNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var appErr *AppError
+	if errors.As(err, &appErr) {
+		return appErr.Code == CodeNotFound
+	}
+	return false
+}
+

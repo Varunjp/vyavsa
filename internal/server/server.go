@@ -17,6 +17,8 @@ import (
 	"github.com/Varunjp/vyavsa/internal/database"
 	authHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/auth"
 	"github.com/Varunjp/vyavsa/internal/handler/health"
+	platformHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/platform"
+	tenantHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/tenant"
 	"github.com/Varunjp/vyavsa/internal/logger"
 	"github.com/Varunjp/vyavsa/internal/metrics"
 	"github.com/Varunjp/vyavsa/internal/middleware"
@@ -116,8 +118,8 @@ func (s *Server) setupRoutes() {
 			response.Success(c, gin.H{"pong": true}, "API v1 is active")
 		})
 
-		// Wire Auth Layer
-		s.setupAuthRoutes(apiV1)
+		// Wire Core Feature Routes (Auth, Platform Admin, Tenant Onboarding & Management)
+		s.setupAPIRoutes(apiV1)
 	}
 
 	// 404 handler returning standard JSON error
@@ -126,15 +128,27 @@ func (s *Server) setupRoutes() {
 	})
 }
 
-func (s *Server) setupAuthRoutes(apiV1 *gin.RouterGroup) {
+func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	jwtManager := auth.NewJWTManager(s.cfg.JWT)
 	hasher := auth.NewBcryptHasher()
 
+	// Repositories
 	var platformAdminRepo repository.PlatformAdminRepository
 	var tenantUserRepo repository.TenantUserRepository
+	var planRepo repository.PlatformPlanRepository
+	var tenantRepo repository.TenantRepository
+	var summaryRepo repository.TenantFinancialSummaryRepository
+	var subRepo repository.PlatformSubscriptionRepository
+	var transactor repository.Transactor
+
 	if s.db != nil && s.db.Pool != nil {
 		platformAdminRepo = postgresRepo.NewPlatformAdminPostgres(s.db.Pool)
 		tenantUserRepo = postgresRepo.NewTenantUserPostgres(s.db.Pool)
+		planRepo = postgresRepo.NewPlatformPlanPostgres(s.db.Pool)
+		tenantRepo = postgresRepo.NewTenantPostgres(s.db.Pool)
+		summaryRepo = postgresRepo.NewTenantFinancialSummaryPostgres(s.db.Pool)
+		subRepo = postgresRepo.NewPlatformSubscriptionPostgres(s.db.Pool)
+		transactor = postgresRepo.NewPostgresTransactor(s.db.Pool)
 	}
 
 	var blacklistRepo repository.TokenBlacklistRepository
@@ -142,6 +156,7 @@ func (s *Server) setupAuthRoutes(apiV1 *gin.RouterGroup) {
 		blacklistRepo = redisRepo.NewTokenBlacklistRedis(s.redis)
 	}
 
+	// Services
 	authService := service.NewAuthService(
 		platformAdminRepo,
 		tenantUserRepo,
@@ -151,9 +166,30 @@ func (s *Server) setupAuthRoutes(apiV1 *gin.RouterGroup) {
 		s.log.Logger,
 	)
 
-	authHandler := authHandlerPkg.NewHandler(authService)
+	planService := service.NewPlatformPlanService(
+		planRepo,
+		s.log.Logger,
+	)
 
-	// Public Auth Endpoints
+	tenantService := service.NewTenantService(
+		tenantRepo,
+		tenantUserRepo,
+		summaryRepo,
+		subRepo,
+		planRepo,
+		transactor,
+		hasher,
+		s.metrics,
+		s.log.Logger,
+	)
+
+	// Handlers
+	authHandler := authHandlerPkg.NewHandler(authService)
+	planHandler := platformHandlerPkg.NewPlanHandler(planService)
+	platformTenantHandler := platformHandlerPkg.NewTenantHandler(tenantService)
+	tenantHandler := tenantHandlerPkg.NewTenantHandler(tenantService)
+
+	// 1. Public Endpoints
 	authGroup := apiV1.Group("/auth")
 	{
 		authGroup.POST("/platform/login", authHandler.PlatformLogin)
@@ -161,14 +197,19 @@ func (s *Server) setupAuthRoutes(apiV1 *gin.RouterGroup) {
 		authGroup.POST("/refresh", authHandler.RefreshToken)
 	}
 
-	// Protected Endpoints
+	// Public Subscription Plans Catalog (viewable without authentication)
+	apiV1.GET("/plans", planHandler.List)
+
+	// 2. Protected Endpoints (Requires valid JWT)
 	protected := apiV1.Group("")
 	protected.Use(middleware.Authenticate(jwtManager, blacklistRepo))
 	{
 		protected.POST("/auth/logout", authHandler.Logout)
 		protected.GET("/auth/me", authHandler.GetMe)
 
+		// ----------------------------------------------------
 		// Platform Administrator Gated Routes
+		// ----------------------------------------------------
 		platform := protected.Group("/platform")
 		platform.Use(middleware.RequirePlatformAdmin())
 		{
@@ -180,9 +221,25 @@ func (s *Server) setupAuthRoutes(apiV1 *gin.RouterGroup) {
 					"role":     claims.Role,
 				}, "platform admin authenticated")
 			})
+
+			// Subscription Plan Management
+			platform.POST("/plans", planHandler.Create)
+			platform.GET("/plans", planHandler.List)
+			platform.GET("/plans/:id", planHandler.GetByID)
+			platform.PUT("/plans/:id", planHandler.Update)
+			platform.DELETE("/plans/:id", planHandler.Archive)
+
+			// Tenant Onboarding & Management
+			platform.POST("/tenants", platformTenantHandler.Onboard)
+			platform.GET("/tenants", platformTenantHandler.List)
+			platform.GET("/tenants/:id", platformTenantHandler.GetByID)
+			platform.PATCH("/tenants/:id/status", platformTenantHandler.UpdateStatus)
+			platform.POST("/tenants/:id/subscription", platformTenantHandler.ChangeSubscription)
 		}
 
+		// ----------------------------------------------------
 		// Tenant Member Gated Routes
+		// ----------------------------------------------------
 		tenant := protected.Group("/tenant")
 		tenant.Use(middleware.RequireTenantUser())
 		{
@@ -194,6 +251,11 @@ func (s *Server) setupAuthRoutes(apiV1 *gin.RouterGroup) {
 					"role":      claims.Role,
 				}, "tenant user authenticated")
 			})
+
+			// Tenant Organization Profile & Financial Insights
+			tenant.GET("/profile", tenantHandler.GetProfile)
+			tenant.GET("/financial-summary", tenantHandler.GetFinancialSummary)
+			tenant.GET("/subscription", tenantHandler.GetSubscription)
 		}
 	}
 }
