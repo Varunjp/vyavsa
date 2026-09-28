@@ -11,13 +11,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Varunjp/vyavsa/internal/auth"
 	"github.com/Varunjp/vyavsa/internal/cache"
 	"github.com/Varunjp/vyavsa/internal/config"
 	"github.com/Varunjp/vyavsa/internal/database"
+	authHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/auth"
 	"github.com/Varunjp/vyavsa/internal/handler/health"
 	"github.com/Varunjp/vyavsa/internal/logger"
 	"github.com/Varunjp/vyavsa/internal/metrics"
 	"github.com/Varunjp/vyavsa/internal/middleware"
+	"github.com/Varunjp/vyavsa/internal/repository"
+	postgresRepo "github.com/Varunjp/vyavsa/internal/repository/postgres"
+	redisRepo "github.com/Varunjp/vyavsa/internal/repository/redis"
+	"github.com/Varunjp/vyavsa/internal/service"
 	"github.com/Varunjp/vyavsa/pkg/response"
 	"github.com/gin-gonic/gin"
 )
@@ -109,12 +115,87 @@ func (s *Server) setupRoutes() {
 		apiV1.GET("/ping", func(c *gin.Context) {
 			response.Success(c, gin.H{"pong": true}, "API v1 is active")
 		})
+
+		// Wire Auth Layer
+		s.setupAuthRoutes(apiV1)
 	}
 
 	// 404 handler returning standard JSON error
 	s.router.NoRoute(func(c *gin.Context) {
 		response.CustomError(c, http.StatusNotFound, "ROUTE_NOT_FOUND", fmt.Sprintf("path '%s' not found", c.Request.URL.Path))
 	})
+}
+
+func (s *Server) setupAuthRoutes(apiV1 *gin.RouterGroup) {
+	jwtManager := auth.NewJWTManager(s.cfg.JWT)
+	hasher := auth.NewBcryptHasher()
+
+	var platformAdminRepo repository.PlatformAdminRepository
+	var tenantUserRepo repository.TenantUserRepository
+	if s.db != nil && s.db.Pool != nil {
+		platformAdminRepo = postgresRepo.NewPlatformAdminPostgres(s.db.Pool)
+		tenantUserRepo = postgresRepo.NewTenantUserPostgres(s.db.Pool)
+	}
+
+	var blacklistRepo repository.TokenBlacklistRepository
+	if s.redis != nil {
+		blacklistRepo = redisRepo.NewTokenBlacklistRedis(s.redis)
+	}
+
+	authService := service.NewAuthService(
+		platformAdminRepo,
+		tenantUserRepo,
+		blacklistRepo,
+		hasher,
+		jwtManager,
+		s.log.Logger,
+	)
+
+	authHandler := authHandlerPkg.NewHandler(authService)
+
+	// Public Auth Endpoints
+	authGroup := apiV1.Group("/auth")
+	{
+		authGroup.POST("/platform/login", authHandler.PlatformLogin)
+		authGroup.POST("/tenant/login", authHandler.TenantLogin)
+		authGroup.POST("/refresh", authHandler.RefreshToken)
+	}
+
+	// Protected Endpoints
+	protected := apiV1.Group("")
+	protected.Use(middleware.Authenticate(jwtManager, blacklistRepo))
+	{
+		protected.POST("/auth/logout", authHandler.Logout)
+		protected.GET("/auth/me", authHandler.GetMe)
+
+		// Platform Administrator Gated Routes
+		platform := protected.Group("/platform")
+		platform.Use(middleware.RequirePlatformAdmin())
+		{
+			platform.GET("/ping", func(c *gin.Context) {
+				claims, _ := auth.GetClaims(c)
+				response.Success(c, gin.H{
+					"admin_id": claims.UserID,
+					"email":    claims.Email,
+					"role":     claims.Role,
+				}, "platform admin authenticated")
+			})
+		}
+
+		// Tenant Member Gated Routes
+		tenant := protected.Group("/tenant")
+		tenant.Use(middleware.RequireTenantUser())
+		{
+			tenant.GET("/ping", func(c *gin.Context) {
+				claims, _ := auth.GetClaims(c)
+				response.Success(c, gin.H{
+					"user_id":   claims.UserID,
+					"tenant_id": claims.TenantID,
+					"role":      claims.Role,
+				}, "tenant user authenticated")
+			})
+		}
+	}
 }
 
 // Run starts the HTTP server and blocks until an interrupt signal is received for graceful shutdown
