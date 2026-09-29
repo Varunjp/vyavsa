@@ -102,9 +102,16 @@ func NewAuthService(
 
 // LoginPlatformAdmin authenticates a platform-level administrator
 func (s *authService) LoginPlatformAdmin(ctx context.Context, req dto.PlatformLoginRequest) (*dto.TokenResponse, error) {
-	admin, err := s.platformAdminRepo.GetByIdentifier(ctx, req.Identifier)
+	identifier := req.GetIdentifier()
+	if identifier == "" {
+		return nil, appErrors.NewValidation("invalid request payload", map[string]string{
+			"identifier": "username or email identifier is required",
+		})
+	}
+
+	admin, err := s.platformAdminRepo.GetByIdentifier(ctx, identifier)
 	if err != nil {
-		s.log.WarnContext(ctx, "platform admin login failed: user not found", slog.String("identifier", req.Identifier))
+		s.log.WarnContext(ctx, "platform admin login failed: user not found", slog.String("identifier", identifier))
 		return nil, appErrors.NewUnauthorized("invalid username or password")
 	}
 
