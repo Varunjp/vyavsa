@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Vyavsa Business Management</title>
+  <meta name="description" content="Vyavsa small business financial management overview.">
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+
+  <!-- Immediate Authentication & bfcache Protection Guard -->
+  <script>
+    (function() {
+      var t1 = localStorage.getItem('vyavsa_access_token');
+      var t2 = localStorage.getItem('vyavsa_platform_access_token');
+      if (!t1 && !t2) {
+        window.location.replace('/login');
+      }
+    })();
+
+    // Intercept back-forward navigation cache
+    window.addEventListener('pageshow', function(event) {
+      var t1 = localStorage.getItem('vyavsa_access_token');
+      var t2 = localStorage.getItem('vyavsa_platform_access_token');
+      if (event.persisted || (!t1 && !t2)) {
+        if (document.body) {
+          document.body.style.display = 'none';
+        }
+        window.location.replace('/login');
+      }
+    });
+  </script>
+
+  <style>
+    .dashboard-header {
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--color-border);
+      padding: 0.75rem 0;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .dash-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .dash-left-group {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+    .system-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.25rem 0.625rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--color-success-text);
+      background: var(--color-success-bg);
+      border: 1px solid var(--color-success-border);
+      border-radius: var(--radius-full);
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-success);
+    }
+    .dash-user-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.875rem;
+    }
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      padding: 0.3125rem 0.75rem 0.3125rem 0.375rem;
+      border-radius: var(--radius-full);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--color-text-main);
+      box-shadow: var(--shadow-xs);
+    }
+    .user-avatar-badge {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8125rem;
+      font-weight: 700;
+      box-shadow: 0 2px 4px var(--color-primary-glow);
+    }
+    .dash-body {
+      flex: 1;
+      padding: 2.25rem 0 4rem;
+    }
+    .welcome-banner {
+      background: linear-gradient(135deg, #0b0f19 0%, #1e1b4b 50%, #312e81 100%);
+      border-radius: var(--radius-lg);
+      padding: 2.5rem 2.25rem;
+      color: #ffffff;
+      margin-bottom: 2rem;
+      box-shadow: var(--shadow-md);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .welcome-banner::after {
+      content: "";
+      position: absolute;
+      top: -50%;
+      right: -10%;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .welcome-title {
+      font-size: 1.75rem;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.5rem;
+    }
+    .welcome-desc {
+      font-size: 0.95rem;
+      color: #c7d2fe;
+      max-width: 650px;
+      line-height: 1.5;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .kpi-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-sm);
+      transition: all var(--transition-normal);
+      display: flex;
+      flex-direction: column;
+    }
+    .kpi-card:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+      border-color: #cbd5e1;
+    }
+    .kpi-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .kpi-label {
+      font-size: 0.8125rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+    }
+    .kpi-icon-bubble {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .kpi-val {
+      font-family: var(--font-sans);
+      font-size: 1.85rem;
+      font-weight: 800;
+      color: var(--color-text-main);
+      letter-spacing: -0.025em;
+      line-height: 1.2;
+    }
+    .kpi-trend {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      margin-top: 0.625rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--color-success);
+    }
+    .kpi-trend.trend-danger {
+      color: var(--color-error);
+    }
+    .dash-sections-grid {
+      display: grid;
+      grid-template-columns: 2.2fr 1fr;
+      gap: 1.75rem;
+    }
+    .panel-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 1.25rem 1.75rem;
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .panel-title {
+      font-size: 1.0625rem;
+      font-weight: 700;
+      color: var(--color-text-main);
+      letter-spacing: -0.015em;
+    }
+    .quick-actions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding: 1.5rem;
+    }
+    .action-btn-item {
+      display: flex;
+      align-items: center;
+      gap: 0.875rem;
+      padding: 0.875rem 1rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-surface);
+      color: var(--color-text-main);
+      font-weight: 600;
+      font-size: 0.875rem;
+      transition: all var(--transition-fast);
+      cursor: pointer;
+      text-decoration: none;
+      text-align: left;
+    }
+    .action-btn-item:hover {
+      background: var(--color-surface-hover);
+      border-color: #cbd5e1;
+      color: var(--color-primary);
+      transform: translateY(-1px);
+    }
+    .action-icon {
+      width: 22px;
+      height: 22px;
+      color: var(--color-primary);
+      flex-shrink: 0;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+      text-align: left;
+    }
+    .data-table th {
+      background: var(--color-surface-hover);
+      padding: 0.75rem 1.5rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .data-table td {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--color-border-subtle);
+      color: var(--color-text-main);
+      vertical-align: middle;
+    }
+    .data-table tr:hover td {
+      background-color: #fbfcfe;
+    }
+    .data-table tr:last-child td {
+      border-bottom: none;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3125rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: var(--radius-full);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .status-badge.paid {
+      background: var(--color-success-bg);
+      color: var(--color-success-text);
+      border: 1px solid var(--color-success-border);
+    }
+    .status-badge.pending {
+      background: var(--color-warning-bg);
+      color: var(--color-warning-text);
+      border: 1px solid var(--color-warning-border);
+    }
+    .status-badge.cleared {
+      background: #eff6ff;
+      color: #1e40af;
+      border: 1px solid #bfdbfe;
+    }
+    @media (max-width: 860px) {
+      .dash-sections-grid {
+        grid-template-columns: 1fr;
+      }
+      .system-status-pill {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body style="background: var(--color-bg); min-height: 100vh; display: flex; flex-direction: column;">
+  <!-- Dashboard Top Navigation -->
+  <header class="dashboard-header">
+    <div class="container dash-nav">
+      <div class="dash-left-group">
+        <a href="/dashboard" class="brand-link">
+          <img src="/static/images/logo.svg" alt="Vyavsa" width="32" height="32">
+          <span class="brand-name">Vyavsa</span>
+        </a>
+        <div class="system-status-pill">
+          <span class="status-dot"></span>
+          <span>System Operational</span>
+        </div>
+      </div>
+
+      <div class="dash-user-meta">
+        <div class="user-pill" id="user-profile-pill">
+          <div class="user-avatar-badge" id="user-avatar-initial">V</div>
+          <span id="user-display-name">Business Admin</span>
+        </div>
+        <button type="button" id="logout-btn" class="btn btn-secondary btn-sm" style="font-weight: 600;">
+          Sign Out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Dashboard Content -->
+  <main class="dash-body">
+    <div class="container">
+      <!-- Welcome Greeting Banner -->
+      <div class="welcome-banner">
+        <h1 class="welcome-title" id="welcome-header">Welcome to your Vyavsa Dashboard</h1>
+        <p class="welcome-desc">
+          Your centralized business bookkeeping, customer receivables, staff management, and real-time financial overview.
+        </p>
+      </div>
+
+      <!-- KPI Summary Cards -->
+      <div class="kpi-grid">
+        <!-- Sales Card -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Today's Sales</span>
+            <div class="kpi-icon-bubble" style="background: #eef2ff; color: #4f46e5;">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+          </div>
+          <div class="kpi-val">₹42,850</div>
+          <span class="kpi-trend">↑ +12.4% from yesterday</span>
+        </div>
+
+        <!-- Receivables Card -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Pending Receivables</span>
+            <div class="kpi-icon-bubble" style="background: #fffbeb; color: #d97706;">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+          </div>
+          <div class="kpi-val">₹18,400</div>
+          <span class="kpi-trend trend-danger">5 dues overdue</span>
+        </div>
+
+        <!-- Staff Card -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Active Employees</span>
+            <div class="kpi-icon-bubble" style="background: #f5f3ff; color: #7c3aed;">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+          </div>
+          <div class="kpi-val">6</div>
+          <span class="kpi-trend">100% staff present today</span>
+        </div>
+
+        <!-- Net Balance Card -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Monthly Net Cash</span>
+            <div class="kpi-icon-bubble" style="background: #ecfdf5; color: #059669;">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+            </div>
+          </div>
+          <div class="kpi-val">₹1,94,200</div>
+          <span class="kpi-trend">↑ +8.5% margin</span>
+        </div>
+      </div>
+
+      <!-- Sections Grid -->
+      <div class="dash-sections-grid">
+        <!-- Recent Ledger Activity Table -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2 class="panel-title">Recent Transactions & Bill-Book Entries</h2>
+            <a href="#view-all" class="auth-link" style="font-size: 0.8125rem;">View Full Ledger →</a>
+          </div>
+          <div style="overflow-x: auto;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Category</th>
+                  <th>Date & Time</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Invoice #1048 - Retail Sale</strong></td>
+                  <td>Cash Sale</td>
+                  <td>Today, 02:45 PM</td>
+                  <td style="color: var(--color-success); font-weight: 700;">+ ₹12,500</td>
+                  <td><span class="status-badge paid"><span class="status-dot"></span>Paid</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Gupta Hardware Credit</strong></td>
+                  <td>Customer Due</td>
+                  <td>Today, 11:20 AM</td>
+                  <td style="color: var(--color-warning); font-weight: 700;">₹4,200</td>
+                  <td><span class="status-badge pending"><span class="status-dot" style="background: var(--color-warning);"></span>Pending</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Shop Inventory Restock</strong></td>
+                  <td>Supplier Payment</td>
+                  <td>Yesterday, 04:10 PM</td>
+                  <td style="color: var(--color-error); font-weight: 700;">- ₹28,000</td>
+                  <td><span class="status-badge cleared"><span class="status-dot" style="background: #3b82f6;"></span>Cleared</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Staff Advance - Ramesh</strong></td>
+                  <td>Salary Advance</td>
+                  <td>28 Sep, 01:15 PM</td>
+                  <td style="color: var(--color-error); font-weight: 700;">- ₹3,000</td>
+                  <td><span class="status-badge cleared"><span class="status-dot" style="background: #3b82f6;"></span>Recorded</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Quick Operational Actions -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2 class="panel-title">Quick Actions</h2>
+          </div>
+          <div class="quick-actions-list">
+            <button type="button" class="action-btn-item">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              <div>
+                <div>Record Sale / Income</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Log cash or online receipt</div>
+              </div>
+            </button>
+            <button type="button" class="action-btn-item">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              <div>
+                <div>Add Customer Due Record</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Track customer credit balance</div>
+              </div>
+            </button>
+            <button type="button" class="action-btn-item">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              <div>
+                <div>Record Expense / Purchase</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Log inventory or utility bills</div>
+              </div>
+            </button>
+            <button type="button" class="action-btn-item">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+              <div>
+                <div>Mark Staff Attendance</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Update employee daily presence</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="container" style="padding: 1.75rem 0; border-top: 1px solid var(--color-border); text-align: center; font-size: 0.8125rem; color: var(--color-text-muted);">
+    © {{.CurrentYear}} Vyavsa Business Management. Production encrypted tenant session.
+  </footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Validate session
+      const isTenant = window.Auth.isAuthenticated();
+      const isPlatform = window.Auth.isPlatformAuthenticated();
+
+      if (!isTenant && !isPlatform) {
+        window.location.replace('/login');
+        return;
+      }
+
+      // Display authenticated user details
+      const user = window.Auth.getUser();
+      if (user) {
+        const name = user.name || user.email || 'Business Owner';
+        document.getElementById('user-display-name').textContent = name;
+        document.getElementById('user-avatar-initial').textContent = name.charAt(0).toUpperCase();
+        document.getElementById('welcome-header').textContent = `Welcome back, ${name}`;
+      }
+
+      // Setup logout button with history-clearing replace
+      document.getElementById('logout-btn').addEventListener('click', () => {
+        window.Auth.logout();
+      });
+    });
+  </script>
+</body>
+</html>

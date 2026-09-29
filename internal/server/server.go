@@ -11,6 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"html/template"
+	"io/fs"
+
 	"github.com/Varunjp/vyavsa/internal/auth"
 	"github.com/Varunjp/vyavsa/internal/cache"
 	"github.com/Varunjp/vyavsa/internal/config"
@@ -19,6 +22,7 @@ import (
 	"github.com/Varunjp/vyavsa/internal/handler/health"
 	platformHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/platform"
 	tenantHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/tenant"
+	webHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/web"
 	"github.com/Varunjp/vyavsa/internal/logger"
 	"github.com/Varunjp/vyavsa/internal/mailer"
 	"github.com/Varunjp/vyavsa/internal/metrics"
@@ -28,6 +32,7 @@ import (
 	redisRepo "github.com/Varunjp/vyavsa/internal/repository/redis"
 	"github.com/Varunjp/vyavsa/internal/service"
 	"github.com/Varunjp/vyavsa/pkg/response"
+	"github.com/Varunjp/vyavsa/web"
 	"github.com/gin-gonic/gin"
 )
 
@@ -98,6 +103,9 @@ func (s *Server) setupMiddlewares() {
 }
 
 func (s *Server) setupRoutes() {
+	// Setup user-facing landing page, auth routes, and embedded static assets
+	s.setupWebRoutes()
+
 	healthHandler := health.NewHandler(s.db, s.redis)
 
 	// Liveness check (process is up)
@@ -126,6 +134,41 @@ func (s *Server) setupRoutes() {
 	// 404 handler returning standard JSON error
 	s.router.NoRoute(func(c *gin.Context) {
 		response.CustomError(c, http.StatusNotFound, "ROUTE_NOT_FOUND", fmt.Sprintf("path '%s' not found", c.Request.URL.Path))
+	})
+}
+
+func (s *Server) setupWebRoutes() {
+	// Parse HTML templates from embedded filesystem
+	tmpl, err := template.ParseFS(web.WebFS, "templates/*.html")
+	if err != nil {
+		s.log.Error("failed to parse web templates", "error", err)
+	} else {
+		s.router.SetHTMLTemplate(tmpl)
+	}
+
+	// Serve static assets from embedded filesystem
+	staticFS, err := fs.Sub(web.WebFS, "static")
+	if err != nil {
+		s.log.Error("failed to create static sub-filesystem", "error", err)
+	} else {
+		s.router.StaticFS("/static", http.FS(staticFS))
+	}
+
+	webHandler := webHandlerPkg.NewHandler()
+
+	// Public Web Pages
+	s.router.GET("/", webHandler.ShowLanding)
+	s.router.GET("/login", webHandler.ShowLogin)
+	s.router.GET("/register", webHandler.ShowRegister)
+	s.router.GET("/verify-otp", webHandler.ShowVerifyOTP)
+	s.router.GET("/forgot-password", webHandler.ShowForgotPassword)
+	s.router.GET("/reset-password", webHandler.ShowResetPassword)
+	s.router.GET("/platform/login", webHandler.ShowPlatformLogin)
+	s.router.GET("/dashboard", webHandler.ShowDashboard)
+
+	// Favicon shortcut
+	s.router.GET("/favicon.ico", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/static/images/favicon.svg")
 	})
 }
 

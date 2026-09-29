@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create Business Account — Vyavsa</title>
+  <meta name="description" content="Register your small business on Vyavsa. Start tracking transactions, customer dues, and employee salaries today.">
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/auth.css">
+</head>
+<body class="auth-page">
+  <main class="auth-wrapper">
+    <div class="auth-card auth-card-wide">
+      <!-- Brand Logo -->
+      <a href="/" class="auth-brand" aria-label="Vyavsa Home">
+        <img src="/static/images/logo.svg" alt="Vyavsa Logo" width="32" height="32">
+        <span class="auth-brand-name">Vyavsa</span>
+      </a>
+
+      <!-- Header -->
+      <div class="auth-header">
+        <h1 class="auth-title">Create your business account</h1>
+        <p class="auth-subtitle">Join Vyavsa and streamline your business financial operations</p>
+      </div>
+
+      <!-- Alert Container -->
+      <div id="alert-container" style="display: none; margin-bottom: 1.25rem;"></div>
+
+      <!-- Registration Form -->
+      <form id="register-form" class="auth-form" novalidate>
+        <!-- Business Name -->
+        <div class="form-group">
+          <label for="name" class="form-label">Business / Shop Name <span style="color: var(--color-error)">*</span></label>
+          <input 
+            type="text" 
+            id="name" 
+            name="name" 
+            class="form-control" 
+            placeholder="e.g. Sharma Hardware & Traders" 
+            required 
+            autofocus
+          >
+          <span class="form-helper">The official registered or trade name of your organization.</span>
+        </div>
+
+        <!-- Two Columns: Owner Name & Phone -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+          <div class="form-group">
+            <label for="admin_name" class="form-label">Owner / Manager Name</label>
+            <input 
+              type="text" 
+              id="admin_name" 
+              name="admin_name" 
+              class="form-control" 
+              placeholder="e.g. Rajesh Sharma"
+            >
+          </div>
+          <div class="form-group">
+            <label for="phone" class="form-label">Business Phone Number</label>
+            <input 
+              type="tel" 
+              id="phone" 
+              name="phone" 
+              class="form-control" 
+              placeholder="+91 98765 43210"
+            >
+          </div>
+        </div>
+
+        <!-- Email Field -->
+        <div class="form-group">
+          <label for="email" class="form-label">Business Email Address <span style="color: var(--color-error)">*</span></label>
+          <input 
+            type="email" 
+            id="email" 
+            name="email" 
+            class="form-control" 
+            placeholder="owner@business.com" 
+            autocomplete="email" 
+            required
+          >
+          <span class="form-helper">Used for your administrator login and account notifications.</span>
+        </div>
+
+        <!-- Password Field with Strength Indicator -->
+        <div class="form-group">
+          <label for="password" class="form-label">Create Password <span style="color: var(--color-error)">*</span></label>
+          <div class="password-input-wrap">
+            <input 
+              type="password" 
+              id="password" 
+              name="password" 
+              class="form-control" 
+              placeholder="Minimum 6 characters" 
+              autocomplete="new-password" 
+              required
+            >
+            <button type="button" class="password-toggle-btn" aria-label="Show password">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+            </button>
+          </div>
+          <!-- Password Strength Meter -->
+          <div class="password-strength">
+            <div class="strength-bar-track">
+              <div class="strength-bar-seg"></div>
+              <div class="strength-bar-seg"></div>
+              <div class="strength-bar-seg"></div>
+              <div class="strength-bar-seg"></div>
+            </div>
+            <div class="strength-feedback">
+              <span id="strength-text">Minimum 6 characters</span>
+              <span>Numbers & letters recommended</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Confirm Password Field -->
+        <div class="form-group">
+          <label for="confirm-password" class="form-label">Confirm Password <span style="color: var(--color-error)">*</span></label>
+          <div class="password-input-wrap">
+            <input 
+              type="password" 
+              id="confirm-password" 
+              name="confirm-password" 
+              class="form-control" 
+              placeholder="Re-enter password" 
+              autocomplete="new-password" 
+              required
+            >
+            <button type="button" class="password-toggle-btn" aria-label="Show password">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Plan Selection Option Cards -->
+        <div class="form-group">
+          <label class="form-label">Choose Starting Plan</label>
+          <div id="plan-select-container">
+            <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Loading available subscription tiers...</span>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" id="submit-btn" class="btn btn-primary btn-block" style="margin-top: 0.5rem;">
+          Create Business Account
+        </button>
+      </form>
+
+      <!-- Footer / Switch to Login -->
+      <footer class="auth-footer">
+        <p>Already have an account? <a href="/login" class="auth-link" style="font-weight: 600;">Sign in here</a></p>
+        <div class="auth-footer-links">
+          <a href="/">← Back to Vyavsa</a>
+        </div>
+      </footer>
+    </div>
+  </main>
+
+  <footer class="auth-page-copy">
+    © {{.CurrentYear}} Vyavsa. All rights reserved.
+  </footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/register.js"></script>
+</body>
+</html>

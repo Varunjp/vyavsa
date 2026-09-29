@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In — Vyavsa Business Management</title>
+  <meta name="description" content="Sign in to your Vyavsa business management account. Track transactions, dues, employees, and financial summaries.">
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/auth.css">
+</head>
+<body class="auth-page">
+  <main class="auth-wrapper">
+    <div class="auth-card">
+      <!-- Brand Logo -->
+      <a href="/" class="auth-brand" aria-label="Vyavsa Home">
+        <img src="/static/images/logo.svg" alt="Vyavsa Logo" width="32" height="32">
+        <span class="auth-brand-name">Vyavsa</span>
+      </a>
+
+      <!-- Header -->
+      <div class="auth-header">
+        <h1 class="auth-title">Welcome back</h1>
+        <p class="auth-subtitle">Sign in to your business account</p>
+      </div>
+
+      <!-- Alert Container -->
+      <div id="alert-container" style="display: none; margin-bottom: 1.25rem;"></div>
+
+      <!-- Login Form -->
+      <form id="tenant-login-form" class="auth-form" novalidate>
+        <!-- Email Field -->
+        <div class="form-group">
+          <label for="email" class="form-label">Email address</label>
+          <input 
+            type="email" 
+            id="email" 
+            name="email" 
+            class="form-control" 
+            placeholder="name@business.com" 
+            autocomplete="email" 
+            required 
+            autofocus
+          >
+        </div>
+
+        <!-- Password Field -->
+        <div class="form-group">
+          <div class="auth-actions-row" style="margin-bottom: 0.375rem;">
+            <label for="password" class="form-label" style="margin-bottom: 0;">Password</label>
+            <a href="/forgot-password" class="auth-link">Forgot password?</a>
+          </div>
+          <div class="password-input-wrap">
+            <input 
+              type="password" 
+              id="password" 
+              name="password" 
+              class="form-control" 
+              placeholder="••••••••" 
+              autocomplete="current-password" 
+              required
+            >
+            <button type="button" class="password-toggle-btn" aria-label="Show password">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" id="submit-btn" class="btn btn-primary btn-block">
+          Sign In
+        </button>
+      </form>
+
+      <!-- Footer / Switch Form Links -->
+      <footer class="auth-footer">
+        <p>Don't have an account? <a href="/register" class="auth-link" style="font-weight: 600;">Create an account</a></p>
+        <div class="auth-footer-links">
+          <a href="/">← Back to Vyavsa</a>
+          <span>•</span>
+          <a href="/platform/login">Platform Admin</a>
+        </div>
+      </footer>
+    </div>
+  </main>
+
+  <footer class="auth-page-copy">
+    © {{.CurrentYear}} Vyavsa. All rights reserved.
+  </footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Code — Vyavsa</title>
+  <meta name="description" content="Enter your one-time verification code to secure your Vyavsa account.">
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/auth.css">
+</head>
+<body class="auth-page">
+  <main class="auth-wrapper">
+    <div class="auth-card">
+      <!-- Brand Logo -->
+      <a href="/" class="auth-brand" aria-label="Vyavsa Home">
+        <img src="/static/images/logo.svg" alt="Vyavsa Logo" width="32" height="32">
+        <span class="auth-brand-name">Vyavsa</span>
+      </a>
+
+      <!-- Header -->
+      <div class="auth-header">
+        <h1 class="auth-title">Verify your account</h1>
+        <p class="auth-subtitle">
+          We sent a 6-digit verification code to:<br>
+          <strong id="email-display">your email address</strong>
+        </p>
+      </div>
+
+      <!-- Alert Container -->
+      <div id="alert-container" style="display: none; margin-bottom: 1.25rem;"></div>
+
+      <!-- OTP Form -->
+      <form id="otp-form" class="auth-form" novalidate>
+        <!-- 6-Digit OTP Input Grid -->
+        <div class="otp-group" role="group" aria-label="6-digit verification code">
+          <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]*" aria-label="Digit 1" autofocus>
+          <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]*" aria-label="Digit 2">
+          <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]*" aria-label="Digit 3">
+          <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]*" aria-label="Digit 4">
+          <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]*" aria-label="Digit 5">
+          <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]*" aria-label="Digit 6">
+        </div>
+
+        <!-- Resend Countdown Block -->
+        <div class="resend-box">
+          <span class="resend-timer-text" id="countdown-text">Resend available in 60s</span>
+          <button type="button" class="resend-btn" id="resend-btn" disabled>Resend Code</button>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" id="verify-btn" class="btn btn-primary btn-block" style="margin-top: 0.75rem;">
+          Verify Code
+        </button>
+      </form>
+
+      <!-- Footer Links -->
+      <footer class="auth-footer">
+        <div class="auth-footer-links">
+          <a href="/login">← Back to Login</a>
+          <span>•</span>
+          <a href="/forgot-password">Restart Recovery</a>
+        </div>
+      </footer>
+    </div>
+  </main>
+
+  <footer class="auth-page-copy">
+    © {{.CurrentYear}} Vyavsa Security. All rights reserved.
+  </footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/otp.js"></script>
+</body>
+</html>
