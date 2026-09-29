@@ -69,6 +69,34 @@ func (r *TenantFinancialSummaryPostgres) GetByTenantID(ctx context.Context, tena
 	return &s, nil
 }
 
+func (r *TenantFinancialSummaryPostgres) GetByTenantIDForUpdate(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error) {
+	query := `
+		SELECT id, tenant_id, cash_balance, bank_balance, total_receivable, total_payable, created_at, updated_at
+		FROM tenant_financial_summary
+		WHERE tenant_id = $1
+		FOR UPDATE
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var s domain.TenantFinancialSummary
+	err := exec.QueryRow(ctx, query, tenantID).Scan(
+		&s.ID,
+		&s.TenantID,
+		&s.CashBalance,
+		&s.BankBalance,
+		&s.TotalReceivable,
+		&s.TotalPayable,
+		&s.CreatedAt,
+		&s.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("financial summary not found for tenant")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get tenant financial summary for update: %w", err))
+	}
+	return &s, nil
+}
+
 func (r *TenantFinancialSummaryPostgres) Update(ctx context.Context, summary *domain.TenantFinancialSummary) error {
 	query := `
 		UPDATE tenant_financial_summary

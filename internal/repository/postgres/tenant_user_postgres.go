@@ -191,3 +191,109 @@ func (r *TenantUserPostgres) UpdatePassword(ctx context.Context, tenantID, id uu
 	}
 	return nil
 }
+
+func (r *TenantUserPostgres) Update(ctx context.Context, user *domain.TenantUser) error {
+	query := `
+		UPDATE tenant_user
+		SET name = $1, role = $2, status = $3, updated_at = NOW()
+		WHERE tenant_id = $4 AND id = $5
+		RETURNING updated_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, query, user.Name, user.Role, user.Status, user.TenantID, user.ID).Scan(&user.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return appErrors.NewNotFound("tenant user not found")
+		}
+		return appErrors.NewDatabase(fmt.Errorf("failed to update tenant user: %w", err))
+	}
+	return nil
+}
+
+func (r *TenantUserPostgres) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
+	query := `DELETE FROM tenant_user WHERE tenant_id = $1 AND id = $2`
+	exec := GetExecutor(ctx, r.pool)
+	tag, err := exec.Exec(ctx, query, tenantID, id)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to delete tenant user: %w", err))
+	}
+	if tag.RowsAffected() == 0 {
+		return appErrors.NewNotFound("tenant user not found")
+	}
+	return nil
+}
+
+func (r *TenantUserPostgres) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, role, status string) ([]domain.TenantUser, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	baseWhere := "WHERE tenant_id = $1"
+	args := []any{tenantID}
+	argIdx := 2
+
+	if role != "" {
+		baseWhere += fmt.Sprintf(" AND role = $%d", argIdx)
+		args = append(args, role)
+		argIdx++
+	}
+
+	if status != "" {
+		baseWhere += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, status)
+		argIdx++
+	}
+
+	if search != "" {
+		baseWhere += fmt.Sprintf(" AND (name ILIKE $%d OR email ILIKE $%d)", argIdx, argIdx)
+		args = append(args, "%"+search+"%")
+		argIdx++
+	}
+
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM tenant_user %s", baseWhere)
+	exec := GetExecutor(ctx, r.pool)
+	var total int64
+	if err := exec.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count tenant users: %w", err))
+	}
+
+	listQuery := fmt.Sprintf(`
+		SELECT id, tenant_id, name, role, email, password_hash, status, created_at, updated_at
+		FROM tenant_user
+		%s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, baseWhere, argIdx, argIdx+1)
+	args = append(args, pageSize, offset)
+
+	rows, err := exec.Query(ctx, listQuery, args...)
+	if err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list tenant users: %w", err))
+	}
+	defer rows.Close()
+
+	users := make([]domain.TenantUser, 0)
+	for rows.Next() {
+		var u domain.TenantUser
+		if err := rows.Scan(
+			&u.ID,
+			&u.TenantID,
+			&u.Name,
+			&u.Role,
+			&u.Email,
+			&u.PasswordHash,
+			&u.Status,
+			&u.CreatedAt,
+			&u.UpdatedAt,
+		); err != nil {
+			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan tenant user: %w", err))
+		}
+		users = append(users, u)
+	}
+
+	return users, total, nil
+}

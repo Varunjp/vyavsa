@@ -102,6 +102,10 @@ func (m *mockFinancialSummaryRepo) GetByTenantID(ctx context.Context, tenantID u
 	return s, nil
 }
 
+func (m *mockFinancialSummaryRepo) GetByTenantIDForUpdate(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error) {
+	return m.GetByTenantID(ctx, tenantID)
+}
+
 func (m *mockFinancialSummaryRepo) Update(ctx context.Context, s *domain.TenantFinancialSummary) error {
 	s.UpdatedAt = time.Now().UTC()
 	m.summaries[s.TenantID] = s
@@ -208,6 +212,26 @@ func (m *mockTenantUserRepoFull) UpdatePassword(ctx context.Context, tenantID, i
 	u.PasswordHash = passwordHash
 	u.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+func (m *mockTenantUserRepoFull) Update(ctx context.Context, u *domain.TenantUser) error {
+	m.users[u.ID] = u
+	return nil
+}
+
+func (m *mockTenantUserRepoFull) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
+	delete(m.users, id)
+	return nil
+}
+
+func (m *mockTenantUserRepoFull) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, role, status string) ([]domain.TenantUser, int64, error) {
+	var list []domain.TenantUser
+	for _, u := range m.users {
+		if u.TenantID == tenantID {
+			list = append(list, *u)
+		}
+	}
+	return list, int64(len(list)), nil
 }
 
 func TestTenantService_RegistrationAndOnboarding(t *testing.T) {

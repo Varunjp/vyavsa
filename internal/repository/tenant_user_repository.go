@@ -14,6 +14,9 @@ type TenantUserRepository interface {
 	GetByTenantAndEmail(ctx context.Context, tenantID uuid.UUID, email string) (*domain.TenantUser, error)
 	GetAdminByTenantID(ctx context.Context, tenantID uuid.UUID) (*domain.TenantUser, error)
 	Create(ctx context.Context, user *domain.TenantUser) error
+	Update(ctx context.Context, user *domain.TenantUser) error
 	UpdateStatus(ctx context.Context, tenantID, id uuid.UUID, status string) error
 	UpdatePassword(ctx context.Context, tenantID, id uuid.UUID, passwordHash string) error
+	Delete(ctx context.Context, tenantID, id uuid.UUID) error
+	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, role, status string) ([]domain.TenantUser, int64, error)
 }
