@@ -25,9 +25,7 @@ func NewTenantHandler(tenantService service.TenantService) *TenantHandler {
 func (h *TenantHandler) Register(c *gin.Context) {
 	var req dto.TenantRegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid registration payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 

@@ -102,7 +102,7 @@ func (s *TenantOperationsService) CreateTenantUser(ctx context.Context, tenantID
 
 	hash, err := s.hasher.Hash(req.Password)
 	if err != nil {
-		return nil, fmt.Errorf("failed to hash password: %w", err)
+		return nil, appErrors.NewInternal(fmt.Errorf("failed to hash password during user creation: %w", err))
 	}
 
 	status := req.Status
@@ -149,7 +149,7 @@ func (s *TenantOperationsService) UpdateTenantUser(ctx context.Context, tenantID
 	if req.Password != "" {
 		hash, err := s.hasher.Hash(req.Password)
 		if err != nil {
-			return nil, fmt.Errorf("failed to hash new password: %w", err)
+			return nil, appErrors.NewInternal(fmt.Errorf("failed to hash new password during user update: %w", err))
 		}
 		if err := s.userRepo.UpdatePassword(ctx, tenantID, id, hash); err != nil {
 			return nil, err
@@ -293,7 +293,9 @@ func (s *TenantOperationsService) CreateCustomer(ctx context.Context, tenantID u
 			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
 			if err == nil {
 				summary.TotalReceivable = summary.TotalReceivable.Add(req.OpeningBalance)
-				_ = s.summaryRepo.Update(txCtx, summary)
+				if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+					return fmt.Errorf("failed to update financial summary for customer opening balance: %w", err)
+				}
 			}
 		}
 		return nil
@@ -492,11 +494,15 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 			summary.CashBalance = summary.CashBalance.Add(cashPaid)
 			summary.BankBalance = summary.BankBalance.Add(bankPaid)
 			summary.TotalReceivable = summary.TotalReceivable.Add(balance)
-			_ = s.summaryRepo.Update(txCtx, summary)
+			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+				return fmt.Errorf("failed to update financial summary for line sale: %w", err)
+			}
 		}
 
-		// Sync tenant daily stats
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+		// Sync tenant daily stats (best-effort: does not abort transaction on failure)
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString()); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after line sale creation", "error", err.Error())
+		}
 
 		return nil
 	})
@@ -556,12 +562,16 @@ func (s *TenantOperationsService) DeleteLineSale(ctx context.Context, tenantID, 
 	return s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
 		// Reverse balance on customer if unpaid
 		if sale.Balance.GreaterThan(decimal.Zero) {
-			_ = s.custRepo.AdjustBalance(txCtx, tenantID, sale.CustomerID, sale.Balance.Neg())
+			if err := s.custRepo.AdjustBalance(txCtx, tenantID, sale.CustomerID, sale.Balance.Neg()); err != nil {
+				return fmt.Errorf("failed to reverse customer balance on line sale deletion: %w", err)
+			}
 		}
 		if err := s.lineSaleRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02"))
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02")); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after line sale deletion", "error", err.Error())
+		}
 		return nil
 	})
 }
@@ -631,10 +641,14 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 			summary.CashBalance = summary.CashBalance.Add(req.Cash)
 			summary.BankBalance = summary.BankBalance.Add(bankPaid)
 			summary.TotalReceivable = summary.TotalReceivable.Add(req.Account)
-			_ = s.summaryRepo.Update(txCtx, summary)
+			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+				return fmt.Errorf("failed to update financial summary for counter sale: %w", err)
+			}
 		}
 
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString()); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after counter sale creation", "error", err.Error())
+		}
 		return nil
 	})
 	if err != nil {
@@ -695,7 +709,9 @@ func (s *TenantOperationsService) DeleteCounterSale(ctx context.Context, tenantI
 		if err := s.countSaleRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02"))
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02")); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after counter sale deletion", "error", err.Error())
+		}
 		return nil
 	})
 }
@@ -779,10 +795,14 @@ func (s *TenantOperationsService) CreatePurchase(ctx context.Context, tenantID u
 			summary.CashBalance = summary.CashBalance.Sub(cashPaid)
 			summary.BankBalance = summary.BankBalance.Sub(bankPaid)
 			summary.TotalPayable = summary.TotalPayable.Add(pending)
-			_ = s.summaryRepo.Update(txCtx, summary)
+			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+				return fmt.Errorf("failed to update financial summary for purchase: %w", err)
+			}
 		}
 
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString()); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after purchase creation", "error", err.Error())
+		}
 		return nil
 	})
 	if err != nil {
@@ -839,7 +859,9 @@ func (s *TenantOperationsService) DeletePurchase(ctx context.Context, tenantID, 
 		if err := s.purchRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, purchase.CreatedAt.Format("2006-01-02"))
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, purchase.CreatedAt.Format("2006-01-02")); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after purchase deletion", "error", err.Error())
+		}
 		return nil
 	})
 }
@@ -923,10 +945,14 @@ func (s *TenantOperationsService) CreateExpense(ctx context.Context, tenantID uu
 		if err == nil {
 			summary.CashBalance = summary.CashBalance.Sub(cashPaid)
 			summary.BankBalance = summary.BankBalance.Sub(bankPaid)
-			_ = s.summaryRepo.Update(txCtx, summary)
+			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+				return fmt.Errorf("failed to update financial summary for expense: %w", err)
+			}
 		}
 
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString()); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after expense creation", "error", err.Error())
+		}
 		return nil
 	})
 	if err != nil {
@@ -975,7 +1001,9 @@ func (s *TenantOperationsService) DeleteExpense(ctx context.Context, tenantID, i
 		if err := s.expRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, exp.CreatedAt.Format("2006-01-02"))
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, exp.CreatedAt.Format("2006-01-02")); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after expense deletion", "error", err.Error())
+		}
 		return nil
 	})
 }
@@ -1029,13 +1057,19 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
 			if err == nil {
 				summary.CashBalance = summary.CashBalance.Sub(req.Advance)
-				_ = s.summaryRepo.Update(txCtx, summary)
+				if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+					return fmt.Errorf("failed to update financial summary for attendance advance: %w", err)
+				}
 			}
 			// Deduct from employee salary balance (advance recovery)
-			_ = s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, req.Advance.Neg())
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, req.Advance.Neg()); err != nil {
+				return fmt.Errorf("failed to adjust employee salary balance for advance: %w", err)
+			}
 		}
 
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, attDate)
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, attDate); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after attendance record", "error", err.Error())
+		}
 		return nil
 	})
 	if err != nil {
@@ -1093,7 +1127,9 @@ func (s *TenantOperationsService) RecordOvertime(ctx context.Context, tenantID u
 			}
 		}
 
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, date)
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, date); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after overtime record", "error", err.Error())
+		}
 		return nil
 	})
 	if err != nil {
@@ -1155,13 +1191,19 @@ func (s *TenantOperationsService) RecordAdvance(ctx context.Context, tenantID uu
 			} else {
 				summary.CashBalance = summary.CashBalance.Sub(req.Amount)
 			}
-			_ = s.summaryRepo.Update(txCtx, summary)
+			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+				return fmt.Errorf("failed to update financial summary for advance: %w", err)
+			}
 		}
 
 		// Deduct advance from employee salary balance
-		_ = s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, req.Amount.Neg())
+		if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, req.Amount.Neg()); err != nil {
+			return fmt.Errorf("failed to adjust employee salary balance for advance: %w", err)
+		}
 
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, date)
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, date); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after advance record", "error", err.Error())
+		}
 		return nil
 	})
 	if err != nil {
@@ -1292,10 +1334,14 @@ func (s *TenantOperationsService) PaySalary(ctx context.Context, tenantID, emplo
 			} else {
 				summary.BankBalance = summary.BankBalance.Sub(req.Amount)
 			}
-			_ = s.summaryRepo.Update(txCtx, summary)
+			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+				return fmt.Errorf("failed to update financial summary for salary payment: %w", err)
+			}
 		}
 
-		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString()); err != nil {
+			s.logger.WarnContext(txCtx, "failed to sync daily stats after salary payment", "error", err.Error())
+		}
 		return nil
 	})
 	if err != nil {

@@ -21,6 +21,7 @@ type ErrorInfo struct {
 	Code    string            `json:"code"`
 	Message string            `json:"message"`
 	Details map[string]string `json:"details,omitempty"`
+	Fields  map[string]string `json:"fields,omitempty"`
 }
 
 // Pagination represents pagination metadata
@@ -78,12 +79,22 @@ func Paginated(c *gin.Context, data any, pagination Pagination, message ...strin
 func Error(c *gin.Context, err error) {
 	appErr := appErrors.FromError(err)
 
+	details := appErr.Details
+	fields := appErr.Fields
+	if details == nil && fields != nil {
+		details = fields
+	}
+	if fields == nil && details != nil {
+		fields = details
+	}
+
 	c.JSON(appErr.HTTPStatus, Response{
 		Success: false,
 		Error: &ErrorInfo{
 			Code:    appErr.Code,
 			Message: appErr.Message,
-			Details: appErr.Details,
+			Details: details,
+			Fields:  fields,
 		},
 	})
 }
@@ -101,6 +112,7 @@ func CustomError(c *gin.Context, status int, code, message string, details ...ma
 			Code:    code,
 			Message: message,
 			Details: d,
+			Fields:  d,
 		},
 	})
 }

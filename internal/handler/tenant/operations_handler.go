@@ -52,7 +52,7 @@ func parseUUID(c *gin.Context, paramName string) (uuid.UUID, error) {
 }
 
 func validationErr(err error) *appErrors.AppError {
-	return appErrors.NewValidation("invalid request payload", map[string]string{"error": err.Error()})
+	return appErrors.ParseBindingError(err)
 }
 
 // ==========================================

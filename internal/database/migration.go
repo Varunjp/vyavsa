@@ -235,6 +235,7 @@ func (m *Migrator) loadMigrations(suffix string) ([]Migration, error) {
 
 		version, err := strconv.ParseInt(parts[0], 10, 64)
 		if err != nil {
+			m.log.Warn("skipping migration file with invalid version prefix", slog.String("file", f.Name()), slog.String("error", err.Error()))
 			continue
 		}
 

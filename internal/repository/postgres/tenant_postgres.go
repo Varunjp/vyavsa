@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/Varunjp/vyavsa/internal/domain"
 	appErrors "github.com/Varunjp/vyavsa/pkg/errors"
@@ -36,7 +35,7 @@ func (r *TenantPostgres) Create(ctx context.Context, tenant *domain.Tenant) erro
 		tenant.Status,
 	).Scan(&tenant.ID, &tenant.CreatedAt, &tenant.UpdatedAt)
 	if err != nil {
-		return appErrors.NewDatabase(fmt.Errorf("failed to create tenant: %w", err))
+		return MapDBError(err, "failed to create tenant")
 	}
 	return nil
 }
@@ -62,7 +61,7 @@ func (r *TenantPostgres) GetByID(ctx context.Context, id uuid.UUID) (*domain.Ten
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, appErrors.NewNotFound("tenant not found")
 		}
-		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get tenant by id: %w", err))
+		return nil, MapDBError(err, "failed to get tenant by id")
 	}
 	return &t, nil
 }
@@ -88,7 +87,7 @@ func (r *TenantPostgres) GetByEmail(ctx context.Context, email string) (*domain.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, appErrors.NewNotFound("tenant not found")
 		}
-		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get tenant by email: %w", err))
+		return nil, MapDBError(err, "failed to get tenant by email")
 	}
 	return &t, nil
 }
@@ -113,7 +112,7 @@ func (r *TenantPostgres) List(ctx context.Context, page, pageSize int, status, s
 	`
 	var total int64
 	if err := exec.QueryRow(ctx, countQuery, status, search, searchPattern).Scan(&total); err != nil {
-		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count tenants: %w", err))
+		return nil, 0, MapDBError(err, "failed to count tenants")
 	}
 
 	query := `
@@ -126,7 +125,7 @@ func (r *TenantPostgres) List(ctx context.Context, page, pageSize int, status, s
 	`
 	rows, err := exec.Query(ctx, query, status, search, searchPattern, pageSize, offset)
 	if err != nil {
-		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list tenants: %w", err))
+		return nil, 0, MapDBError(err, "failed to list tenants")
 	}
 	defer rows.Close()
 
@@ -142,13 +141,13 @@ func (r *TenantPostgres) List(ctx context.Context, page, pageSize int, status, s
 			&t.CreatedAt,
 			&t.UpdatedAt,
 		); err != nil {
-			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan tenant: %w", err))
+			return nil, 0, MapDBError(err, "failed to scan tenant")
 		}
 		tenants = append(tenants, t)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, appErrors.NewDatabase(fmt.Errorf("error iterating tenants: %w", err))
+		return nil, 0, MapDBError(err, "error iterating tenants")
 	}
 
 	return tenants, total, nil
@@ -163,7 +162,7 @@ func (r *TenantPostgres) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	exec := GetExecutor(ctx, r.pool)
 	tag, err := exec.Exec(ctx, query, status, id)
 	if err != nil {
-		return appErrors.NewDatabase(fmt.Errorf("failed to update tenant status: %w", err))
+		return MapDBError(err, "failed to update tenant status")
 	}
 	if tag.RowsAffected() == 0 {
 		return appErrors.NewNotFound("tenant not found")

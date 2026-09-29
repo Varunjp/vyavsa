@@ -668,7 +668,9 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 		FROM counter_sale_payments p
 		WHERE p.tenant_id = $1 AND p.created_at::date = $2::date
 	`
-	_ = exec.QueryRow(ctx, cpQuery, tenantID, date).Scan(&counterPaymentsBank)
+	if err := exec.QueryRow(ctx, cpQuery, tenantID, date).Scan(&counterPaymentsBank); err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating counter sale payments: %w", err))
+	}
 
 	// 3. Purchase Aggregations
 	var purchaseAmount, purchasePaid decimal.Decimal

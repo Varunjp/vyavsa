@@ -28,9 +28,7 @@ func NewPlanHandler(planService service.PlatformPlanService) *PlanHandler {
 func (h *PlanHandler) Create(c *gin.Context) {
 	var req dto.CreatePlanRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 
@@ -100,9 +98,7 @@ func (h *PlanHandler) Update(c *gin.Context) {
 
 	var req dto.UpdatePlanRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 
