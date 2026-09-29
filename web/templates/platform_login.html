@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Platform Admin Sign In — Vyavsa</title>
+  <meta name="description" content="Administrative login for Vyavsa platform management and tenant oversight.">
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/auth.css">
+</head>
+<body class="auth-page">
+  <main class="auth-wrapper">
+    <div class="auth-card">
+      <!-- Brand Logo -->
+      <a href="/" class="auth-brand" aria-label="Vyavsa Home">
+        <img src="/static/images/logo.svg" alt="Vyavsa Logo" width="32" height="32">
+        <span class="auth-brand-name">Vyavsa</span>
+      </a>
+
+      <!-- Header -->
+      <div class="auth-header">
+        <span class="auth-badge platform-badge">Platform Administration</span>
+        <h1 class="auth-title">Superadmin Portal</h1>
+        <p class="auth-subtitle">Restricted system administration access</p>
+      </div>
+
+      <!-- Alert Container -->
+      <div id="alert-container" style="display: none; margin-bottom: 1.25rem;"></div>
+
+      <!-- Platform Login Form -->
+      <form id="platform-login-form" class="auth-form" novalidate>
+        <!-- Email Field -->
+        <div class="form-group">
+          <label for="email" class="form-label">Admin Email / Username</label>
+          <input 
+            type="email" 
+            id="email" 
+            name="email" 
+            class="form-control" 
+            placeholder="admin@vyavsa.internal" 
+            autocomplete="email" 
+            required 
+            autofocus
+          >
+        </div>
+
+        <!-- Password Field -->
+        <div class="form-group">
+          <label for="password" class="form-label">Password</label>
+          <div class="password-input-wrap">
+            <input 
+              type="password" 
+              id="password" 
+              name="password" 
+              class="form-control" 
+              placeholder="••••••••" 
+              autocomplete="current-password" 
+              required
+            >
+            <button type="button" class="password-toggle-btn" aria-label="Show password">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" id="submit-btn" class="btn btn-primary btn-block">
+          Authenticate Administrator
+        </button>
+      </form>
+
+      <!-- Footer Links -->
+      <footer class="auth-footer">
+        <div class="auth-footer-links">
+          <a href="/">← Back to Vyavsa</a>
+          <span>•</span>
+          <a href="/login">Tenant Business Login</a>
+        </div>
+      </footer>
+    </div>
+  </main>
+
+  <footer class="auth-page-copy">
+    © {{.CurrentYear}} Vyavsa Platform Security. All rights reserved.
+  </footer>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/platform_login.js"></script>
+</body>
+</html>
