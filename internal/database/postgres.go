@@ -63,6 +63,9 @@ func NewPostgres(ctx context.Context, cfg config.DatabaseConfig, log *slog.Logge
 
 // Ping checks if the PostgreSQL database is reachable
 func (p *Postgres) Ping(ctx context.Context) error {
+	if p == nil || p.Pool == nil {
+		return fmt.Errorf("postgres connection pool is not initialized")
+	}
 	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return p.Pool.Ping(pingCtx)
@@ -70,6 +73,9 @@ func (p *Postgres) Ping(ctx context.Context) error {
 
 // Stats returns connection pool statistics
 func (p *Postgres) Stats() *pgxpool.Stat {
+	if p == nil || p.Pool == nil {
+		return nil
+	}
 	return p.Pool.Stat()
 }
 

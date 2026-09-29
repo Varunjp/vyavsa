@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -32,7 +31,7 @@ func Recovery(log *logger.Logger) gin.HandlerFunc {
 					c,
 					http.StatusInternalServerError,
 					"INTERNAL_SERVER_ERROR",
-					fmt.Sprintf("Internal server error: %v", r),
+					"an unexpected internal server error occurred",
 				)
 			}
 		}()

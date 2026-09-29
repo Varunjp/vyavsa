@@ -45,7 +45,7 @@ func (r *TenantUserPostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, appErrors.NewNotFound("user not found within tenant")
 		}
-		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get tenant user: %w", err))
+		return nil, MapDBError(err, "failed to get tenant user")
 	}
 	return &user, nil
 }
@@ -74,7 +74,7 @@ func (r *TenantUserPostgres) GetByEmail(ctx context.Context, email string) (*dom
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, appErrors.NewNotFound("user not found")
 		}
-		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get user by email: %w", err))
+		return nil, MapDBError(err, "failed to get user by email")
 	}
 	return &user, nil
 }
@@ -102,7 +102,7 @@ func (r *TenantUserPostgres) GetByTenantAndEmail(ctx context.Context, tenantID u
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, appErrors.NewNotFound("user not found within tenant")
 		}
-		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get tenant user by email: %w", err))
+		return nil, MapDBError(err, "failed to get tenant user by email")
 	}
 	return &user, nil
 }
@@ -132,7 +132,7 @@ func (r *TenantUserPostgres) GetAdminByTenantID(ctx context.Context, tenantID uu
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, appErrors.NewNotFound("admin user not found for tenant")
 		}
-		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get tenant admin user: %w", err))
+		return nil, MapDBError(err, "failed to get tenant admin user")
 	}
 	return &user, nil
 }
@@ -153,7 +153,7 @@ func (r *TenantUserPostgres) Create(ctx context.Context, user *domain.TenantUser
 		user.Status,
 	).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
-		return appErrors.NewDatabase(fmt.Errorf("failed to create tenant user: %w", err))
+		return MapDBError(err, "failed to create tenant user")
 	}
 	return nil
 }
@@ -167,7 +167,7 @@ func (r *TenantUserPostgres) UpdateStatus(ctx context.Context, tenantID, id uuid
 	exec := GetExecutor(ctx, r.pool)
 	tag, err := exec.Exec(ctx, query, status, tenantID, id)
 	if err != nil {
-		return appErrors.NewDatabase(fmt.Errorf("failed to update tenant user status: %w", err))
+		return MapDBError(err, "failed to update tenant user status")
 	}
 	if tag.RowsAffected() == 0 {
 		return appErrors.NewNotFound("tenant user not found")
@@ -184,7 +184,7 @@ func (r *TenantUserPostgres) UpdatePassword(ctx context.Context, tenantID, id uu
 	exec := GetExecutor(ctx, r.pool)
 	tag, err := exec.Exec(ctx, query, passwordHash, tenantID, id)
 	if err != nil {
-		return appErrors.NewDatabase(fmt.Errorf("failed to update tenant user password: %w", err))
+		return MapDBError(err, "failed to update tenant user password")
 	}
 	if tag.RowsAffected() == 0 {
 		return appErrors.NewNotFound("tenant user not found")
@@ -205,7 +205,7 @@ func (r *TenantUserPostgres) Update(ctx context.Context, user *domain.TenantUser
 		if errors.Is(err, pgx.ErrNoRows) {
 			return appErrors.NewNotFound("tenant user not found")
 		}
-		return appErrors.NewDatabase(fmt.Errorf("failed to update tenant user: %w", err))
+		return MapDBError(err, "failed to update tenant user")
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ func (r *TenantUserPostgres) Delete(ctx context.Context, tenantID, id uuid.UUID)
 	exec := GetExecutor(ctx, r.pool)
 	tag, err := exec.Exec(ctx, query, tenantID, id)
 	if err != nil {
-		return appErrors.NewDatabase(fmt.Errorf("failed to delete tenant user: %w", err))
+		return MapDBError(err, "failed to delete tenant user")
 	}
 	if tag.RowsAffected() == 0 {
 		return appErrors.NewNotFound("tenant user not found")
@@ -258,7 +258,7 @@ func (r *TenantUserPostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 	exec := GetExecutor(ctx, r.pool)
 	var total int64
 	if err := exec.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count tenant users: %w", err))
+		return nil, 0, MapDBError(err, "failed to count tenant users")
 	}
 
 	listQuery := fmt.Sprintf(`
@@ -272,7 +272,7 @@ func (r *TenantUserPostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 
 	rows, err := exec.Query(ctx, listQuery, args...)
 	if err != nil {
-		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list tenant users: %w", err))
+		return nil, 0, MapDBError(err, "failed to list tenant users")
 	}
 	defer rows.Close()
 
@@ -290,9 +290,13 @@ func (r *TenantUserPostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 		); err != nil {
-			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan tenant user: %w", err))
+			return nil, 0, MapDBError(err, "failed to scan tenant user")
 		}
 		users = append(users, u)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, MapDBError(err, "error iterating tenant users")
 	}
 
 	return users, total, nil

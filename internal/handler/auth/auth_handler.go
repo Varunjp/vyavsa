@@ -27,9 +27,7 @@ func NewHandler(authService service.AuthService) *Handler {
 func (h *Handler) PlatformLogin(c *gin.Context) {
 	var req dto.PlatformLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 
@@ -54,9 +52,7 @@ func (h *Handler) PlatformLogin(c *gin.Context) {
 func (h *Handler) TenantLogin(c *gin.Context) {
 	var req dto.TenantLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 
@@ -73,9 +69,7 @@ func (h *Handler) TenantLogin(c *gin.Context) {
 func (h *Handler) RefreshToken(c *gin.Context) {
 	var req dto.RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 
@@ -130,9 +124,7 @@ func (h *Handler) GetMe(c *gin.Context) {
 func (h *Handler) ForgotPassword(c *gin.Context) {
 	var req dto.ForgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 
@@ -148,9 +140,7 @@ func (h *Handler) ForgotPassword(c *gin.Context) {
 func (h *Handler) VerifyResetOTP(c *gin.Context) {
 	var req dto.VerifyResetOTPRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 
@@ -167,9 +157,7 @@ func (h *Handler) VerifyResetOTP(c *gin.Context) {
 func (h *Handler) ResetPassword(c *gin.Context) {
 	var req dto.ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
-			"error": err.Error(),
-		}))
+		response.Error(c, appErrors.ParseBindingError(err))
 		return
 	}
 

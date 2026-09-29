@@ -638,3 +638,5 @@ You are not merely generating code.
 You are maintaining and evolving a production system.
 
 If you cannot determine how a requested change fits into the existing architecture after inspecting the repository, do not invent a new architecture. Explain what is unclear and ask for clarification.
+
+Always create new branch for new features if required 

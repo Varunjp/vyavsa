@@ -43,7 +43,7 @@ func (h *Handler) Ready(c *gin.Context) {
 	// Check PostgreSQL
 	if h.db != nil {
 		if err := h.db.Ping(ctx); err != nil {
-			checks["postgres"] = "DOWN: " + err.Error()
+			checks["postgres"] = "DOWN"
 			isReady = false
 		} else {
 			checks["postgres"] = "UP"
@@ -56,9 +56,7 @@ func (h *Handler) Ready(c *gin.Context) {
 	// Check Redis
 	if h.redis != nil {
 		if err := h.redis.Ping(ctx); err != nil {
-			checks["redis"] = "DOWN: " + err.Error()
-			// Note: If Redis is configured as non-critical cache, you could choose not to fail readiness,
-			// but for a strict check we flag it.
+			checks["redis"] = "DOWN"
 			isReady = false
 		} else {
 			checks["redis"] = "UP"

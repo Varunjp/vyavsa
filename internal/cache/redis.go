@@ -53,7 +53,7 @@ func NewRedis(ctx context.Context, cfg config.RedisConfig, log *slog.Logger) (*R
 
 // Ping checks if Redis is responsive
 func (r *Redis) Ping(ctx context.Context) error {
-	if r.Client == nil {
+	if r == nil || r.Client == nil {
 		return fmt.Errorf("redis client is nil")
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -63,8 +63,10 @@ func (r *Redis) Ping(ctx context.Context) error {
 
 // Close closes the Redis client connection
 func (r *Redis) Close() error {
-	if r.Client != nil {
-		r.log.Info("closing redis client")
+	if r != nil && r.Client != nil {
+		if r.log != nil {
+			r.log.Info("closing redis client")
+		}
 		return r.Client.Close()
 	}
 	return nil

@@ -50,7 +50,9 @@ func Authenticate(jwtManager auth.JWTManager, blacklist repository.TokenBlacklis
 		if blacklist != nil {
 			if claims.TokenID != "" {
 				revoked, err := blacklist.IsTokenRevoked(c.Request.Context(), claims.TokenID)
-				if err == nil && revoked {
+				if err != nil {
+					logger.FromContext(c.Request.Context()).Warn("failed to check token revocation status", "error", err.Error(), "token_id", claims.TokenID)
+				} else if revoked {
 					response.Error(c, appErrors.NewUnauthorized("access token has been revoked"))
 					c.Abort()
 					return
@@ -58,7 +60,9 @@ func Authenticate(jwtManager auth.JWTManager, blacklist repository.TokenBlacklis
 			}
 			if claims.IssuedAt != nil {
 				userRevoked, err := blacklist.IsUserTokenRevoked(c.Request.Context(), claims.UserID, claims.IssuedAt.Time)
-				if err == nil && userRevoked {
+				if err != nil {
+					logger.FromContext(c.Request.Context()).Warn("failed to check user revocation status", "error", err.Error(), "user_id", claims.UserID.String())
+				} else if userRevoked {
 					response.Error(c, appErrors.NewUnauthorized("access token has been revoked"))
 					c.Abort()
 					return
