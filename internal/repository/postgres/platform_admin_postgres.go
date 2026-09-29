@@ -110,3 +110,19 @@ func (r *PlatformAdminPostgres) UpdateStatus(ctx context.Context, id uuid.UUID, 
 	}
 	return nil
 }
+
+func (r *PlatformAdminPostgres) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	query := `
+		UPDATE platform_admin
+		SET password_hash = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+	tag, err := r.pool.Exec(ctx, query, passwordHash, id)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to update platform admin password: %w", err))
+	}
+	if tag.RowsAffected() == 0 {
+		return appErrors.NewNotFound("platform administrator not found")
+	}
+	return nil
+}

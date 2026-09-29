@@ -18,6 +18,11 @@ const (
 	RoleTenantUser    = "user"
 )
 
+// Token purpose constants
+const (
+	PurposePasswordReset = "password_reset"
+)
+
 // CustomClaims represents the JWT payload structure
 type CustomClaims struct {
 	UserID   uuid.UUID  `json:"user_id"`
@@ -26,5 +31,17 @@ type CustomClaims struct {
 	Role     string     `json:"role"`
 	UserType string     `json:"user_type"`
 	TokenID  string     `json:"jti,omitempty"` // Unique token identifier for revocation
+	Purpose  string     `json:"purpose,omitempty"`
+	jwt.RegisteredClaims
+}
+
+// PasswordResetClaims represents dedicated claims for password reset tokens
+type PasswordResetClaims struct {
+	UserID   uuid.UUID  `json:"user_id"`
+	TenantID *uuid.UUID `json:"tenant_id,omitempty"`
+	Email    string     `json:"email"`
+	UserType string     `json:"user_type"`
+	Purpose  string     `json:"purpose"`
+	TokenID  string     `json:"jti"`
 	jwt.RegisteredClaims
 }

@@ -46,13 +46,23 @@ func Authenticate(jwtManager auth.JWTManager, blacklist repository.TokenBlacklis
 			return
 		}
 
-		// Check if token has been revoked
-		if blacklist != nil && claims.TokenID != "" {
-			revoked, err := blacklist.IsTokenRevoked(c.Request.Context(), claims.TokenID)
-			if err == nil && revoked {
-				response.Error(c, appErrors.NewUnauthorized("access token has been revoked"))
-				c.Abort()
-				return
+		// Check if token has been revoked individually or via user-wide revocation (password reset)
+		if blacklist != nil {
+			if claims.TokenID != "" {
+				revoked, err := blacklist.IsTokenRevoked(c.Request.Context(), claims.TokenID)
+				if err == nil && revoked {
+					response.Error(c, appErrors.NewUnauthorized("access token has been revoked"))
+					c.Abort()
+					return
+				}
+			}
+			if claims.IssuedAt != nil {
+				userRevoked, err := blacklist.IsUserTokenRevoked(c.Request.Context(), claims.UserID, claims.IssuedAt.Time)
+				if err == nil && userRevoked {
+					response.Error(c, appErrors.NewUnauthorized("access token has been revoked"))
+					c.Abort()
+					return
+				}
 			}
 		}
 

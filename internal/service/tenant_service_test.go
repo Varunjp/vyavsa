@@ -200,6 +200,16 @@ func (m *mockTenantUserRepoFull) UpdateStatus(ctx context.Context, tenantID, id 
 	return nil
 }
 
+func (m *mockTenantUserRepoFull) UpdatePassword(ctx context.Context, tenantID, id uuid.UUID, passwordHash string) error {
+	u, ok := m.users[id]
+	if !ok || u.TenantID != tenantID {
+		return appErrors.NewNotFound("user not found")
+	}
+	u.PasswordHash = passwordHash
+	u.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
 func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 	ctx := context.Background()
 	log := logger.Default().Logger

@@ -20,6 +20,7 @@ import (
 	platformHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/platform"
 	tenantHandlerPkg "github.com/Varunjp/vyavsa/internal/handler/tenant"
 	"github.com/Varunjp/vyavsa/internal/logger"
+	"github.com/Varunjp/vyavsa/internal/mailer"
 	"github.com/Varunjp/vyavsa/internal/metrics"
 	"github.com/Varunjp/vyavsa/internal/middleware"
 	"github.com/Varunjp/vyavsa/internal/repository"
@@ -152,17 +153,25 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	}
 
 	var blacklistRepo repository.TokenBlacklistRepository
+	var passwordResetRepo repository.PasswordResetRepository
 	if s.redis != nil {
 		blacklistRepo = redisRepo.NewTokenBlacklistRedis(s.redis)
+		passwordResetRepo = redisRepo.NewPasswordResetRedis(s.redis)
 	}
+
+	appMailer := mailer.NewMailer(s.cfg.Mailer, s.log.Logger)
 
 	// Services
 	authService := service.NewAuthService(
 		platformAdminRepo,
 		tenantUserRepo,
 		blacklistRepo,
+		passwordResetRepo,
+		appMailer,
 		hasher,
 		jwtManager,
+		s.cfg.PasswordReset,
+		s.metrics,
 		s.log.Logger,
 	)
 
@@ -197,6 +206,17 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		authGroup.POST("/tenant/login", authHandler.TenantLogin)
 		authGroup.POST("/tenant/register", tenantHandler.Register)
 		authGroup.POST("/refresh", authHandler.RefreshToken)
+		authGroup.POST("/forgot-password", authHandler.ForgotPassword)
+		authGroup.POST("/verify-reset-otp", authHandler.VerifyResetOTP)
+		authGroup.POST("/reset-password", authHandler.ResetPassword)
+	}
+
+	// Also support root /auth paths directly
+	rootAuth := s.router.Group("/auth")
+	{
+		rootAuth.POST("/forgot-password", authHandler.ForgotPassword)
+		rootAuth.POST("/verify-reset-otp", authHandler.VerifyResetOTP)
+		rootAuth.POST("/reset-password", authHandler.ResetPassword)
 	}
 
 	// Public Tenant Self-Registration (also accessible under /api/v1/tenants/register)
