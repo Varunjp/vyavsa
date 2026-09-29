@@ -4,8 +4,21 @@ import "github.com/google/uuid"
 
 // PlatformLoginRequest represents platform admin authentication payload
 type PlatformLoginRequest struct {
-	Identifier string `json:"identifier" binding:"required"` // Username or email
+	Identifier string `json:"identifier"`
+	Email      string `json:"email"`
+	Username   string `json:"username"`
 	Password   string `json:"password" binding:"required,min=6"`
+}
+
+// GetIdentifier returns the normalized identifier (email or username)
+func (r *PlatformLoginRequest) GetIdentifier() string {
+	if r.Identifier != "" {
+		return r.Identifier
+	}
+	if r.Email != "" {
+		return r.Email
+	}
+	return r.Username
 }
 
 // TenantLoginRequest represents tenant user authentication payload

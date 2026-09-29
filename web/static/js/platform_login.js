@@ -21,18 +21,11 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     window.Auth.clearAlert(alertContainer);
 
-    const email = emailInput.value.trim();
+    const identifier = emailInput.value.trim();
     const password = passwordInput.value;
 
-    if (!email) {
-      window.Auth.showAlert(alertContainer, 'Please enter administrator email.');
-      emailInput.focus();
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      window.Auth.showAlert(alertContainer, 'Please enter a valid administrator email address.');
+    if (!identifier) {
+      window.Auth.showAlert(alertContainer, 'Please enter administrator username or email address.');
       emailInput.focus();
       return;
     }
@@ -47,7 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const response = await window.API.post('/auth/platform/login', {
-        email,
+        identifier,
+        email: identifier,
+        username: identifier,
         password
       }, { skipAuth: true, isPlatform: true });
 

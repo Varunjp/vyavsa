@@ -75,7 +75,14 @@ func run() error {
 		}
 	}
 
-	// 7. Initialize and start HTTP server with graceful shutdown
+	// 7. Bootstrap platform administrator user from environment variables
+	if cfg.BootstrapAdmin.Enabled && pg.Pool != nil {
+		if err := server.BootstrapPlatformAdminWithPool(ctx, pg.Pool, cfg.BootstrapAdmin, appLogger.Logger); err != nil {
+			return fmt.Errorf("platform admin bootstrap failed: %w", err)
+		}
+	}
+
+	// 8. Initialize and start HTTP server with graceful shutdown
 	srv := server.New(cfg, appLogger, pg, redisClient, appMetrics)
 	return srv.Run()
 }

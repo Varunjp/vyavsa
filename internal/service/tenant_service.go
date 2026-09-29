@@ -93,15 +93,18 @@ func (s *tenantService) RegisterTenant(ctx context.Context, req dto.TenantRegist
 		// Default to free plan
 		plan, err = s.planRepo.GetDefaultFreePlan(ctx)
 		if err != nil {
-			plan, err = s.planRepo.GetByName(ctx, "Free Starter")
+			plan, err = s.planRepo.GetByName(ctx, "1 Month Free Trial")
 			if err != nil {
-				// Fallback to first available active plan
-				plans, _, listErr := s.planRepo.List(ctx, 1, 1, "active")
-				if listErr == nil && len(plans) > 0 {
-					plan = &plans[0]
-					err = nil
-				} else {
-					return nil, appErrors.NewInternal(fmt.Errorf("no default subscription plan available for registration"))
+				plan, err = s.planRepo.GetByName(ctx, "Free Starter")
+				if err != nil {
+					// Fallback to first available active plan
+					plans, _, listErr := s.planRepo.List(ctx, 1, 1, "active")
+					if listErr == nil && len(plans) > 0 {
+						plan = &plans[0]
+						err = nil
+					} else {
+						return nil, appErrors.NewInternal(fmt.Errorf("no default subscription plan available for registration"))
+					}
 				}
 			}
 		}

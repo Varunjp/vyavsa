@@ -33,6 +33,14 @@ func (h *Handler) PlatformLogin(c *gin.Context) {
 		return
 	}
 
+	req.Identifier = req.GetIdentifier()
+	if req.Identifier == "" {
+		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
+			"identifier": "username or email identifier is required",
+		}))
+		return
+	}
+
 	resp, err := h.authService.LoginPlatformAdmin(c.Request.Context(), req)
 	if err != nil {
 		response.Error(c, err)

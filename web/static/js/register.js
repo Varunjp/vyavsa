@@ -44,13 +44,13 @@ document.addEventListener('DOMContentLoaded', () => {
       card.dataset.planId = plan.id;
 
       const priceVal = parseFloat(plan.price) || 0;
-      const formattedPrice = priceVal === 0 ? 'Free' : `₹${priceVal}/mo`;
+      const formattedPrice = priceVal === 0 ? 'Free (1 Mo)' : `₹${priceVal}/mo`;
 
       card.innerHTML = `
         <input type="radio" name="plan_selection" value="${escapeAttr(plan.id)}" ${isFirst ? 'checked' : ''}>
         <span class="plan-option-name">${escapeText(plan.plan_name || plan.name || 'Standard')}</span>
         <span class="plan-option-price">${formattedPrice}</span>
-        <span class="plan-option-desc">${escapeText(plan.note || plan.description || 'Full basic access')}</span>
+        <span class="plan-option-desc">${escapeText(plan.note || plan.description || 'Full feature access')}</span>
       `;
 
       card.addEventListener('click', () => {
@@ -71,9 +71,9 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="plan-select-grid">
         <label class="plan-option selected">
           <input type="radio" name="plan_selection" value="" checked>
-          <span class="plan-option-name">Standard Business</span>
-          <span class="plan-option-price">Free Tier</span>
-          <span class="plan-option-desc">Everything needed to get started</span>
+          <span class="plan-option-name">1 Month Free Trial</span>
+          <span class="plan-option-price">Free (1 Mo)</span>
+          <span class="plan-option-desc">Full access to all features for 1 month</span>
         </label>
       </div>
     `;
