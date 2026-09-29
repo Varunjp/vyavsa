@@ -113,6 +113,23 @@ func (m *mockTenantUserRepo) GetAdminByTenantID(ctx context.Context, tenantID uu
 	return nil, appErrors.NewNotFound("admin not found")
 }
 
+func (m *mockTenantUserRepo) Update(ctx context.Context, user *domain.TenantUser) error {
+	m.user = user
+	return nil
+}
+
+func (m *mockTenantUserRepo) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
+	m.user = nil
+	return nil
+}
+
+func (m *mockTenantUserRepo) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, role, status string) ([]domain.TenantUser, int64, error) {
+	if m.user != nil {
+		return []domain.TenantUser{*m.user}, 1, nil
+	}
+	return nil, 0, nil
+}
+
 // MockBlacklistRepo
 type mockBlacklistRepo struct {
 	revoked     map[string]bool

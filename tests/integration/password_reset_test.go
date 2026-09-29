@@ -95,6 +95,26 @@ func (m *memTenantUserRepo) UpdatePassword(ctx context.Context, tenantID, id uui
 	return nil
 }
 
+func (m *memTenantUserRepo) Update(ctx context.Context, u *domain.TenantUser) error {
+	m.users[u.ID] = u
+	return nil
+}
+
+func (m *memTenantUserRepo) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
+	delete(m.users, id)
+	return nil
+}
+
+func (m *memTenantUserRepo) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, role, status string) ([]domain.TenantUser, int64, error) {
+	var list []domain.TenantUser
+	for _, u := range m.users {
+		if u.TenantID == tenantID {
+			list = append(list, *u)
+		}
+	}
+	return list, int64(len(list)), nil
+}
+
 type memPlatformAdminRepo struct {
 	admins map[uuid.UUID]*domain.PlatformAdmin
 }

@@ -13,15 +13,15 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	App           AppConfig
-	Database      DatabaseConfig
-	Redis         RedisConfig
-	JWT           JWTConfig
-	PasswordReset PasswordResetConfig
-	Mailer        MailerConfig
-	Log           LogConfig
-	Metrics       MetricsConfig
-	CORS          CORSConfig
+	App            AppConfig
+	Database       DatabaseConfig
+	Redis          RedisConfig
+	JWT            JWTConfig
+	PasswordReset  PasswordResetConfig
+	Mailer         MailerConfig
+	Log            LogConfig
+	Metrics        MetricsConfig
+	CORS           CORSConfig
 	BootstrapAdmin BootstrapAdminConfig
 }
 

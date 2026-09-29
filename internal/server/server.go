@@ -185,6 +185,17 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	var subRepo repository.PlatformSubscriptionRepository
 	var transactor repository.Transactor
 
+	var empRepo repository.TenantEmployeeRepository
+	var custRepo repository.TenantCustomerRepository
+	var bankRepo repository.TenantBankRepository
+	var lineSaleRepo repository.LineSaleRepository
+	var countSaleRepo repository.CounterSaleRepository
+	var purchRepo repository.TenantPurchaseRepository
+	var expRepo repository.TenantExpenseRepository
+	var attRepo repository.AttendanceRepository
+	var salaryRepo repository.EmployeeSalaryRepository
+	var statsRepo repository.TenantDailyStatsRepository
+
 	if s.db != nil && s.db.Pool != nil {
 		platformAdminRepo = postgresRepo.NewPlatformAdminPostgres(s.db.Pool)
 		tenantUserRepo = postgresRepo.NewTenantUserPostgres(s.db.Pool)
@@ -193,6 +204,17 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		summaryRepo = postgresRepo.NewTenantFinancialSummaryPostgres(s.db.Pool)
 		subRepo = postgresRepo.NewPlatformSubscriptionPostgres(s.db.Pool)
 		transactor = postgresRepo.NewPostgresTransactor(s.db.Pool)
+
+		empRepo = postgresRepo.NewTenantEmployeePostgres(s.db.Pool)
+		custRepo = postgresRepo.NewTenantCustomerPostgres(s.db.Pool)
+		bankRepo = postgresRepo.NewTenantBankPostgres(s.db.Pool)
+		lineSaleRepo = postgresRepo.NewLineSalePostgres(s.db.Pool)
+		countSaleRepo = postgresRepo.NewCounterSalePostgres(s.db.Pool)
+		purchRepo = postgresRepo.NewTenantPurchasePostgres(s.db.Pool)
+		expRepo = postgresRepo.NewTenantExpensePostgres(s.db.Pool)
+		attRepo = postgresRepo.NewAttendancePostgres(s.db.Pool)
+		salaryRepo = postgresRepo.NewEmployeeSalaryPostgres(s.db.Pool)
+		statsRepo = postgresRepo.NewTenantDailyStatsPostgres(s.db.Pool)
 	}
 
 	var blacklistRepo repository.TokenBlacklistRepository
@@ -236,11 +258,30 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		s.log.Logger,
 	)
 
+	opsService := service.NewTenantOperationsService(
+		tenantUserRepo,
+		empRepo,
+		custRepo,
+		bankRepo,
+		lineSaleRepo,
+		countSaleRepo,
+		purchRepo,
+		expRepo,
+		attRepo,
+		salaryRepo,
+		statsRepo,
+		summaryRepo,
+		transactor,
+		hasher,
+		s.log.Logger,
+	)
+
 	// Handlers
 	authHandler := authHandlerPkg.NewHandler(authService)
 	planHandler := platformHandlerPkg.NewPlanHandler(planService)
 	platformTenantHandler := platformHandlerPkg.NewTenantHandler(tenantService)
 	tenantHandler := tenantHandlerPkg.NewTenantHandler(tenantService)
+	opsHandler := tenantHandlerPkg.NewOperationsHandler(opsService)
 
 	// 1. Public Endpoints
 	authGroup := apiV1.Group("/auth")
@@ -324,6 +365,91 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/profile", tenantHandler.GetProfile)
 			tenant.GET("/financial-summary", tenantHandler.GetFinancialSummary)
 			tenant.GET("/subscription", tenantHandler.GetSubscription)
+
+			// Line Sales (Admin & Tenant User)
+			tenant.POST("/line-sales", opsHandler.CreateLineSale)
+			tenant.GET("/line-sales", opsHandler.ListLineSales)
+			tenant.GET("/line-sales/:id", opsHandler.GetLineSaleByID)
+			tenant.PUT("/line-sales/:id", opsHandler.UpdateLineSale)
+			tenant.DELETE("/line-sales/:id", opsHandler.DeleteLineSale)
+
+			// Counter Sales (Admin & Tenant User)
+			tenant.POST("/counter-sales", opsHandler.CreateCounterSale)
+			tenant.GET("/counter-sales", opsHandler.ListCounterSales)
+			tenant.GET("/counter-sales/:id", opsHandler.GetCounterSaleByID)
+			tenant.PUT("/counter-sales/:id", opsHandler.UpdateCounterSale)
+			tenant.DELETE("/counter-sales/:id", opsHandler.DeleteCounterSale)
+
+			// Purchases (Admin & Tenant User)
+			tenant.POST("/purchases", opsHandler.CreatePurchase)
+			tenant.GET("/purchases", opsHandler.ListPurchases)
+			tenant.GET("/purchases/:id", opsHandler.GetPurchaseByID)
+			tenant.PUT("/purchases/:id", opsHandler.UpdatePurchase)
+			tenant.DELETE("/purchases/:id", opsHandler.DeletePurchase)
+
+			// Expenses (Admin & Tenant User)
+			tenant.POST("/expenses", opsHandler.CreateExpense)
+			tenant.GET("/expenses", opsHandler.ListExpenses)
+			tenant.GET("/expenses/:id", opsHandler.GetExpenseByID)
+			tenant.PUT("/expenses/:id", opsHandler.UpdateExpense)
+			tenant.DELETE("/expenses/:id", opsHandler.DeleteExpense)
+
+			// Attendance, OT, Advances (Admin & Tenant User)
+			tenant.POST("/attendance", opsHandler.RecordAttendance)
+			tenant.GET("/attendance", opsHandler.ListAttendance)
+			tenant.GET("/attendance/:id", opsHandler.GetAttendanceByID)
+			tenant.PUT("/attendance/:id", opsHandler.UpdateAttendance)
+			tenant.POST("/overtime", opsHandler.RecordOvertime)
+			tenant.POST("/advances", opsHandler.RecordAdvance)
+
+			// Daily Stats & Dashboard Summary
+			tenant.GET("/daily-stats", opsHandler.GetDailyStats)
+			tenant.GET("/dashboard", opsHandler.GetFinancialMetrics)
+			tenant.GET("/metrics", opsHandler.GetFinancialMetrics)
+
+			// ----------------------------------------------------
+			// Tenant Administrator Only Routes
+			// ----------------------------------------------------
+			tenantAdmin := tenant.Group("")
+			tenantAdmin.Use(middleware.RequireRole(auth.RoleTenantAdmin))
+			{
+				// Tenant Users Management
+				tenantAdmin.POST("/users", opsHandler.CreateTenantUser)
+				tenantAdmin.GET("/users", opsHandler.ListTenantUsers)
+				tenantAdmin.GET("/users/:id", opsHandler.GetTenantUserByID)
+				tenantAdmin.PUT("/users/:id", opsHandler.UpdateTenantUser)
+				tenantAdmin.DELETE("/users/:id", opsHandler.DeleteTenantUser)
+
+				// Employees Management
+				tenantAdmin.POST("/employees", opsHandler.CreateEmployee)
+				tenantAdmin.GET("/employees", opsHandler.ListEmployees)
+				tenantAdmin.GET("/employees/:id", opsHandler.GetEmployeeByID)
+				tenantAdmin.PUT("/employees/:id", opsHandler.UpdateEmployee)
+				tenantAdmin.DELETE("/employees/:id", opsHandler.DeleteEmployee)
+
+				// Customers Management
+				tenantAdmin.POST("/customers", opsHandler.CreateCustomer)
+				tenantAdmin.GET("/customers", opsHandler.ListCustomers)
+				tenantAdmin.GET("/customers/:id", opsHandler.GetCustomerByID)
+				tenantAdmin.PUT("/customers/:id", opsHandler.UpdateCustomer)
+				tenantAdmin.DELETE("/customers/:id", opsHandler.DeleteCustomer)
+
+				// Banks Management
+				tenantAdmin.POST("/banks", opsHandler.CreateBank)
+				tenantAdmin.GET("/banks", opsHandler.ListBanks)
+				tenantAdmin.GET("/banks/:id", opsHandler.GetBankByID)
+				tenantAdmin.PUT("/banks/:id", opsHandler.UpdateBank)
+				tenantAdmin.DELETE("/banks/:id", opsHandler.DeleteBank)
+
+				// Employee Salaries Management
+				tenantAdmin.GET("/salaries", opsHandler.ListSalaries)
+				tenantAdmin.GET("/salaries/pending", opsHandler.ListPendingSalaries)
+				tenantAdmin.GET("/salaries/:employee_id", opsHandler.GetSalaryByEmployeeID)
+				tenantAdmin.PUT("/salaries/:employee_id", opsHandler.UpdateSalaryBalance)
+				tenantAdmin.POST("/salaries/:employee_id/pay", opsHandler.PaySalary)
+				tenantAdmin.GET("/salaries/:employee_id/payments", opsHandler.ListSalaryPayments)
+				tenantAdmin.GET("/salary-payments", opsHandler.ListSalaryPayments)
+			}
 		}
 	}
 }
