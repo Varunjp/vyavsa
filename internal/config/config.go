@@ -22,6 +22,7 @@ type Config struct {
 	Log           LogConfig
 	Metrics       MetricsConfig
 	CORS          CORSConfig
+	BootstrapAdmin BootstrapAdminConfig
 }
 
 // AppConfig holds HTTP server and general application settings
@@ -99,6 +100,15 @@ type MetricsConfig struct {
 // CORSConfig holds Cross-Origin Resource Sharing settings
 type CORSConfig struct {
 	AllowedOrigins []string
+}
+
+// BootstrapAdminConfig holds initial platform admin credentials from the environment
+type BootstrapAdminConfig struct {
+	Enabled  bool
+	Email    string
+	Password string
+	Username string
+	Phone    string
 }
 
 // ConnectionString returns the PostgreSQL DSN URL
@@ -198,6 +208,13 @@ func Load() (*Config, error) {
 		CORS: CORSConfig{
 			AllowedOrigins: getSliceEnv("CORS_ALLOWED_ORIGINS", []string{"*"}),
 		},
+		BootstrapAdmin: BootstrapAdminConfig{
+			Enabled:  getBoolEnv("PLATFORM_ADMIN_BOOTSTRAP_ENABLED", true),
+			Email:    getEnv("PLATFORM_ADMIN_EMAIL", "admin@vyavsa.com"),
+			Password: getEnv("PLATFORM_ADMIN_PASSWORD", "Admin@12345"),
+			Username: getEnv("PLATFORM_ADMIN_USERNAME", "platform_admin"),
+			Phone:    getEnv("PLATFORM_ADMIN_PHONE", "+919876543210"),
+		},
 	}
 
 	// Default Log Format based on environment if not explicitly set
@@ -241,6 +258,14 @@ func (c *Config) Validate() error {
 	}
 	if c.App.Env == "production" && len(c.JWT.Secret) < 32 {
 		return fmt.Errorf("JWT_SECRET must be at least 32 characters in production")
+	}
+	if c.BootstrapAdmin.Enabled {
+		if c.BootstrapAdmin.Email == "" {
+			return fmt.Errorf("PLATFORM_ADMIN_EMAIL cannot be empty when bootstrap is enabled")
+		}
+		if c.BootstrapAdmin.Password == "" {
+			return fmt.Errorf("PLATFORM_ADMIN_PASSWORD cannot be empty when bootstrap is enabled")
+		}
 	}
 
 	return nil

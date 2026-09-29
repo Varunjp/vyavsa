@@ -63,17 +63,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     plans.forEach((plan, idx) => {
       const card = document.createElement('div');
-      const isPopular = idx === 1 || plan.is_popular;
+      const priceVal = parseFloat(plan.price) || 0;
+      const isPopular = priceVal > 0 || idx === 1 || plan.is_popular;
       card.className = `pricing-card ${isPopular ? 'pricing-card-popular' : ''}`;
 
-      const priceVal = parseFloat(plan.price) || 0;
-      const displayPrice = priceVal === 0 ? '₹0' : `₹${priceVal}`;
-      const period = priceVal === 0 ? 'forever free' : '/month';
+      const displayPrice = priceVal === 0 ? 'Free' : `₹${priceVal}`;
+      const period = priceVal === 0 ? 'for 1 month' : '/month';
+      const ctaText = priceVal === 0 ? 'Start Free Trial' : 'Choose Monthly Plan';
+      const badgeText = isPopular ? 'Standard Plan' : '';
 
       card.innerHTML = `
-        ${isPopular ? '<div class="pricing-badge">Most Popular</div>' : ''}
+        ${badgeText ? `<div class="pricing-badge">${badgeText}</div>` : ''}
         <h3 class="pricing-card-title">${escapeHTML(plan.plan_name || plan.name || 'Business Plan')}</h3>
-        <p class="pricing-card-desc">${escapeHTML(plan.note || plan.description || 'Comprehensive financial toolset for small businesses.')}</p>
+        <p class="pricing-card-desc">${escapeHTML(plan.note || plan.description || 'Full access to all business features.')}</p>
         <div class="pricing-card-price">
           <span class="price-val">${displayPrice}</span>
           <span class="price-period">${period}</span>
@@ -81,7 +83,11 @@ document.addEventListener('DOMContentLoaded', () => {
         <ul class="pricing-features-list">
           <li class="pricing-feature-item">
             <svg class="check-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-            Daily transaction bookkeeping
+            Full access to all features
+          </li>
+          <li class="pricing-feature-item">
+            <svg class="check-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            Unlimited transaction bookkeeping
           </li>
           <li class="pricing-feature-item">
             <svg class="check-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
@@ -95,8 +101,13 @@ document.addEventListener('DOMContentLoaded', () => {
             <svg class="check-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
             Real-time financial status & reports
           </li>
+          ${isPopular ? `
+          <li class="pricing-feature-item">
+            <svg class="check-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            Priority support & automatic data backup
+          </li>` : ''}
         </ul>
-        <a href="/register" class="btn ${isPopular ? 'btn-primary' : 'btn-outline'} btn-block">Get Started</a>
+        <a href="/register" class="btn ${isPopular ? 'btn-primary' : 'btn-outline'} btn-block">${ctaText}</a>
       `;
 
       container.appendChild(card);

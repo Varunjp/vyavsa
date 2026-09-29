@@ -66,6 +66,11 @@ func (h *PlanHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	status := c.Query("status")
+	if status == "" {
+		status = "active"
+	} else if status == "all" {
+		status = ""
+	}
 
 	plans, total, err := h.planService.ListPlans(c.Request.Context(), page, pageSize, status)
 	if err != nil {
