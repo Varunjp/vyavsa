@@ -13,13 +13,15 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	App      AppConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	JWT      JWTConfig
-	Log      LogConfig
-	Metrics  MetricsConfig
-	CORS     CORSConfig
+	App           AppConfig
+	Database      DatabaseConfig
+	Redis         RedisConfig
+	JWT           JWTConfig
+	PasswordReset PasswordResetConfig
+	Mailer        MailerConfig
+	Log           LogConfig
+	Metrics       MetricsConfig
+	CORS          CORSConfig
 }
 
 // AppConfig holds HTTP server and general application settings
@@ -58,6 +60,28 @@ type JWTConfig struct {
 	Secret        string
 	AccessExpiry  time.Duration
 	RefreshExpiry time.Duration
+}
+
+// PasswordResetConfig holds OTP-based password recovery parameters
+type PasswordResetConfig struct {
+	OTPExpiry        time.Duration
+	TokenExpiry      time.Duration
+	OTPLength        int
+	MaxAttempts      int
+	ResendCooldown   time.Duration
+	MaxEmailRequests int
+	MaxIPRequests    int
+	RateLimitWindow  time.Duration
+}
+
+// MailerConfig holds SMTP email dispatch settings
+type MailerConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
+	FromName string
 }
 
 // LogConfig holds structured logging settings
@@ -144,6 +168,24 @@ func Load() (*Config, error) {
 			Secret:        getEnv("JWT_SECRET", "super-secret-development-key-change-in-production-min-32-chars"),
 			AccessExpiry:  getDurationEnv("JWT_ACCESS_EXPIRY", 15*time.Minute),
 			RefreshExpiry: getDurationEnv("JWT_REFRESH_EXPIRY", 7*24*time.Hour),
+		},
+		PasswordReset: PasswordResetConfig{
+			OTPExpiry:        getDurationEnv("PASSWORD_RESET_OTP_EXPIRY", 5*time.Minute),
+			TokenExpiry:      getDurationEnv("PASSWORD_RESET_TOKEN_EXPIRY", 10*time.Minute),
+			OTPLength:        getIntEnv("PASSWORD_RESET_OTP_LENGTH", 6),
+			MaxAttempts:      getIntEnv("PASSWORD_RESET_MAX_ATTEMPTS", 5),
+			ResendCooldown:   getDurationEnv("PASSWORD_RESET_RESEND_COOLDOWN", 60*time.Second),
+			MaxEmailRequests: getIntEnv("PASSWORD_RESET_MAX_EMAIL_REQUESTS", 3),
+			MaxIPRequests:    getIntEnv("PASSWORD_RESET_MAX_IP_REQUESTS", 10),
+			RateLimitWindow:  getDurationEnv("PASSWORD_RESET_RATE_LIMIT_WINDOW", 15*time.Minute),
+		},
+		Mailer: MailerConfig{
+			Host:     getEnv("SMTP_HOST", ""),
+			Port:     getIntEnv("SMTP_PORT", 587),
+			Username: getEnv("SMTP_USERNAME", ""),
+			Password: getEnv("SMTP_PASSWORD", ""),
+			From:     getEnv("SMTP_FROM", "no-reply@vyavsa.com"),
+			FromName: getEnv("SMTP_FROM_NAME", "Vyavsa"),
 		},
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),

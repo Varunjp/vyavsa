@@ -38,3 +38,25 @@ type TokenResponse struct {
 	ExpiresIn    int64       `json:"expires_in"` // in seconds
 	User         UserProfile `json:"user"`
 }
+
+// ForgotPasswordRequest represents payload for initiating password reset
+type ForgotPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+// VerifyResetOTPRequest represents payload for verifying password recovery OTP
+type VerifyResetOTPRequest struct {
+	Email string `json:"email" binding:"required,email"`
+	OTP   string `json:"otp" binding:"required,len=6,numeric"`
+}
+
+// VerifyResetOTPResponse represents data payload returned after successful OTP verification
+type VerifyResetOTPResponse struct {
+	ResetToken string `json:"reset_token"`
+}
+
+// ResetPasswordRequest represents payload for setting new password with a reset token
+type ResetPasswordRequest struct {
+	ResetToken  string `json:"reset_token" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6,max=72"`
+}

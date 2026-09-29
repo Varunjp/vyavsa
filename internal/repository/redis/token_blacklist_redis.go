@@ -3,13 +3,18 @@ package redis
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Varunjp/vyavsa/internal/cache"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
-const blacklistKeyPrefix = "token:revoked:"
+const (
+	blacklistKeyPrefix      = "token:revoked:"
+	userRevokedBeforePrefix = "user:revoked_before:"
+)
 
 // TokenBlacklistRedis implements repository.TokenBlacklistRepository
 type TokenBlacklistRedis struct {
@@ -53,4 +58,43 @@ func (r *TokenBlacklistRedis) IsTokenRevoked(ctx context.Context, tokenID string
 	}
 
 	return exists > 0, nil
+}
+
+// RevokeAllUserTokens records a revocation timestamp for the user, invalidating any tokens issued prior
+func (r *TokenBlacklistRedis) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID, ttl time.Duration) error {
+	if r.cache == nil || r.cache.Client == nil {
+		return nil
+	}
+
+	key := userRevokedBeforePrefix + userID.String()
+	nowUnix := strconv.FormatInt(time.Now().Unix(), 10)
+	err := r.cache.Client.Set(ctx, key, nowUnix, ttl).Err()
+	if err != nil {
+		return fmt.Errorf("failed to set user revocation timestamp in redis: %w", err)
+	}
+
+	return nil
+}
+
+// IsUserTokenRevoked checks whether a token's issued-at timestamp is before the user's latest revocation timestamp
+func (r *TokenBlacklistRedis) IsUserTokenRevoked(ctx context.Context, userID uuid.UUID, issuedAt time.Time) (bool, error) {
+	if r.cache == nil || r.cache.Client == nil {
+		return false, nil
+	}
+
+	key := userRevokedBeforePrefix + userID.String()
+	val, err := r.cache.Client.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return false, nil
+		}
+		return false, fmt.Errorf("redis check failed: %w", err)
+	}
+
+	revokedBeforeUnix, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return false, nil
+	}
+
+	return issuedAt.Unix() <= revokedBeforeUnix, nil
 }

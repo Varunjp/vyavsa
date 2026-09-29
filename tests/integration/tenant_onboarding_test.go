@@ -151,4 +151,3 @@ func TestTenantEndpointsIntegration(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "VALIDATION_ERROR")
 	})
 }
-

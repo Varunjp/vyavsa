@@ -25,6 +25,15 @@ type Metrics struct {
 	purchasesTotal      *prometheus.CounterVec
 	expensesTotal       *prometheus.CounterVec
 	tenantsCreatedTotal prometheus.Counter
+
+	// Password Recovery Metrics
+	passwordResetRequestsTotal         prometheus.Counter
+	passwordResetOTPSentTotal          prometheus.Counter
+	passwordResetOTPVerifySuccessTotal prometheus.Counter
+	passwordResetOTPVerifyFailedTotal  prometheus.Counter
+	passwordResetSuccessTotal          prometheus.Counter
+	passwordResetFailedTotal           prometheus.Counter
+	passwordResetRateLimitedTotal      prometheus.Counter
 }
 
 // New initializes application metrics and registers them with a custom Prometheus registry
@@ -117,6 +126,63 @@ func New() *Metrics {
 				Help:      "Total number of tenants created",
 			},
 		),
+
+		passwordResetRequestsTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "auth",
+				Name:      "password_reset_requests_total",
+				Help:      "Total count of password reset requests initiated",
+			},
+		),
+		passwordResetOTPSentTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "auth",
+				Name:      "password_reset_otp_sent_total",
+				Help:      "Total count of password reset OTPs dispatched",
+			},
+		),
+		passwordResetOTPVerifySuccessTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "auth",
+				Name:      "password_reset_otp_verification_success_total",
+				Help:      "Total count of successful OTP verifications",
+			},
+		),
+		passwordResetOTPVerifyFailedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "auth",
+				Name:      "password_reset_otp_verification_failed_total",
+				Help:      "Total count of failed OTP verification attempts",
+			},
+		),
+		passwordResetSuccessTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "auth",
+				Name:      "password_reset_success_total",
+				Help:      "Total count of successfully completed password resets",
+			},
+		),
+		passwordResetFailedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "auth",
+				Name:      "password_reset_failed_total",
+				Help:      "Total count of failed password reset finalizations",
+			},
+		),
+		passwordResetRateLimitedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "auth",
+				Name:      "password_reset_rate_limited_total",
+				Help:      "Total count of rate-limited password reset requests",
+			},
+		),
 	}
 
 	reg.MustRegister(
@@ -128,6 +194,13 @@ func New() *Metrics {
 		m.purchasesTotal,
 		m.expensesTotal,
 		m.tenantsCreatedTotal,
+		m.passwordResetRequestsTotal,
+		m.passwordResetOTPSentTotal,
+		m.passwordResetOTPVerifySuccessTotal,
+		m.passwordResetOTPVerifyFailedTotal,
+		m.passwordResetSuccessTotal,
+		m.passwordResetFailedTotal,
+		m.passwordResetRateLimitedTotal,
 	)
 
 	return m
@@ -157,6 +230,55 @@ func (m *Metrics) DecInFlight() {
 func (m *Metrics) IncTenantsCreated() {
 	if m != nil && m.tenantsCreatedTotal != nil {
 		m.tenantsCreatedTotal.Inc()
+	}
+}
+
+// IncPasswordResetRequests increments password reset request counter
+func (m *Metrics) IncPasswordResetRequests() {
+	if m != nil && m.passwordResetRequestsTotal != nil {
+		m.passwordResetRequestsTotal.Inc()
+	}
+}
+
+// IncPasswordResetOTPSent increments sent recovery OTP counter
+func (m *Metrics) IncPasswordResetOTPSent() {
+	if m != nil && m.passwordResetOTPSentTotal != nil {
+		m.passwordResetOTPSentTotal.Inc()
+	}
+}
+
+// IncPasswordResetOTPVerifySuccess increments successful OTP verifications counter
+func (m *Metrics) IncPasswordResetOTPVerifySuccess() {
+	if m != nil && m.passwordResetOTPVerifySuccessTotal != nil {
+		m.passwordResetOTPVerifySuccessTotal.Inc()
+	}
+}
+
+// IncPasswordResetOTPVerifyFailed increments failed OTP verifications counter
+func (m *Metrics) IncPasswordResetOTPVerifyFailed() {
+	if m != nil && m.passwordResetOTPVerifyFailedTotal != nil {
+		m.passwordResetOTPVerifyFailedTotal.Inc()
+	}
+}
+
+// IncPasswordResetSuccess increments completed password reset counter
+func (m *Metrics) IncPasswordResetSuccess() {
+	if m != nil && m.passwordResetSuccessTotal != nil {
+		m.passwordResetSuccessTotal.Inc()
+	}
+}
+
+// IncPasswordResetFailed increments failed password reset counter
+func (m *Metrics) IncPasswordResetFailed() {
+	if m != nil && m.passwordResetFailedTotal != nil {
+		m.passwordResetFailedTotal.Inc()
+	}
+}
+
+// IncPasswordResetRateLimited increments rate limited password recovery counter
+func (m *Metrics) IncPasswordResetRateLimited() {
+	if m != nil && m.passwordResetRateLimitedTotal != nil {
+		m.passwordResetRateLimitedTotal.Inc()
 	}
 }
 

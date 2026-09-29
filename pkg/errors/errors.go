@@ -17,6 +17,7 @@ const (
 	CodeDatabase           = "DATABASE_ERROR"
 	CodeServiceUnavailable = "SERVICE_UNAVAILABLE"
 	CodeBadRequest         = "BAD_REQUEST"
+	CodeTooManyRequests    = "TOO_MANY_REQUESTS"
 )
 
 // AppError represents an application-level structured error
@@ -104,6 +105,15 @@ func NewBadRequest(message string) *AppError {
 	}
 }
 
+// NewTooManyRequests creates a 429 Too Many Requests rate limit error
+func NewTooManyRequests(message string) *AppError {
+	return &AppError{
+		Code:       CodeTooManyRequests,
+		Message:    message,
+		HTTPStatus: http.StatusTooManyRequests,
+	}
+}
+
 // NewInternal creates a 500 Internal Server Error
 func NewInternal(err error) *AppError {
 	return &AppError{
@@ -158,4 +168,3 @@ func IsNotFound(err error) bool {
 	}
 	return false
 }
-

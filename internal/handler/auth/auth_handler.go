@@ -117,3 +117,58 @@ func (h *Handler) GetMe(c *gin.Context) {
 
 	response.Success(c, profile, "profile retrieved successfully")
 }
+
+// ForgotPassword initiates the password recovery flow by generating and emailing an OTP
+func (h *Handler) ForgotPassword(c *gin.Context) {
+	var req dto.ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
+			"error": err.Error(),
+		}))
+		return
+	}
+
+	if err := h.authService.ForgotPassword(c.Request.Context(), req, c.ClientIP()); err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, nil, "If an account exists with this email, an OTP has been sent.")
+}
+
+// VerifyResetOTP validates the submitted OTP and issues a short-lived password reset token
+func (h *Handler) VerifyResetOTP(c *gin.Context) {
+	var req dto.VerifyResetOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
+			"error": err.Error(),
+		}))
+		return
+	}
+
+	resp, err := h.authService.VerifyResetOTP(c.Request.Context(), req, c.ClientIP())
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, resp, "OTP verified successfully")
+}
+
+// ResetPassword finalizes the password reset with a valid token and updates credentials
+func (h *Handler) ResetPassword(c *gin.Context) {
+	var req dto.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
+			"error": err.Error(),
+		}))
+		return
+	}
+
+	if err := h.authService.ResetPassword(c.Request.Context(), req, c.ClientIP()); err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, nil, "Password reset successfully.")
+}

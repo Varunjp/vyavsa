@@ -17,7 +17,7 @@ type OnboardTenantRequest struct {
 
 	// Initial Tenant Administrator User Details
 	AdminName     string `json:"admin_name" binding:"omitempty,min=2,max=255"` // Defaults to Name if empty
-	AdminEmail    string `json:"admin_email" binding:"omitempty,email"`       // Defaults to Email if empty
+	AdminEmail    string `json:"admin_email" binding:"omitempty,email"`        // Defaults to Email if empty
 	AdminPassword string `json:"admin_password" binding:"required,min=6,max=72"`
 
 	// Subscription Plan Selection
@@ -26,12 +26,12 @@ type OnboardTenantRequest struct {
 
 // TenantRegisterRequest represents self-service public registration for a new tenant
 type TenantRegisterRequest struct {
-	Name      string     `json:"name" binding:"required,min=2,max=255"`       // Organization / Business Name
+	Name      string     `json:"name" binding:"required,min=2,max=255"`        // Organization / Business Name
 	AdminName string     `json:"admin_name" binding:"omitempty,min=2,max=255"` // Optional: Defaults to Name if omitted
-	Email     string     `json:"email" binding:"required,email"`              // Used for both Tenant Organization and Admin User
+	Email     string     `json:"email" binding:"required,email"`               // Used for both Tenant Organization and Admin User
 	Password  string     `json:"password" binding:"required,min=6,max=72"`     // Admin User Password
 	Phone     string     `json:"phone" binding:"omitempty,max=30"`
-	PlanID    *uuid.UUID `json:"plan_id,omitempty"`                           // Optional: Defaults to free plan if omitted
+	PlanID    *uuid.UUID `json:"plan_id,omitempty"` // Optional: Defaults to free plan if omitted
 }
 
 // UpdateTenantStatusRequest represents tenant status modification payload

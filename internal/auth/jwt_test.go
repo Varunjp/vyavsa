@@ -65,4 +65,37 @@ func TestJWTManager(t *testing.T) {
 		_, err = mgr.ValidateToken(tokens.AccessToken)
 		assert.ErrorIs(t, err, ErrInvalidToken)
 	})
+
+	t.Run("Generates and validates password reset token", func(t *testing.T) {
+		resetToken, tokenID, err := mgr.GeneratePasswordResetToken(userID, &tenantID, "user@example.com", UserTypeTenantUser, 10*time.Minute)
+		require.NoError(t, err)
+		assert.NotEmpty(t, resetToken)
+		assert.NotEmpty(t, tokenID)
+
+		claims, err := mgr.ValidatePasswordResetToken(resetToken)
+		require.NoError(t, err)
+		assert.Equal(t, userID, claims.UserID)
+		assert.Equal(t, &tenantID, claims.TenantID)
+		assert.Equal(t, "user@example.com", claims.Email)
+		assert.Equal(t, UserTypeTenantUser, claims.UserType)
+		assert.Equal(t, PurposePasswordReset, claims.Purpose)
+		assert.Equal(t, tokenID, claims.TokenID)
+	})
+
+	t.Run("Password reset token cannot be used as standard access token", func(t *testing.T) {
+		resetToken, _, err := mgr.GeneratePasswordResetToken(userID, &tenantID, "user@example.com", UserTypeTenantUser, 10*time.Minute)
+		require.NoError(t, err)
+
+		// Calling ValidateToken with reset token must fail
+		_, err = mgr.ValidateToken(resetToken)
+		assert.ErrorIs(t, err, ErrInvalidToken)
+	})
+
+	t.Run("Rejects expired password reset token", func(t *testing.T) {
+		resetToken, _, err := mgr.GeneratePasswordResetToken(userID, &tenantID, "user@example.com", UserTypeTenantUser, -1*time.Minute)
+		require.NoError(t, err)
+
+		_, err = mgr.ValidatePasswordResetToken(resetToken)
+		assert.ErrorIs(t, err, ErrExpiredToken)
+	})
 }

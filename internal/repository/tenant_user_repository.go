@@ -15,4 +15,5 @@ type TenantUserRepository interface {
 	GetAdminByTenantID(ctx context.Context, tenantID uuid.UUID) (*domain.TenantUser, error)
 	Create(ctx context.Context, user *domain.TenantUser) error
 	UpdateStatus(ctx context.Context, tenantID, id uuid.UUID, status string) error
+	UpdatePassword(ctx context.Context, tenantID, id uuid.UUID, passwordHash string) error
 }

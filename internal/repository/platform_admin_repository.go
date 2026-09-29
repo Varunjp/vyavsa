@@ -13,4 +13,5 @@ type PlatformAdminRepository interface {
 	GetByIdentifier(ctx context.Context, identifier string) (*domain.PlatformAdmin, error)
 	Create(ctx context.Context, admin *domain.PlatformAdmin) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 }

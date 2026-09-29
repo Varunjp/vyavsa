@@ -174,3 +174,20 @@ func (r *TenantUserPostgres) UpdateStatus(ctx context.Context, tenantID, id uuid
 	}
 	return nil
 }
+
+func (r *TenantUserPostgres) UpdatePassword(ctx context.Context, tenantID, id uuid.UUID, passwordHash string) error {
+	query := `
+		UPDATE tenant_user
+		SET password_hash = $1, updated_at = NOW()
+		WHERE tenant_id = $2 AND id = $3
+	`
+	exec := GetExecutor(ctx, r.pool)
+	tag, err := exec.Exec(ctx, query, passwordHash, tenantID, id)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to update tenant user password: %w", err))
+	}
+	if tag.RowsAffected() == 0 {
+		return appErrors.NewNotFound("tenant user not found")
+	}
+	return nil
+}

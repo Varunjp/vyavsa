@@ -16,7 +16,8 @@ import (
 )
 
 type dummyBlacklist struct {
-	revoked map[string]bool
+	revoked     map[string]bool
+	userRevoked map[uuid.UUID]time.Time
 }
 
 func (d *dummyBlacklist) RevokeToken(ctx context.Context, tokenID string, ttl time.Duration) error {
@@ -28,13 +29,29 @@ func (d *dummyBlacklist) IsTokenRevoked(ctx context.Context, tokenID string) (bo
 	return d.revoked[tokenID], nil
 }
 
+func (d *dummyBlacklist) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID, ttl time.Duration) error {
+	d.userRevoked[userID] = time.Now()
+	return nil
+}
+
+func (d *dummyBlacklist) IsUserTokenRevoked(ctx context.Context, userID uuid.UUID, issuedAt time.Time) (bool, error) {
+	t, ok := d.userRevoked[userID]
+	if !ok {
+		return false, nil
+	}
+	return issuedAt.Before(t) || issuedAt.Equal(t), nil
+}
+
 func TestAuthAndRBACMiddleware(t *testing.T) {
 	jwtManager := auth.NewJWTManager(config.JWTConfig{
 		Secret:        "test-secret-must-be-at-least-32-bytes-long",
 		AccessExpiry:  15 * time.Minute,
 		RefreshExpiry: 24 * time.Hour,
 	})
-	blacklist := &dummyBlacklist{revoked: make(map[string]bool)}
+	blacklist := &dummyBlacklist{
+		revoked:     make(map[string]bool),
+		userRevoked: make(map[uuid.UUID]time.Time),
+	}
 
 	r := gin.New()
 	api := r.Group("/test")
@@ -137,5 +154,22 @@ func TestAuthAndRBACMiddleware(t *testing.T) {
 		r.ServeHTTP(w2, req2)
 
 		assert.Equal(t, http.StatusOK, w2.Code)
+	})
+
+	t.Run("Rejects token when user tokens have been revoked (password reset)", func(t *testing.T) {
+		revokedUser := uuid.New()
+		tokens, err := jwtManager.GenerateTokenPair(revokedUser, &tenantID, "revoked@tenant.com", auth.RoleTenantUser, auth.UserTypeTenantUser)
+		require.NoError(t, err)
+
+		// Revoke all tokens for this user
+		err = blacklist.RevokeAllUserTokens(context.Background(), revokedUser, 24*time.Hour)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/test/protected", nil)
+		req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 }
