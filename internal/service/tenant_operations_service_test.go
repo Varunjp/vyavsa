@@ -70,11 +70,15 @@ func (m *mockOpEmployeeRepo) List(ctx context.Context, tenantID uuid.UUID, page,
 
 // Mock Customer Repo
 type mockOpCustomerRepo struct {
-	custs map[uuid.UUID]*domain.TenantCustomer
+	custs       map[uuid.UUID]*domain.TenantCustomer
+	adjustments []domain.CustomerBalanceAdjustment
 }
 
 func newMockOpCustomerRepo() *mockOpCustomerRepo {
-	return &mockOpCustomerRepo{custs: make(map[uuid.UUID]*domain.TenantCustomer)}
+	return &mockOpCustomerRepo{
+		custs:       make(map[uuid.UUID]*domain.TenantCustomer),
+		adjustments: make([]domain.CustomerBalanceAdjustment, 0),
+	}
 }
 
 func (m *mockOpCustomerRepo) Create(ctx context.Context, cust *domain.TenantCustomer) error {
@@ -107,6 +111,32 @@ func (m *mockOpCustomerRepo) AdjustBalance(ctx context.Context, tenantID, id uui
 	return nil
 }
 
+func (m *mockOpCustomerRepo) SetBalance(ctx context.Context, tenantID, id uuid.UUID, newBalance decimal.Decimal) error {
+	c, ok := m.custs[id]
+	if !ok || c.TenantID != tenantID {
+		return appErrors.NewNotFound("customer not found")
+	}
+	c.CurrentBalance = newBalance
+	return nil
+}
+
+func (m *mockOpCustomerRepo) RecordAdjustment(ctx context.Context, adj *domain.CustomerBalanceAdjustment) error {
+	adj.ID = uuid.New()
+	adj.CreatedAt = time.Now().UTC()
+	m.adjustments = append(m.adjustments, *adj)
+	return nil
+}
+
+func (m *mockOpCustomerRepo) ListAdjustments(ctx context.Context, tenantID, customerID uuid.UUID, page, pageSize int) ([]domain.CustomerBalanceAdjustment, int64, error) {
+	var list []domain.CustomerBalanceAdjustment
+	for _, a := range m.adjustments {
+		if a.TenantID == tenantID && a.CustomerID == customerID {
+			list = append(list, a)
+		}
+	}
+	return list, int64(len(list)), nil
+}
+
 func (m *mockOpCustomerRepo) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
 	delete(m.custs, id)
 	return nil
@@ -124,11 +154,15 @@ func (m *mockOpCustomerRepo) List(ctx context.Context, tenantID uuid.UUID, page,
 
 // Mock Bank Repo
 type mockOpBankRepo struct {
-	banks map[uuid.UUID]*domain.TenantBank
+	banks        map[uuid.UUID]*domain.TenantBank
+	transactions []domain.BankTransaction
 }
 
 func newMockOpBankRepo() *mockOpBankRepo {
-	return &mockOpBankRepo{banks: make(map[uuid.UUID]*domain.TenantBank)}
+	return &mockOpBankRepo{
+		banks:        make(map[uuid.UUID]*domain.TenantBank),
+		transactions: make([]domain.BankTransaction, 0),
+	}
 }
 
 func (m *mockOpBankRepo) Create(ctx context.Context, bank *domain.TenantBank) error {
@@ -150,6 +184,32 @@ func (m *mockOpBankRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*
 func (m *mockOpBankRepo) Update(ctx context.Context, bank *domain.TenantBank) error {
 	m.banks[bank.ID] = bank
 	return nil
+}
+
+func (m *mockOpBankRepo) AdjustBalance(ctx context.Context, tenantID, id uuid.UUID, delta decimal.Decimal) error {
+	b, ok := m.banks[id]
+	if !ok || b.TenantID != tenantID {
+		return appErrors.NewNotFound("bank not found")
+	}
+	b.CurrentBalance = b.CurrentBalance.Add(delta)
+	return nil
+}
+
+func (m *mockOpBankRepo) CreateTransaction(ctx context.Context, tx *domain.BankTransaction) error {
+	tx.ID = uuid.New()
+	tx.CreatedAt = time.Now().UTC()
+	m.transactions = append(m.transactions, *tx)
+	return nil
+}
+
+func (m *mockOpBankRepo) ListTransactions(ctx context.Context, tenantID, bankID uuid.UUID, page, pageSize int) ([]domain.BankTransaction, int64, error) {
+	var list []domain.BankTransaction
+	for _, tx := range m.transactions {
+		if tx.TenantID == tenantID && tx.BankID == bankID {
+			list = append(list, tx)
+		}
+	}
+	return list, int64(len(list)), nil
 }
 
 func (m *mockOpBankRepo) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
@@ -421,6 +481,16 @@ func (m *mockOpAttendanceRepo) List(ctx context.Context, tenantID uuid.UUID, pag
 	return list, int64(len(list)), nil
 }
 
+func (m *mockOpAttendanceRepo) GetTodaySalaryEarned(ctx context.Context, tenantID uuid.UUID, date string) (decimal.Decimal, error) {
+	var total decimal.Decimal
+	for _, a := range m.attendance {
+		if a.TenantID == tenantID && a.Date == date && a.Status == "present" {
+			total = total.Add(a.DailySalary)
+		}
+	}
+	return total, nil
+}
+
 // Mock Salary Repo
 type mockOpSalaryRepo struct {
 	salaries map[uuid.UUID]*domain.EmployeeSalary
@@ -530,7 +600,22 @@ func (m *mockOpDailyStatsRepo) Upsert(ctx context.Context, stats *domain.TenantD
 	return nil
 }
 
+func (m *mockOpDailyStatsRepo) GetLatestAvailable(ctx context.Context, tenantID uuid.UUID, beforeDate string) (*domain.TenantDailyStats, error) {
+	var latest *domain.TenantDailyStats
+	for _, s := range m.stats {
+		if s.TenantID == tenantID && s.Date < beforeDate {
+			if latest == nil || s.Date > latest.Date {
+				latest = s
+			}
+		}
+	}
+	return latest, nil
+}
+
 func (m *mockOpDailyStatsRepo) ComputeAndSyncDailyStats(ctx context.Context, tenantID uuid.UUID, date string) (*domain.TenantDailyStats, error) {
+	if existing, ok := m.stats[tenantID.String()+":"+date]; ok {
+		return existing, nil
+	}
 	s := &domain.TenantDailyStats{
 		ID:       uuid.New(),
 		TenantID: tenantID,
@@ -672,10 +757,10 @@ func TestOperationsService_EmployeeAndSalaryFlow(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Salary balance should reflect: 0 (initial) - 2000 (advance) + 600 (OT) = -1400
+	// Salary balance should reflect: 0 (initial) + 25000 (present daily salary) - 2000 (advance) + 600 (OT) = 23600
 	salary, err := svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
 	require.NoError(t, err)
-	assert.True(t, salary.Balance.Equal(decimal.NewFromFloat(-1400.00)))
+	assert.True(t, salary.Balance.Equal(decimal.NewFromFloat(23600.00)))
 
 	// Adjust salary to 20,000 for monthly wage
 	_, err = svc.UpdateSalaryBalance(ctx, tenantID, emp.ID, &dto.UpdateSalaryBalanceRequest{
@@ -788,4 +873,379 @@ func TestOperationsService_FinancialMetrics(t *testing.T) {
 	assert.NotNil(t, metrics)
 	assert.True(t, metrics.CashBalance.Equal(decimal.NewFromFloat(50000.00)))
 	assert.True(t, metrics.BankBalance.Equal(decimal.NewFromFloat(100000.00)))
+}
+
+func TestOperationsService_StaleDataFallback(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// 1. Initially no activity today, no yesterday -> is_current is true (empty/zeroed)
+	metrics, err := svc.GetFinancialMetrics(ctx, tenantID)
+	require.NoError(t, err)
+	assert.True(t, metrics.IsCurrent)
+	assert.Equal(t, 0, metrics.DaysOld)
+
+	// 2. Simulate yesterday had activity
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	yesterdayStats := &domain.TenantDailyStats{
+		ID:         uuid.New(),
+		TenantID:   tenantID,
+		Date:       yesterday,
+		TotalSales: decimal.NewFromFloat(25000.00),
+	}
+	_ = svc.statsRepo.Upsert(ctx, yesterdayStats)
+
+	// Query metrics: today has no activity, so it should fall back to yesterday's stats
+	metricsStale, err := svc.GetFinancialMetrics(ctx, tenantID)
+	require.NoError(t, err)
+	assert.False(t, metricsStale.IsCurrent)
+	assert.Equal(t, yesterday, metricsStale.DataDate)
+	assert.Equal(t, 1, metricsStale.DaysOld)
+	assert.True(t, metricsStale.TodayStats.TotalSales.Equal(decimal.NewFromFloat(25000.00)))
+
+	// 3. Now simulate today records a sale
+	today := todayString()
+	todayActive := &domain.TenantDailyStats{
+		ID:         uuid.New(),
+		TenantID:   tenantID,
+		Date:       today,
+		TotalSales: decimal.NewFromFloat(12000.00),
+	}
+	_ = svc.statsRepo.Upsert(ctx, todayActive)
+
+	metricsToday, err := svc.GetFinancialMetrics(ctx, tenantID)
+	require.NoError(t, err)
+	assert.True(t, metricsToday.IsCurrent)
+	assert.Equal(t, today, metricsToday.DataDate)
+	assert.Equal(t, 0, metricsToday.DaysOld)
+	assert.True(t, metricsToday.TodayStats.TotalSales.Equal(decimal.NewFromFloat(12000.00)))
+}
+
+func TestOperationsService_SalesPaymentCollectionAndBankBalance(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// Setup Customer
+	cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "Super Store",
+		Phone:        "9876500001",
+	})
+	require.NoError(t, err)
+
+	// Setup Bank
+	bankA, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "HDFC Current",
+		AccountNumber:  "1234567890",
+		OpeningBalance: decimal.NewFromFloat(10000.00),
+	})
+	require.NoError(t, err)
+	assert.True(t, bankA.CurrentBalance.Equal(decimal.NewFromFloat(10000.00)))
+
+	// 1. Cash-only Line Sale
+	sale1, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+		CustomerID:  cust.ID,
+		TotalAmount: decimal.NewFromFloat(1000.00),
+		TotalCashIn: decimal.NewFromFloat(1000.00),
+	})
+	require.NoError(t, err)
+	assert.True(t, sale1.TotalCashIn.Equal(decimal.NewFromFloat(1000.00)))
+	assert.True(t, sale1.BankAmount.IsZero())
+	assert.True(t, sale1.CollectedAmount.Equal(decimal.NewFromFloat(1000.00)))
+	assert.True(t, sale1.Balance.IsZero())
+
+	// 2. Bank-only Line Sale
+	sale2, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+		CustomerID:  cust.ID,
+		TotalAmount: decimal.NewFromFloat(2000.00),
+		BankAmount:  decimal.NewFromFloat(2000.00),
+		BankID:      &bankA.ID,
+	})
+	require.NoError(t, err)
+	assert.True(t, sale2.BankAmount.Equal(decimal.NewFromFloat(2000.00)))
+	assert.True(t, sale2.CollectedAmount.Equal(decimal.NewFromFloat(2000.00)))
+	assert.True(t, sale2.Balance.IsZero())
+
+	// Verify Bank A balance updated: 10000 + 2000 = 12000
+	updatedBankA, err := svc.GetBankByID(ctx, tenantID, bankA.ID)
+	require.NoError(t, err)
+	assert.True(t, updatedBankA.CurrentBalance.Equal(decimal.NewFromFloat(12000.00)))
+
+	// Verify Bank Transaction recorded
+	txs, totalTxs, err := svc.ListBankTransactions(ctx, tenantID, bankA.ID, 1, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), totalTxs) // 1 opening balance + 1 sale deposit
+	assert.Equal(t, "credit", txs[0].TransactionType)
+	assert.True(t, txs[0].Amount.Equal(decimal.NewFromFloat(10000.00)))
+	assert.Equal(t, "credit", txs[1].TransactionType)
+	assert.True(t, txs[1].Amount.Equal(decimal.NewFromFloat(2000.00)))
+	assert.Equal(t, &sale2.ID, txs[1].SaleID)
+
+	// 3. Split Cash + Bank Line Sale with Due
+	sale3, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+		CustomerID:  cust.ID,
+		TotalAmount: decimal.NewFromFloat(5000.00),
+		TotalCashIn: decimal.NewFromFloat(1500.00),
+		BankAmount:  decimal.NewFromFloat(2000.00),
+		BankID:      &bankA.ID,
+	})
+	require.NoError(t, err)
+	assert.True(t, sale3.TotalCashIn.Equal(decimal.NewFromFloat(1500.00)))
+	assert.True(t, sale3.BankAmount.Equal(decimal.NewFromFloat(2000.00)))
+	assert.True(t, sale3.CollectedAmount.Equal(decimal.NewFromFloat(3500.00)))
+	assert.True(t, sale3.Balance.Equal(decimal.NewFromFloat(1500.00)))
+
+	// Check customer balance increased by due amount (1500)
+	updatedCust, err := svc.GetCustomerByID(ctx, tenantID, cust.ID)
+	require.NoError(t, err)
+	assert.True(t, updatedCust.CurrentBalance.Equal(decimal.NewFromFloat(1500.00)))
+
+	// Verify Bank A balance updated again: 12000 + 2000 = 14000
+	updatedBankA, err = svc.GetBankByID(ctx, tenantID, bankA.ID)
+	require.NoError(t, err)
+	assert.True(t, updatedBankA.CurrentBalance.Equal(decimal.NewFromFloat(14000.00)))
+
+	// 4. Overpayment Validation (Collected > Total should be rejected)
+	_, err = svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+		CustomerID:  cust.ID,
+		TotalAmount: decimal.NewFromFloat(1000.00),
+		TotalCashIn: decimal.NewFromFloat(600.00),
+		BankAmount:  decimal.NewFromFloat(600.00),
+		BankID:      &bankA.ID,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "collected amount cannot exceed sale total")
+
+	// 5. Counter Sale with Bank Payment
+	cs1, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+		Item:          "Rice 25kg",
+		Price:         decimal.NewFromFloat(800.00),
+		TotalAmount:   decimal.NewFromFloat(800.00),
+		PaymentMethod: "bank",
+		BankAmount:    decimal.NewFromFloat(800.00),
+		BankID:        &bankA.ID,
+	})
+	require.NoError(t, err)
+	assert.True(t, cs1.BankAmount.Equal(decimal.NewFromFloat(800.00)))
+	assert.True(t, cs1.CollectedAmount.Equal(decimal.NewFromFloat(800.00)))
+
+	// Bank A balance should now be: 14000 + 800 = 14800
+	updatedBankA, err = svc.GetBankByID(ctx, tenantID, bankA.ID)
+	require.NoError(t, err)
+	assert.True(t, updatedBankA.CurrentBalance.Equal(decimal.NewFromFloat(14800.00)))
+
+	// 6. Counter Sale Split Payment
+	cs2, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+		Item:          "Sugar 50kg",
+		Price:         decimal.NewFromFloat(1200.00),
+		TotalAmount:   decimal.NewFromFloat(1200.00),
+		PaymentMethod: "split",
+		Cash:          decimal.NewFromFloat(500.00),
+		BankAmount:    decimal.NewFromFloat(700.00),
+		BankID:        &bankA.ID,
+	})
+	require.NoError(t, err)
+	assert.True(t, cs2.Cash.Equal(decimal.NewFromFloat(500.00)))
+	assert.True(t, cs2.BankAmount.Equal(decimal.NewFromFloat(700.00)))
+	assert.True(t, cs2.CollectedAmount.Equal(decimal.NewFromFloat(1200.00)))
+
+	// Bank A balance: 14800 + 700 = 15500
+	updatedBankA, err = svc.GetBankByID(ctx, tenantID, bankA.ID)
+	require.NoError(t, err)
+	assert.True(t, updatedBankA.CurrentBalance.Equal(decimal.NewFromFloat(15500.00)))
+}
+
+func TestOperationsService_IndividualBankBalanceTracking(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// Create Bank 1 (SBI) and Bank 2 (ICICI)
+	sbi, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "SBI Current",
+		AccountNumber:  "SBI001",
+		OpeningBalance: decimal.NewFromFloat(25000.00),
+	})
+	require.NoError(t, err)
+
+	icici, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "ICICI Current",
+		AccountNumber:  "ICICI001",
+		OpeningBalance: decimal.NewFromFloat(50000.00),
+	})
+	require.NoError(t, err)
+
+	// Deposit to SBI via Line Sale
+	cust1, _ := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "Retailer 1",
+		Phone:        "9000000000",
+	})
+	_, err = svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+		CustomerID:  cust1.ID,
+		TotalAmount: decimal.NewFromFloat(5000.00),
+		BankAmount:  decimal.NewFromFloat(5000.00),
+		BankID:      &sbi.ID,
+	})
+	require.NoError(t, err)
+
+	// Deposit to ICICI via Counter Sale
+	_, err = svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+		Item:          "Items",
+		Price:         decimal.NewFromFloat(8000.00),
+		TotalAmount:   decimal.NewFromFloat(8000.00),
+		PaymentMethod: "bank",
+		BankAmount:    decimal.NewFromFloat(8000.00),
+		BankID:        &icici.ID,
+	})
+	require.NoError(t, err)
+
+	// SBI balance should be 30000, ICICI balance should be 58000
+	sbiUpdated, err := svc.GetBankByID(ctx, tenantID, sbi.ID)
+	require.NoError(t, err)
+	assert.True(t, sbiUpdated.CurrentBalance.Equal(decimal.NewFromFloat(30000.00)))
+
+	iciciUpdated, err := svc.GetBankByID(ctx, tenantID, icici.ID)
+	require.NoError(t, err)
+	assert.True(t, iciciUpdated.CurrentBalance.Equal(decimal.NewFromFloat(58000.00)))
+
+	// Check Financial Metrics contains both individual banks with separate balances
+	metrics, err := svc.GetFinancialMetrics(ctx, tenantID)
+	require.NoError(t, err)
+	require.Len(t, metrics.BankBalances, 2)
+	for _, b := range metrics.BankBalances {
+		if b.ID == sbi.ID {
+			assert.True(t, b.CurrentBalance.Equal(decimal.NewFromFloat(30000.00)))
+		} else if b.ID == icici.ID {
+			assert.True(t, b.CurrentBalance.Equal(decimal.NewFromFloat(58000.00)))
+		}
+	}
+}
+
+func TestOperationsService_EmployeeDailySalaryAndAttendance(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+	today := todayString()
+
+	// Create Employee with base salary 600/day
+	emp, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Sunil Kumar",
+		Phone:  "9876543200",
+		Salary: decimal.NewFromFloat(600.00),
+		OTRate: decimal.NewFromFloat(100.00),
+	})
+	require.NoError(t, err)
+
+	// 1. Mark Absent: Salary balance should NOT increase
+	attAbsent, err := svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp.ID,
+		Date:       today,
+		Status:     "absent",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "absent", attAbsent.Status)
+	assert.True(t, attAbsent.DailySalary.IsZero())
+
+	sal, err := svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.IsZero())
+
+	// 2. Mark Present: Salary balance should increase by configured daily salary (600)
+	attPresent, err := svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp.ID,
+		Date:       today,
+		Status:     "present",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "present", attPresent.Status)
+	assert.True(t, attPresent.DailySalary.Equal(decimal.NewFromFloat(600.00)))
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(600.00)))
+
+	// Check Financial Metrics today's earned employee salary reflects 600
+	metrics, err := svc.GetFinancialMetrics(ctx, tenantID)
+	require.NoError(t, err)
+	assert.True(t, metrics.TodayEmployeeSalary.Equal(decimal.NewFromFloat(600.00)))
+
+	// 3. Idempotent Retry: Calling RecordAttendance again with "present" should NOT double-credit
+	attRetry, err := svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp.ID,
+		Date:       today,
+		Status:     "present",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "present", attRetry.Status)
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(600.00)), "Retry must not duplicate salary credit")
+
+	// 4. Change status back to "absent": Should reverse the daily salary
+	attReversed, err := svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp.ID,
+		Date:       today,
+		Status:     "absent",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "absent", attReversed.Status)
+	assert.True(t, attReversed.DailySalary.IsZero())
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.IsZero(), "Reversing status must reverse salary balance")
+}
+
+func TestOperationsService_CustomerBalanceAdjustmentAndTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	svcA, tenantIDA := setupTestOperationsService()
+	svcB, tenantIDB := setupTestOperationsService()
+
+	// Create Customer for Tenant A
+	custA, err := svcA.CreateCustomer(ctx, tenantIDA, &dto.CreateCustomerRequest{
+		CustomerName: "Kisan Traders",
+		Phone:        "9811111111",
+	})
+	require.NoError(t, err)
+	assert.True(t, custA.CurrentBalance.IsZero())
+
+	// 1. Manually set new balance to 2500
+	newBal := decimal.NewFromFloat(2500.00)
+	custUpdated1, err := svcA.AdjustCustomerBalance(ctx, tenantIDA, custA.ID, &dto.AdjustCustomerBalanceRequest{
+		NewBalance: &newBal,
+		Reason:     "Initial ledger balance adjustment",
+	})
+	require.NoError(t, err)
+	assert.True(t, custUpdated1.CurrentBalance.Equal(newBal))
+
+	// 2. Adjust with delta (-500)
+	delta := decimal.NewFromFloat(-500.00)
+	custUpdated2, err := svcA.AdjustCustomerBalance(ctx, tenantIDA, custA.ID, &dto.AdjustCustomerBalanceRequest{
+		AdjustmentAmount: &delta,
+		Reason:           "Discount credit waiver",
+	})
+	require.NoError(t, err)
+	assert.True(t, custUpdated2.CurrentBalance.Equal(decimal.NewFromFloat(2000.00)))
+
+	// Verify adjustments list
+	adjs, total, err := svcA.ListCustomerAdjustments(ctx, tenantIDA, custA.ID, 1, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	assert.Len(t, adjs, 2)
+	assert.True(t, adjs[0].PreviousBalance.IsZero())
+	assert.True(t, adjs[0].NewBalance.Equal(newBal))
+	assert.True(t, adjs[0].AdjustmentAmount.Equal(newBal))
+	assert.True(t, adjs[1].PreviousBalance.Equal(decimal.NewFromFloat(2500.00)))
+	assert.True(t, adjs[1].NewBalance.Equal(decimal.NewFromFloat(2000.00)))
+	assert.True(t, adjs[1].AdjustmentAmount.Equal(delta))
+
+	// 3. Tenant Isolation Check: Tenant B cannot adjust or view Tenant A's customer
+	_, err = svcB.AdjustCustomerBalance(ctx, tenantIDB, custA.ID, &dto.AdjustCustomerBalanceRequest{
+		NewBalance: &newBal,
+		Reason:     "Cross tenant attempt",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid customer for tenant")
+
+	_, _, err = svcB.ListCustomerAdjustments(ctx, tenantIDB, custA.ID, 1, 10)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "customer not found")
 }

@@ -33,14 +33,15 @@ type TenantUser struct {
 
 // TenantBank represents a bank account owned by the tenant
 type TenantBank struct {
-	ID            uuid.UUID `json:"id"`
-	TenantID      uuid.UUID `json:"tenant_id"`
-	BankName      string    `json:"bank_name"`
-	AccountNumber string    `json:"account_number,omitempty"`
-	IFSC          string    `json:"ifsc,omitempty"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID             uuid.UUID       `json:"id"`
+	TenantID       uuid.UUID       `json:"tenant_id"`
+	BankName       string          `json:"bank_name"`
+	AccountNumber  string          `json:"account_number,omitempty"`
+	IFSC           string          `json:"ifsc,omitempty"`
+	CurrentBalance decimal.Decimal `json:"current_balance"`
+	Status         string          `json:"status"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 // TenantEmployee represents a staff member of the tenant

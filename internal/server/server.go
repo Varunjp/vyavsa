@@ -275,6 +275,9 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		hasher,
 		s.log.Logger,
 	)
+	if s.cfg.App.Location != nil {
+		opsService.SetLocation(s.cfg.App.Location)
+	}
 
 	// Handlers
 	authHandler := authHandlerPkg.NewHandler(authService)
@@ -431,13 +434,16 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 				tenantAdmin.POST("/customers", opsHandler.CreateCustomer)
 				tenantAdmin.GET("/customers", opsHandler.ListCustomers)
 				tenantAdmin.GET("/customers/:id", opsHandler.GetCustomerByID)
+				tenantAdmin.GET("/customers/:id/adjustments", opsHandler.ListCustomerAdjustments)
 				tenantAdmin.PUT("/customers/:id", opsHandler.UpdateCustomer)
+				tenantAdmin.POST("/customers/:id/adjust-balance", opsHandler.AdjustCustomerBalance)
 				tenantAdmin.DELETE("/customers/:id", opsHandler.DeleteCustomer)
 
 				// Banks Management
 				tenantAdmin.POST("/banks", opsHandler.CreateBank)
 				tenantAdmin.GET("/banks", opsHandler.ListBanks)
 				tenantAdmin.GET("/banks/:id", opsHandler.GetBankByID)
+				tenantAdmin.GET("/banks/:id/transactions", opsHandler.ListBankTransactions)
 				tenantAdmin.PUT("/banks/:id", opsHandler.UpdateBank)
 				tenantAdmin.DELETE("/banks/:id", opsHandler.DeleteBank)
 

@@ -30,6 +30,8 @@ type AppConfig struct {
 	Name            string
 	Env             string
 	Port            string
+	Timezone        string
+	Location        *time.Location
 	ShutdownTimeout time.Duration
 }
 
@@ -148,11 +150,22 @@ func Load() (*Config, error) {
 	// Best-effort load from .env file (does not overwrite existing environment variables)
 	_ = godotenv.Load()
 
+	tz := getEnv("APP_TIMEZONE", "Asia/Kolkata")
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.Local
+		if loc == nil {
+			loc = time.UTC
+		}
+	}
+
 	cfg := &Config{
 		App: AppConfig{
 			Name:            getEnv("APP_NAME", "vyavsa-bill-book-api"),
 			Env:             getEnv("APP_ENV", "development"),
 			Port:            getEnv("APP_PORT", "8080"),
+			Timezone:        tz,
+			Location:        loc,
 			ShutdownTimeout: getDurationEnv("APP_SHUTDOWN_TIMEOUT", 10*time.Second),
 		},
 		Database: DatabaseConfig{

@@ -440,6 +440,78 @@ func (h *OperationsHandler) ListCustomers(c *gin.Context) {
 	}, "customers listed")
 }
 
+func (h *OperationsHandler) AdjustCustomerBalance(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	id, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	var req dto.AdjustCustomerBalanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, validationErr(err))
+		return
+	}
+
+	cust, err := h.svc.AdjustCustomerBalance(c.Request.Context(), tenantID, id, &req)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, dto.ToCustomerResponse(cust), "customer balance adjusted successfully")
+}
+
+func (h *OperationsHandler) ListCustomerAdjustments(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	id, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	page, pageSize := parsePagination(c)
+	adjustments, total, err := h.svc.ListCustomerAdjustments(c.Request.Context(), tenantID, id, page, pageSize)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	resp := make([]dto.CustomerBalanceAdjustmentResponse, len(adjustments))
+	for i, a := range adjustments {
+		resp[i] = dto.CustomerBalanceAdjustmentResponse{
+			ID:               a.ID,
+			TenantID:         a.TenantID,
+			CustomerID:       a.CustomerID,
+			CustomerName:     a.CustomerName,
+			PreviousBalance:  a.PreviousBalance,
+			NewBalance:       a.NewBalance,
+			AdjustmentAmount: a.AdjustmentAmount,
+			Reason:           a.Reason,
+			CreatedAt:        a.CreatedAt,
+		}
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+	response.Paginated(c, resp, response.Pagination{
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: total,
+		TotalPages: totalPages,
+	}, "customer adjustments listed")
+}
+
 // ==========================================
 // 4. Bank Handlers (Admin only)
 // ==========================================
@@ -566,6 +638,50 @@ func (h *OperationsHandler) ListBanks(c *gin.Context) {
 		TotalItems: total,
 		TotalPages: totalPages,
 	}, "bank accounts listed")
+}
+
+func (h *OperationsHandler) ListBankTransactions(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	id, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	page, pageSize := parsePagination(c)
+	txs, total, err := h.svc.ListBankTransactions(c.Request.Context(), tenantID, id, page, pageSize)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	resp := make([]dto.BankTransactionResponse, len(txs))
+	for i, t := range txs {
+		resp[i] = dto.BankTransactionResponse{
+			ID:              t.ID,
+			TenantID:        t.TenantID,
+			BankID:          t.BankID,
+			Amount:          t.Amount,
+			TransactionType: t.TransactionType,
+			Reason:          t.Reason,
+			SaleType:        t.SaleType,
+			SaleID:          t.SaleID,
+			CreatedAt:       t.CreatedAt,
+		}
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+	response.Paginated(c, resp, response.Pagination{
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: total,
+		TotalPages: totalPages,
+	}, "bank transactions listed")
 }
 
 // ==========================================

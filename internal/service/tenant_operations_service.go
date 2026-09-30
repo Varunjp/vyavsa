@@ -31,6 +31,7 @@ type TenantOperationsService struct {
 	summaryRepo   repository.TenantFinancialSummaryRepository
 	transactor    repository.Transactor
 	hasher        auth.PasswordHasher
+	location      *time.Location
 	logger        *slog.Logger
 }
 
@@ -70,9 +71,28 @@ func NewTenantOperationsService(
 	}
 }
 
-// todayString returns today's date formatted as YYYY-MM-DD in UTC
+var defaultBusinessLocation *time.Location
+
+// SetDefaultBusinessLocation sets the package-level business timezone location
+func SetDefaultBusinessLocation(loc *time.Location) {
+	defaultBusinessLocation = loc
+}
+
+func (s *TenantOperationsService) SetLocation(loc *time.Location) {
+	s.location = loc
+	SetDefaultBusinessLocation(loc)
+}
+
+// todayString returns today's date formatted as YYYY-MM-DD in the configured business timezone
 func todayString() string {
-	return time.Now().UTC().Format("2006-01-02")
+	loc := defaultBusinessLocation
+	if loc == nil {
+		loc = time.Local
+		if loc == nil {
+			loc = time.UTC
+		}
+	}
+	return time.Now().In(loc).Format("2006-01-02")
 }
 
 // checkCurrentDayRestriction ensures Tenant Users can only record or mutate today's transactions
@@ -342,6 +362,76 @@ func (s *TenantOperationsService) ListCustomers(ctx context.Context, tenantID uu
 	return s.custRepo.List(ctx, tenantID, page, pageSize, search, status)
 }
 
+func (s *TenantOperationsService) AdjustCustomerBalance(ctx context.Context, tenantID, customerID uuid.UUID, req *dto.AdjustCustomerBalanceRequest) (*domain.TenantCustomer, error) {
+	if req.Reason == "" {
+		return nil, validationErr("reason", "reason for balance adjustment is required")
+	}
+	if req.NewBalance == nil && req.AdjustmentAmount == nil {
+		return nil, validationErr("balance", "either new_balance or adjustment_amount must be provided")
+	}
+
+	cust, err := s.custRepo.GetByID(ctx, tenantID, customerID)
+	if err != nil {
+		return nil, appErrors.NewBadRequest("invalid customer for tenant")
+	}
+
+	prevBalance := cust.CurrentBalance
+	var newBalance, delta decimal.Decimal
+
+	if req.NewBalance != nil {
+		newBalance = *req.NewBalance
+		delta = newBalance.Sub(prevBalance)
+	} else {
+		delta = *req.AdjustmentAmount
+		newBalance = prevBalance.Add(delta)
+	}
+
+	adjustment := &domain.CustomerBalanceAdjustment{
+		TenantID:         tenantID,
+		CustomerID:       customerID,
+		CustomerName:     cust.CustomerName,
+		PreviousBalance:  prevBalance,
+		NewBalance:       newBalance,
+		AdjustmentAmount: delta,
+		Reason:           req.Reason,
+	}
+
+	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.custRepo.SetBalance(txCtx, tenantID, customerID, newBalance); err != nil {
+			return err
+		}
+
+		if err := s.custRepo.RecordAdjustment(txCtx, adjustment); err != nil {
+			return err
+		}
+
+		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+		if err == nil {
+			summary.TotalReceivable = summary.TotalReceivable.Add(delta)
+			if summary.TotalReceivable.IsNegative() {
+				summary.TotalReceivable = decimal.Zero
+			}
+			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+				return fmt.Errorf("failed to update financial summary for customer balance adjustment: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	cust.CurrentBalance = newBalance
+	return cust, nil
+}
+
+func (s *TenantOperationsService) ListCustomerAdjustments(ctx context.Context, tenantID, customerID uuid.UUID, page, pageSize int) ([]domain.CustomerBalanceAdjustment, int64, error) {
+	if _, err := s.custRepo.GetByID(ctx, tenantID, customerID); err != nil {
+		return nil, 0, err
+	}
+	return s.custRepo.ListAdjustments(ctx, tenantID, customerID, page, pageSize)
+}
+
 // ==========================================
 // 4. Bank Management (Admin only)
 // ==========================================
@@ -352,15 +442,46 @@ func (s *TenantOperationsService) CreateBank(ctx context.Context, tenantID uuid.
 		status = "active"
 	}
 
-	bank := &domain.TenantBank{
-		TenantID:      tenantID,
-		BankName:      req.BankName,
-		AccountNumber: req.AccountNumber,
-		IFSC:          req.IFSC,
-		Status:        status,
+	currentBal := req.OpeningBalance
+	if currentBal.IsNegative() {
+		currentBal = decimal.Zero
 	}
 
-	if err := s.bankRepo.Create(ctx, bank); err != nil {
+	bank := &domain.TenantBank{
+		TenantID:       tenantID,
+		BankName:       req.BankName,
+		AccountNumber:  req.AccountNumber,
+		IFSC:           req.IFSC,
+		CurrentBalance: currentBal,
+		Status:         status,
+	}
+
+	err := s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.bankRepo.Create(txCtx, bank); err != nil {
+			return err
+		}
+		if currentBal.GreaterThan(decimal.Zero) {
+			tx := &domain.BankTransaction{
+				TenantID:        tenantID,
+				BankID:          bank.ID,
+				Amount:          currentBal,
+				TransactionType: "credit",
+				Reason:          "Opening Balance",
+			}
+			if err := s.bankRepo.CreateTransaction(txCtx, tx); err != nil {
+				return err
+			}
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil {
+				summary.BankBalance = summary.BankBalance.Add(currentBal)
+				if err := s.summaryRepo.Update(txCtx, summary); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -405,6 +526,13 @@ func (s *TenantOperationsService) ListBanks(ctx context.Context, tenantID uuid.U
 	return s.bankRepo.List(ctx, tenantID, page, pageSize, search, status)
 }
 
+func (s *TenantOperationsService) ListBankTransactions(ctx context.Context, tenantID, bankID uuid.UUID, page, pageSize int) ([]domain.BankTransaction, int64, error) {
+	if _, err := s.bankRepo.GetByID(ctx, tenantID, bankID); err != nil {
+		return nil, 0, err
+	}
+	return s.bankRepo.ListTransactions(ctx, tenantID, bankID, page, pageSize)
+}
+
 // ==========================================
 // 5. Line Sale Operations
 // ==========================================
@@ -420,59 +548,90 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 		return nil, appErrors.NewBadRequest("invalid customer for tenant")
 	}
 
-	balance := req.TotalAmount.Sub(req.TotalCashIn)
-	if balance.IsNegative() {
-		balance = decimal.Zero
+	var cashReceived, bankReceived decimal.Decimal
+	var bankID *uuid.UUID
+	var bankName string
+
+	if len(req.Payments) > 0 {
+		for _, p := range req.Payments {
+			if p.Amount.IsNegative() || p.Amount.IsZero() {
+				return nil, validationErr("payment_amount", "payment amount must be greater than zero")
+			}
+			if p.PaymentMethod == "cash" {
+				cashReceived = cashReceived.Add(p.Amount)
+			} else if p.PaymentMethod == "bank" || p.PaymentMethod == "upi" || p.PaymentMethod == "online" {
+				bankReceived = bankReceived.Add(p.Amount)
+				if p.BankID == nil || *p.BankID == uuid.Nil {
+					return nil, validationErr("bank_id", "bank account must be selected for bank payments")
+				}
+				bankID = p.BankID
+			}
+		}
+	} else {
+		if req.TotalCashIn.GreaterThan(decimal.Zero) {
+			cashReceived = req.TotalCashIn
+		}
+		if req.BankAmount.GreaterThan(decimal.Zero) {
+			bankReceived = req.BankAmount
+			if req.BankID == nil || *req.BankID == uuid.Nil {
+				return nil, validationErr("bank_id", "bank account must be selected when bank amount is specified")
+			}
+			bankID = req.BankID
+		}
+	}
+
+	collectedAmount := cashReceived.Add(bankReceived)
+	if collectedAmount.GreaterThan(req.TotalAmount) {
+		return nil, validationErr("collected_amount", "collected amount cannot exceed sale total")
+	}
+
+	due := req.TotalAmount.Sub(collectedAmount)
+	if due.IsNegative() {
+		due = decimal.Zero
+	}
+
+	if bankReceived.GreaterThan(decimal.Zero) {
+		if bankID == nil || *bankID == uuid.Nil {
+			return nil, validationErr("bank_id", "bank account must be selected for bank payment")
+		}
+		bank, err := s.bankRepo.GetByID(ctx, tenantID, *bankID)
+		if err != nil {
+			return nil, appErrors.NewBadRequest("invalid bank account specified for line sale payment")
+		}
+		bankName = bank.BankName
 	}
 
 	sale := &domain.LineSale{
-		TenantID:     tenantID,
-		CustomerID:   cust.ID,
-		CustomerName: cust.CustomerName,
-		Route:        req.Route,
-		Salesman:     req.Salesman,
-		Note:         req.Note,
-		TotalAmount:  req.TotalAmount,
-		TotalCashIn:  req.TotalCashIn,
-		Balance:      balance,
+		TenantID:        tenantID,
+		CustomerID:      cust.ID,
+		CustomerName:    cust.CustomerName,
+		Route:           req.Route,
+		Salesman:        req.Salesman,
+		Note:            req.Note,
+		TotalAmount:     req.TotalAmount,
+		TotalCashIn:     cashReceived,
+		BankAmount:      bankReceived,
+		CollectedAmount: collectedAmount,
+		Balance:         due,
 	}
 
-	// Build payment list
-	payments := make([]domain.LineSalePayment, len(req.Payments))
-	var cashPaid, bankPaid decimal.Decimal
-	for i, p := range req.Payments {
-		if p.Amount.IsNegative() || p.Amount.IsZero() {
-			return nil, validationErr("payment_amount", "payment amount must be greater than zero")
-		}
-		if p.PaymentMethod == "cash" {
-			cashPaid = cashPaid.Add(p.Amount)
-		} else {
-			bankPaid = bankPaid.Add(p.Amount)
-		}
-		if p.BankID != nil && *p.BankID != uuid.Nil {
-			bank, err := s.bankRepo.GetByID(ctx, tenantID, *p.BankID)
-			if err != nil {
-				return nil, appErrors.NewBadRequest("invalid bank account specified for line sale payment")
-			}
-			p.BankName = bank.BankName
-		}
-		payments[i] = domain.LineSalePayment{
-			TenantID:      tenantID,
-			PaymentMethod: p.PaymentMethod,
-			BankID:        p.BankID,
-			BankName:      p.BankName,
-			Amount:        p.Amount,
-			Note:          p.Note,
-		}
-	}
-
-	// If no explicit payment breakdown provided but TotalCashIn > 0, record as cash payment
-	if len(payments) == 0 && req.TotalCashIn.GreaterThan(decimal.Zero) {
-		cashPaid = req.TotalCashIn
+	payments := make([]domain.LineSalePayment, 0, 2)
+	if cashReceived.GreaterThan(decimal.Zero) {
 		payments = append(payments, domain.LineSalePayment{
 			TenantID:      tenantID,
 			PaymentMethod: "cash",
-			Amount:        req.TotalCashIn,
+			Amount:        cashReceived,
+			Note:          "Cash payment",
+		})
+	}
+	if bankReceived.GreaterThan(decimal.Zero) {
+		payments = append(payments, domain.LineSalePayment{
+			TenantID:      tenantID,
+			PaymentMethod: "bank",
+			BankID:        bankID,
+			BankName:      bankName,
+			Amount:        bankReceived,
+			Note:          "Bank payment",
 		})
 	}
 
@@ -481,9 +640,27 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 			return err
 		}
 
+		if bankReceived.GreaterThan(decimal.Zero) && bankID != nil {
+			if err := s.bankRepo.AdjustBalance(txCtx, tenantID, *bankID, bankReceived); err != nil {
+				return fmt.Errorf("failed to adjust bank balance: %w", err)
+			}
+			tx := &domain.BankTransaction{
+				TenantID:        tenantID,
+				BankID:          *bankID,
+				Amount:          bankReceived,
+				TransactionType: "credit",
+				Reason:          "Line Sale: " + cust.CustomerName,
+				SaleType:        "line_sale",
+				SaleID:          &sale.ID,
+			}
+			if err := s.bankRepo.CreateTransaction(txCtx, tx); err != nil {
+				return fmt.Errorf("failed to record bank transaction: %w", err)
+			}
+		}
+
 		// Adjust customer current balance by remaining credit balance
-		if balance.GreaterThan(decimal.Zero) {
-			if err := s.custRepo.AdjustBalance(txCtx, tenantID, cust.ID, balance); err != nil {
+		if due.GreaterThan(decimal.Zero) {
+			if err := s.custRepo.AdjustBalance(txCtx, tenantID, cust.ID, due); err != nil {
 				return err
 			}
 		}
@@ -491,9 +668,9 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 		// Update financial summary
 		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
 		if err == nil {
-			summary.CashBalance = summary.CashBalance.Add(cashPaid)
-			summary.BankBalance = summary.BankBalance.Add(bankPaid)
-			summary.TotalReceivable = summary.TotalReceivable.Add(balance)
+			summary.CashBalance = summary.CashBalance.Add(cashReceived)
+			summary.BankBalance = summary.BankBalance.Add(bankReceived)
+			summary.TotalReceivable = summary.TotalReceivable.Add(due)
 			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
 				return fmt.Errorf("failed to update financial summary for line sale: %w", err)
 			}
@@ -596,38 +773,93 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 		return nil, validationErr("total_amount", "total amount cannot be negative")
 	}
 
-	sale := &domain.CounterSale{
-		TenantID:      tenantID,
-		Item:          req.Item,
-		Price:         req.Price,
-		TotalAmount:   req.TotalAmount,
-		PaymentMethod: req.PaymentMethod,
-		Cash:          req.Cash,
-		Account:       req.Account,
+	var cashReceived, bankReceived decimal.Decimal
+	var bankID *uuid.UUID
+	var bankName string
+
+	if len(req.Payments) > 0 {
+		for _, p := range req.Payments {
+			if p.Amount.IsNegative() || p.Amount.IsZero() {
+				return nil, validationErr("payment_amount", "payment amount must be greater than zero")
+			}
+			if p.PaymentMethod == "cash" {
+				cashReceived = cashReceived.Add(p.Amount)
+			} else if p.PaymentMethod == "bank" || p.PaymentMethod == "online" || p.PaymentMethod == "upi" {
+				bankReceived = bankReceived.Add(p.Amount)
+				if p.BankID == nil || *p.BankID == uuid.Nil {
+					return nil, validationErr("bank_id", "bank account must be selected for bank payments")
+				}
+				bankID = p.BankID
+			}
+		}
+	} else {
+		if req.Cash.GreaterThan(decimal.Zero) {
+			cashReceived = req.Cash
+		}
+		if req.BankAmount.GreaterThan(decimal.Zero) {
+			bankReceived = req.BankAmount
+			if req.BankID == nil || *req.BankID == uuid.Nil {
+				return nil, validationErr("bank_id", "bank account must be selected when bank amount is specified")
+			}
+			bankID = req.BankID
+		} else if (req.PaymentMethod == "bank" || req.PaymentMethod == "online" || req.PaymentMethod == "upi") && req.Account.GreaterThan(decimal.Zero) && req.BankID != nil {
+			bankReceived = req.Account
+			bankID = req.BankID
+		}
 	}
 
-	payments := make([]domain.CounterSalePayment, len(req.Payments))
-	var bankPaid decimal.Decimal
-	for i, p := range req.Payments {
-		if p.Amount.IsNegative() || p.Amount.IsZero() {
-			return nil, validationErr("payment_amount", "payment amount must be greater than zero")
+	collectedAmount := cashReceived.Add(bankReceived)
+	if collectedAmount.GreaterThan(req.TotalAmount) {
+		return nil, validationErr("collected_amount", "collected amount cannot exceed sale total")
+	}
+
+	due := req.TotalAmount.Sub(collectedAmount)
+	if due.IsNegative() {
+		due = decimal.Zero
+	}
+
+	if bankReceived.GreaterThan(decimal.Zero) {
+		if bankID == nil || *bankID == uuid.Nil {
+			return nil, validationErr("bank_id", "bank account must be selected for bank payment")
 		}
-		bankPaid = bankPaid.Add(p.Amount)
-		if p.BankID != nil && *p.BankID != uuid.Nil {
-			bank, err := s.bankRepo.GetByID(ctx, tenantID, *p.BankID)
-			if err != nil {
-				return nil, appErrors.NewBadRequest("invalid bank account specified for counter sale")
-			}
-			p.BankName = bank.BankName
+		bank, err := s.bankRepo.GetByID(ctx, tenantID, *bankID)
+		if err != nil {
+			return nil, appErrors.NewBadRequest("invalid bank account specified for counter sale")
 		}
-		payments[i] = domain.CounterSalePayment{
+		bankName = bank.BankName
+	}
+
+	sale := &domain.CounterSale{
+		TenantID:        tenantID,
+		Item:            req.Item,
+		Price:           req.Price,
+		TotalAmount:     req.TotalAmount,
+		PaymentMethod:   req.PaymentMethod,
+		Cash:            cashReceived,
+		BankAmount:      bankReceived,
+		BankID:          bankID,
+		CollectedAmount: collectedAmount,
+		Account:         due,
+	}
+
+	payments := make([]domain.CounterSalePayment, 0, 2)
+	if cashReceived.GreaterThan(decimal.Zero) {
+		payments = append(payments, domain.CounterSalePayment{
 			TenantID:      tenantID,
-			PaymentMethod: p.PaymentMethod,
-			BankID:        p.BankID,
-			BankName:      p.BankName,
-			Amount:        p.Amount,
-			Note:          p.Note,
-		}
+			PaymentMethod: "cash",
+			Amount:        cashReceived,
+			Note:          "Cash payment",
+		})
+	}
+	if bankReceived.GreaterThan(decimal.Zero) {
+		payments = append(payments, domain.CounterSalePayment{
+			TenantID:      tenantID,
+			PaymentMethod: "bank",
+			BankID:        bankID,
+			BankName:      bankName,
+			Amount:        bankReceived,
+			Note:          "Bank payment",
+		})
 	}
 
 	err := s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -635,12 +867,30 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 			return err
 		}
 
+		if bankReceived.GreaterThan(decimal.Zero) && bankID != nil {
+			if err := s.bankRepo.AdjustBalance(txCtx, tenantID, *bankID, bankReceived); err != nil {
+				return fmt.Errorf("failed to adjust bank balance: %w", err)
+			}
+			tx := &domain.BankTransaction{
+				TenantID:        tenantID,
+				BankID:          *bankID,
+				Amount:          bankReceived,
+				TransactionType: "credit",
+				Reason:          "Counter Sale: " + sale.Item,
+				SaleType:        "counter_sale",
+				SaleID:          &sale.ID,
+			}
+			if err := s.bankRepo.CreateTransaction(txCtx, tx); err != nil {
+				return fmt.Errorf("failed to record bank transaction: %w", err)
+			}
+		}
+
 		// Update financial summary
 		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
 		if err == nil {
-			summary.CashBalance = summary.CashBalance.Add(req.Cash)
-			summary.BankBalance = summary.BankBalance.Add(bankPaid)
-			summary.TotalReceivable = summary.TotalReceivable.Add(req.Account)
+			summary.CashBalance = summary.CashBalance.Add(cashReceived)
+			summary.BankBalance = summary.BankBalance.Add(bankReceived)
+			summary.TotalReceivable = summary.TotalReceivable.Add(due)
 			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
 				return fmt.Errorf("failed to update financial summary for counter sale: %w", err)
 			}
@@ -1024,7 +1274,7 @@ func (s *TenantOperationsService) ListExpenses(ctx context.Context, tenantID uui
 // ==========================================
 
 func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID uuid.UUID, role string, req *dto.RecordAttendanceRequest) (*domain.Attendance, error) {
-	_, err := s.empRepo.GetByID(ctx, tenantID, req.EmployeeID)
+	emp, err := s.empRepo.GetByID(ctx, tenantID, req.EmployeeID)
 	if err != nil {
 		return nil, appErrors.NewBadRequest("invalid employee for tenant")
 	}
@@ -1038,13 +1288,39 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 		return nil, err
 	}
 
+	// Fetch existing record to calculate salary and advance deltas, ensuring idempotent updates
+	existing, err := s.attRepo.GetByEmployeeAndDate(ctx, tenantID, req.EmployeeID, attDate)
+	if err != nil {
+		return nil, err
+	}
+
+	var oldDailySalary decimal.Decimal
+	var oldAdvance decimal.Decimal
+	if existing != nil {
+		oldDailySalary = existing.DailySalary
+		oldAdvance = existing.Advance
+	}
+
+	var newDailySalary decimal.Decimal
+	if req.Status == "present" {
+		newDailySalary = emp.Salary
+	} else if req.Status == "half_day" {
+		newDailySalary = emp.Salary.Div(decimal.NewFromInt(2))
+	} else {
+		newDailySalary = decimal.Zero // absent, leave
+	}
+
+	salaryDelta := newDailySalary.Sub(oldDailySalary)
+	advanceDelta := req.Advance.Sub(oldAdvance)
+
 	att := &domain.Attendance{
-		TenantID:   tenantID,
-		EmployeeID: req.EmployeeID,
-		Date:       attDate,
-		Status:     req.Status,
-		OT:         req.OT,
-		Advance:    req.Advance,
+		TenantID:    tenantID,
+		EmployeeID:  req.EmployeeID,
+		Date:        attDate,
+		Status:      req.Status,
+		DailySalary: newDailySalary,
+		OT:          req.OT,
+		Advance:     req.Advance,
 	}
 
 	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -1052,17 +1328,24 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 			return err
 		}
 
-		// If advance recorded with attendance, deduct cash and update daily stats
-		if req.Advance.GreaterThan(decimal.Zero) {
+		// Credit/debit employee salary balance by salary delta (avoids crediting absent, handles status change/retry idempotently)
+		if !salaryDelta.IsZero() {
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, salaryDelta); err != nil {
+				return fmt.Errorf("failed to adjust employee salary balance for attendance: %w", err)
+			}
+		}
+
+		// If advance delta changed, adjust cash balance and employee salary balance
+		if !advanceDelta.IsZero() {
 			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
 			if err == nil {
-				summary.CashBalance = summary.CashBalance.Sub(req.Advance)
+				summary.CashBalance = summary.CashBalance.Sub(advanceDelta)
 				if err := s.summaryRepo.Update(txCtx, summary); err != nil {
 					return fmt.Errorf("failed to update financial summary for attendance advance: %w", err)
 				}
 			}
-			// Deduct from employee salary balance (advance recovery)
-			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, req.Advance.Neg()); err != nil {
+			// Deduct advance from employee salary balance
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, advanceDelta.Neg()); err != nil {
 				return fmt.Errorf("failed to adjust employee salary balance for advance: %w", err)
 			}
 		}
@@ -1355,18 +1638,102 @@ func (s *TenantOperationsService) ListSalaryPayments(ctx context.Context, tenant
 	return s.salaryRepo.ListPayments(ctx, tenantID, employeeID, page, pageSize)
 }
 
+func hasStatsActivity(s *domain.TenantDailyStats) bool {
+	if s == nil {
+		return false
+	}
+	return s.TotalSales.GreaterThan(decimal.Zero) ||
+		s.PurchaseAmount.GreaterThan(decimal.Zero) ||
+		s.ExpenseAmount.GreaterThan(decimal.Zero) ||
+		s.AttendancePresent > 0 ||
+		s.AttendanceAbsent > 0 ||
+		s.AdvanceAmount.GreaterThan(decimal.Zero) ||
+		s.WagesAmount.GreaterThan(decimal.Zero) ||
+		s.AmountReceived.GreaterThan(decimal.Zero) ||
+		s.AmountPaid.GreaterThan(decimal.Zero)
+}
+
+func calculateDaysOld(requestedDate, dataDate string) int {
+	if requestedDate == dataDate || requestedDate == "" || dataDate == "" {
+		return 0
+	}
+	reqTime, err1 := time.Parse("2006-01-02", requestedDate)
+	dateTime, err2 := time.Parse("2006-01-02", dataDate)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	days := int(reqTime.Sub(dateTime).Hours() / 24)
+	if days < 1 {
+		days = 1
+	}
+	return days
+}
+
 // ==========================================
 // 11. Financial Summary & Daily Statistics
 // ==========================================
 
 func (s *TenantOperationsService) GetDailyStats(ctx context.Context, tenantID uuid.UUID, date string) (*domain.TenantDailyStats, error) {
-	if date == "" {
-		date = todayString()
+	if s.statsRepo == nil {
+		return &domain.TenantDailyStats{TenantID: tenantID}, nil
 	}
-	return s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, date)
+	today := todayString()
+	isExplicitHistorical := date != "" && date != today
+
+	if isExplicitHistorical {
+		stats, err := s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, date)
+		if err != nil {
+			return nil, err
+		}
+		if stats != nil {
+			stats.RequestedDate = date
+			stats.DataDate = date
+			isCur := false
+			stats.IsCurrent = &isCur
+			stats.DaysOld = calculateDaysOld(today, date)
+		}
+		return stats, nil
+	}
+
+	// For current business day:
+	todayStats, err := s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, today)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasStatsActivity(todayStats) {
+		todayStats.RequestedDate = today
+		todayStats.DataDate = today
+		isCur := true
+		todayStats.IsCurrent = &isCur
+		todayStats.DaysOld = 0
+		return todayStats, nil
+	}
+
+	// If no activity today, look for latest available previous-day data
+	prevStats, err := s.statsRepo.GetLatestAvailable(ctx, tenantID, today)
+	if err == nil && prevStats != nil && prevStats.Date != "" {
+		prevStats.RequestedDate = today
+		prevStats.DataDate = prevStats.Date
+		isCur := false
+		prevStats.IsCurrent = &isCur
+		prevStats.DaysOld = calculateDaysOld(today, prevStats.Date)
+		return prevStats, nil
+	}
+
+	// Fallback to today's (zeroed) stats if no prior data exists
+	todayStats.RequestedDate = today
+	todayStats.DataDate = today
+	isCur := true
+	todayStats.IsCurrent = &isCur
+	todayStats.DaysOld = 0
+	return todayStats, nil
 }
 
 func (s *TenantOperationsService) GetFinancialMetrics(ctx context.Context, tenantID uuid.UUID) (*domain.FinancialMetrics, error) {
+	if s.summaryRepo == nil {
+		return &domain.FinancialMetrics{}, nil
+	}
 	summary, err := s.summaryRepo.GetByTenantID(ctx, tenantID)
 	if err != nil {
 		if appErrors.IsNotFound(err) {
@@ -1383,28 +1750,86 @@ func (s *TenantOperationsService) GetFinancialMetrics(ctx context.Context, tenan
 	}
 
 	// Calculate pending salaries directly from employee_salary table
-	pendingSalaries, _, _ := s.salaryRepo.ListPending(ctx, tenantID, 1, 500)
 	var totalPendingSalary decimal.Decimal
-	for _, ps := range pendingSalaries {
-		if ps.Balance.GreaterThan(decimal.Zero) {
-			totalPendingSalary = totalPendingSalary.Add(ps.Balance)
+	if s.salaryRepo != nil {
+		pendingSalaries, _, _ := s.salaryRepo.ListPending(ctx, tenantID, 1, 500)
+		for _, ps := range pendingSalaries {
+			if ps.Balance.GreaterThan(decimal.Zero) {
+				totalPendingSalary = totalPendingSalary.Add(ps.Balance)
+			}
 		}
 	}
 
-	// Today's synced stats
-	todayStats, _ := s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, todayString())
+	today := todayString()
+	var todayStats *domain.TenantDailyStats
+	if s.statsRepo != nil {
+		todayStats, _ = s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, today)
+	}
+
+	requestedDate := today
+	dataDate := today
+	isCurrent := true
+	daysOld := 0
+	activeStats := todayStats
+
+	if hasStatsActivity(todayStats) {
+		if todayStats != nil {
+			todayStats.RequestedDate = today
+			todayStats.DataDate = today
+			isCur := true
+			todayStats.IsCurrent = &isCur
+			todayStats.DaysOld = 0
+		}
+	} else if s.statsRepo != nil {
+		prevStats, err := s.statsRepo.GetLatestAvailable(ctx, tenantID, today)
+		if err == nil && prevStats != nil && prevStats.Date != "" {
+			activeStats = prevStats
+			dataDate = prevStats.Date
+			isCurrent = false
+			daysOld = calculateDaysOld(today, prevStats.Date)
+			isCur := false
+			prevStats.RequestedDate = today
+			prevStats.DataDate = prevStats.Date
+			prevStats.IsCurrent = &isCur
+			prevStats.DaysOld = daysOld
+		} else if todayStats != nil {
+			todayStats.RequestedDate = today
+			todayStats.DataDate = today
+			isCur := true
+			todayStats.IsCurrent = &isCur
+			todayStats.DaysOld = 0
+		}
+	}
 
 	// Net dues is total payable on purchases + pending employee salaries
 	netDues := summary.TotalPayable.Add(totalPendingSalary)
 
+	// Fetch individual bank balances for dashboard/reporting
+	var activeBanks []domain.TenantBank
+	if s.bankRepo != nil {
+		activeBanks, _, _ = s.bankRepo.List(ctx, tenantID, 1, 100, "", "active")
+	}
+
+	// Calculate today's earned employee salary from attendance
+	var todaySalaryEarned decimal.Decimal
+	if s.attRepo != nil {
+		todaySalaryEarned, _ = s.attRepo.GetTodaySalaryEarned(ctx, tenantID, today)
+	}
+
 	return &domain.FinancialMetrics{
-		CashBalance:     summary.CashBalance,
-		BankBalance:     summary.BankBalance,
-		TotalReceivable: summary.TotalReceivable,
-		TotalPayable:    summary.TotalPayable,
-		NetDues:         netDues,
-		NetReceivables:  summary.TotalReceivable,
-		PendingSalary:   totalPendingSalary,
-		TodayStats:      todayStats,
+		CashBalance:         summary.CashBalance,
+		BankBalance:         summary.BankBalance,
+		TotalReceivable:     summary.TotalReceivable,
+		TotalPayable:        summary.TotalPayable,
+		NetDues:             netDues,
+		NetReceivables:      summary.TotalReceivable,
+		PendingSalary:       totalPendingSalary,
+		TodayEmployeeSalary: todaySalaryEarned,
+		BankBalances:        activeBanks,
+		TodayStats:          activeStats,
+		RequestedDate:       requestedDate,
+		DataDate:            dataDate,
+		IsCurrent:           isCurrent,
+		DaysOld:             daysOld,
 	}, nil
 }

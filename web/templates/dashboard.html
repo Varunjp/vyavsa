@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard — Vyavsa Business Management</title>
+  <title>Tenant Operations — Vyavsa Business Management</title>
   <meta name="description" content="Vyavsa small business financial management, staff bookkeeping, and real-time operations.">
   <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -34,197 +34,91 @@
   </script>
 
   <style>
-    /* Dashboard Custom Styles */
-    .dashboard-header {
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-bottom: 1px solid var(--color-border);
-      padding: 0.75rem 0;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    .dash-nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .dash-left-group {
-      display: flex;
-      align-items: center;
-      gap: 1.5rem;
-    }
-    .system-status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.375rem;
-      padding: 0.25rem 0.625rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--color-success-text);
-      background: var(--color-success-bg);
-      border: 1px solid var(--color-success-border);
-      border-radius: var(--radius-full);
-    }
-    .status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--color-success);
-    }
-    .dash-user-meta {
-      display: flex;
-      align-items: center;
-      gap: 0.875rem;
-    }
-    .user-pill {
-      display: flex;
-      align-items: center;
-      gap: 0.625rem;
-      background: var(--color-surface);
-      border: 1px solid var(--color-border);
-      padding: 0.3125rem 0.75rem 0.3125rem 0.375rem;
-      border-radius: var(--radius-full);
-      font-size: 0.8125rem;
-      font-weight: 600;
-      color: var(--color-text-main);
-      box-shadow: var(--shadow-xs);
-    }
-    .user-avatar-badge {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-      color: #ffffff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.8125rem;
-      font-weight: 700;
-      box-shadow: 0 2px 4px var(--color-primary-glow);
-    }
-
-    /* Sub-nav Tab Navigation */
-    .tab-nav-bar {
-      background: #ffffff;
-      border-bottom: 1px solid var(--color-border);
-      padding: 0.5rem 0;
-      position: sticky;
-      top: 57px;
-      z-index: 90;
-    }
-    .tab-nav-scroll {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      overflow-x: auto;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-      padding-bottom: 2px;
-    }
-    .tab-nav-scroll::-webkit-scrollbar {
-      display: none;
-    }
-    .nav-tab-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 0.875rem;
-      border-radius: var(--radius-sm);
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--color-text-muted);
-      font-size: 0.8125rem;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all var(--transition-fast);
-      user-select: none;
-    }
-    .nav-tab-btn:hover {
-      background: var(--color-surface-hover);
-      color: var(--color-text-main);
-    }
-    .nav-tab-btn.active {
-      background: var(--color-primary-subtle);
-      color: var(--color-primary);
-      border-color: var(--color-primary-border);
-      font-weight: 700;
-    }
-    .nav-tab-badge {
-      padding: 0.125rem 0.375rem;
-      border-radius: var(--radius-full);
-      font-size: 0.6875rem;
-      background: rgba(79, 70, 229, 0.1);
-      color: var(--color-primary);
-    }
-
-    .dash-body {
-      flex: 1;
-      padding: 2rem 0 4rem;
-    }
-    .welcome-banner {
-      background: linear-gradient(135deg, #0b0f19 0%, #1e1b4b 50%, #312e81 100%);
-      border-radius: var(--radius-lg);
-      padding: 2.25rem 2rem;
-      color: #ffffff;
+    /* Inline helper enhancements */
+    .kpi-grid-5 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.25rem;
       margin-bottom: 2rem;
-      box-shadow: var(--shadow-md);
-      position: relative;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.1);
     }
-    .welcome-banner::after {
-      content: "";
-      position: absolute;
-      top: -50%;
-      right: -10%;
-      width: 300px;
-      height: 300px;
-      background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, transparent 70%);
-      pointer-events: none;
+    .kpi-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
     }
-    .welcome-title {
-      font-size: 1.75rem;
-      font-weight: 800;
-      letter-spacing: -0.025em;
-      margin-bottom: 0.375rem;
-    }
-    .welcome-desc {
-      font-size: 0.9375rem;
-      color: #c7d2fe;
-      max-width: 650px;
-      line-height: 1.5;
-    }
-
-    /* KPI Cards */
-    .kpi-grid {
+    .kpi-grid-4 {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 1.25rem;
       margin-bottom: 2rem;
     }
+    .payment-calc-box {
+      background: var(--color-surface-hover);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 0.875rem 1rem;
+      margin: 1rem 0;
+    }
+    .bank-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .bank-balance-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 1rem 1.25rem;
+      box-shadow: var(--shadow-xs);
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      transition: all var(--transition-fast);
+    }
+    .bank-balance-card:hover {
+      box-shadow: var(--shadow-sm);
+      border-color: #cbd5e1;
+    }
+    .bank-card-title {
+      font-size: 0.875rem;
+      font-weight: 700;
+      color: var(--color-text-main);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .bank-card-acc {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+    }
+    .bank-card-balance {
+      font-size: 1.375rem;
+      font-weight: 800;
+      color: var(--color-primary);
+      margin-top: 0.25rem;
+    }
     .kpi-card {
       background: var(--color-surface);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-md);
-      padding: 1.375rem 1.25rem;
-      box-shadow: var(--shadow-sm);
-      transition: all var(--transition-normal);
+      padding: 1.25rem;
+      box-shadow: var(--shadow-xs);
+      transition: all var(--transition-fast);
       display: flex;
       flex-direction: column;
     }
     .kpi-card:hover {
-      box-shadow: var(--shadow-md);
-      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
       border-color: #cbd5e1;
     }
     .kpi-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 0.875rem;
+      margin-bottom: 0.75rem;
     }
     .kpi-label {
       font-size: 0.75rem;
@@ -234,16 +128,17 @@
       color: var(--color-text-muted);
     }
     .kpi-icon-bubble {
-      width: 36px;
-      height: 36px;
+      width: 34px;
+      height: 34px;
       border-radius: var(--radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;
+      font-size: 1rem;
     }
     .kpi-val {
       font-family: var(--font-sans);
-      font-size: 1.65rem;
+      font-size: 1.625rem;
       font-weight: 800;
       color: var(--color-text-main);
       letter-spacing: -0.025em;
@@ -253,7 +148,7 @@
       display: inline-flex;
       align-items: center;
       gap: 0.25rem;
-      margin-top: 0.5rem;
+      margin-top: 0.375rem;
       font-size: 0.75rem;
       font-weight: 600;
       color: var(--color-text-muted);
@@ -264,12 +159,12 @@
       background: var(--color-surface);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-md);
-      box-shadow: var(--shadow-sm);
+      box-shadow: var(--shadow-xs);
       overflow: hidden;
       margin-bottom: 2rem;
     }
     .panel-header {
-      padding: 1.25rem 1.5rem;
+      padding: 1.125rem 1.5rem;
       border-bottom: 1px solid var(--color-border);
       display: flex;
       align-items: center;
@@ -278,7 +173,7 @@
       gap: 1rem;
     }
     .panel-title {
-      font-size: 1.125rem;
+      font-size: 1.0625rem;
       font-weight: 700;
       color: var(--color-text-main);
       letter-spacing: -0.015em;
@@ -286,7 +181,7 @@
     .panel-actions {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: 0.625rem;
       flex-wrap: wrap;
     }
 
@@ -294,21 +189,21 @@
     .data-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.875rem;
+      font-size: 0.84375rem;
       text-align: left;
     }
     .data-table th {
       background: var(--color-surface-hover);
-      padding: 0.75rem 1.25rem;
-      font-size: 0.75rem;
+      padding: 0.6875rem 1rem;
+      font-size: 0.6875rem;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
       color: var(--color-text-muted);
       border-bottom: 1px solid var(--color-border);
     }
     .data-table td {
-      padding: 0.875rem 1.25rem;
+      padding: 0.8125rem 1rem;
       border-bottom: 1px solid var(--color-border-subtle);
       color: var(--color-text-main);
       vertical-align: middle;
@@ -345,25 +240,30 @@
       color: #1e40af;
       border: 1px solid #bfdbfe;
     }
+    .status-badge.danger {
+      background: var(--color-error-bg);
+      color: var(--color-error-text);
+      border: 1px solid var(--color-error-border);
+    }
 
     /* Quick Actions */
     .quick-actions-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 1rem;
-      padding: 1.5rem;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 0.875rem;
+      padding: 1.25rem 1.5rem;
     }
     .action-btn-item {
       display: flex;
       align-items: center;
-      gap: 0.875rem;
-      padding: 0.875rem 1rem;
+      gap: 0.75rem;
+      padding: 0.75rem 0.875rem;
       border: 1px solid var(--color-border);
       border-radius: var(--radius-sm);
       background: var(--color-surface);
       color: var(--color-text-main);
       font-weight: 600;
-      font-size: 0.875rem;
+      font-size: 0.84375rem;
       transition: all var(--transition-fast);
       cursor: pointer;
       text-decoration: none;
@@ -376,8 +276,8 @@
       transform: translateY(-1px);
     }
     .action-icon {
-      width: 22px;
-      height: 22px;
+      width: 20px;
+      height: 20px;
       color: var(--color-primary);
       flex-shrink: 0;
     }
@@ -389,7 +289,7 @@
       background: rgba(15, 23, 42, 0.6);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
-      z-index: 1000;
+      z-index: 2000;
       display: none;
       align-items: center;
       justify-content: center;
@@ -411,14 +311,14 @@
       100% { opacity: 1; transform: scale(1) translateY(0); }
     }
     .modal-header {
-      padding: 1.25rem 1.5rem;
+      padding: 1.125rem 1.5rem;
       border-bottom: 1px solid var(--color-border);
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
     .modal-title {
-      font-size: 1.125rem;
+      font-size: 1.0625rem;
       font-weight: 700;
       color: var(--color-text-main);
     }
@@ -435,288 +335,393 @@
       color: var(--color-text-main);
     }
     .modal-body {
-      padding: 1.5rem;
+      padding: 1.375rem 1.5rem;
     }
     .modal-footer {
-      padding: 1rem 1.5rem;
+      padding: 0.875rem 1.5rem;
       border-top: 1px solid var(--color-border);
       background: #f8fafc;
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 0.75rem;
+      gap: 0.625rem;
       border-bottom-left-radius: var(--radius-md);
       border-bottom-right-radius: var(--radius-md);
     }
 
-    .form-group {
-      margin-bottom: 1.125rem;
-    }
-    .form-group label {
-      display: block;
-      font-size: 0.8125rem;
-      font-weight: 600;
-      color: var(--color-text-main);
-      margin-bottom: 0.375rem;
-    }
-    .form-control {
-      width: 100%;
-      padding: 0.5625rem 0.875rem;
-      border-radius: var(--radius-xs);
-      border: 1px solid var(--color-border);
-      font-size: 0.875rem;
-      background: #ffffff;
-      color: var(--color-text-main);
-      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-    }
-    .form-control:focus {
-      outline: none;
-      border-color: var(--color-primary);
-      box-shadow: 0 0 0 3px var(--color-primary-glow);
-    }
     .form-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 1rem;
     }
-    .form-hint {
-      font-size: 0.75rem;
-      color: var(--color-text-muted);
-      margin-top: 0.25rem;
-    }
-    .modal-error-banner {
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      color: #991b1b;
-      padding: 0.625rem 0.875rem;
-      border-radius: var(--radius-xs);
-      font-size: 0.8125rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-      display: none;
-    }
-
-    @media (max-width: 860px) {
+    @media (max-width: 520px) {
       .form-row {
         grid-template-columns: 1fr;
-      }
-      .system-status-pill {
-        display: none;
       }
     }
   </style>
 </head>
-<body style="background: var(--color-bg); min-height: 100vh; display: flex; flex-direction: column;">
-  <!-- Dashboard Top Navigation -->
-  <header class="dashboard-header">
-    <div class="container dash-nav">
-      <div class="dash-left-group">
-        <a href="/dashboard" class="brand-link">
-          <img src="/static/images/logo.svg" alt="Vyavsa" width="32" height="32">
-          <span class="brand-name">Vyavsa</span>
-        </a>
-        <span id="user-role-badge" class="status-badge paid">Operator</span>
-        <div class="system-status-pill">
-          <span class="status-dot"></span>
-          <span>System Operational</span>
-        </div>
+<body class="app-shell">
+
+  <!-- ========================================================================= -->
+  <!-- Topbar: Logo | Business / Global Search | User / Signout / Mobile Toggle  -->
+  <!-- ========================================================================= -->
+  <header class="app-topbar">
+    <div class="topbar-left">
+      <!-- Hamburger toggle button for Mobile/Tablet -->
+      <button type="button" class="sidebar-toggle-btn" id="mobile-sidebar-toggle" aria-label="Toggle navigation menu">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+
+      <!-- Brand -->
+      <a href="/dashboard" class="topbar-brand">
+        <img src="/static/images/logo.svg" alt="Vyavsa" width="28" height="28">
+        <span>Vyavsa</span>
+      </a>
+
+      <!-- Business Name Pill -->
+      <div class="topbar-business-pill" title="Current Business Organization">
+        <span class="topbar-business-dot"></span>
+        <span id="topbar-business-name">Loading Business...</span>
       </div>
 
-      <div class="dash-user-meta">
-        <div class="user-pill" id="user-profile-pill">
-          <div class="user-avatar-badge" id="user-avatar-initial">V</div>
-          <span id="user-display-name">Loading...</span>
-        </div>
-        <button type="button" id="logout-btn" class="btn btn-secondary btn-sm" style="font-weight: 600;">
-          Sign Out
-        </button>
+      <!-- User Role Badge -->
+      <span id="user-role-badge" class="status-badge paid">Operator</span>
+    </div>
+
+    <!-- Center: Global Quick Search -->
+    <div class="topbar-center">
+      <div class="topbar-search-box">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-text-subtle);">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <input type="text" id="global-search-input" placeholder="Quick search transactions, customers, staff...">
       </div>
+    </div>
+
+    <!-- Right: Status, User Pill, Sign Out -->
+    <div class="topbar-right">
+      <div class="system-status-chip">
+        <span class="status-dot"></span>
+        <span>Online</span>
+      </div>
+
+      <div class="user-chip" id="user-profile-pill">
+        <div class="user-chip-avatar" id="user-avatar-initial">V</div>
+        <span id="user-display-name">Loading...</span>
+      </div>
+
+      <button type="button" id="logout-btn" class="btn btn-secondary btn-sm" style="font-weight: 600;">
+        Sign Out
+      </button>
     </div>
   </header>
 
-  <!-- Navigation Tab Bar -->
-  <nav class="tab-nav-bar">
-    <div class="container tab-nav-scroll">
-      <button type="button" class="nav-tab-btn active" data-tab="overview">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-        <span>Overview</span>
-      </button>
+  <!-- ========================================================================= -->
+  <!-- App Container: Responsive Sidebar + Fluid Main Content                    -->
+  <!-- ========================================================================= -->
+  <div class="app-container">
 
-      <button type="button" class="nav-tab-btn" data-tab="line-sales">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0"/></svg>
-        <span>Line Sales</span>
-      </button>
+    <!-- Mobile Drawer Backdrop Overlay -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 
-      <button type="button" class="nav-tab-btn" data-tab="counter-sales">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span>Counter Sales</span>
-      </button>
+    <!-- Left Sidebar Navigation -->
+    <aside class="app-sidebar" id="app-sidebar">
+      
+      <!-- Primary Overview Link -->
+      <div class="sidebar-group">
+        <a class="sidebar-link active" data-tab="overview">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          <span>Dashboard</span>
+        </a>
+      </div>
 
-      <button type="button" class="nav-tab-btn" data-tab="attendance">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        <span>Staff & Attendance</span>
-      </button>
+      <!-- BUSINESS Group (Admin Only) -->
+      <div class="sidebar-group admin-only">
+        <span class="sidebar-group-title">Business</span>
+        <a class="sidebar-link" data-tab="employees">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span>Employees</span>
+          <span class="sidebar-badge">Admin</span>
+        </a>
+        <a class="sidebar-link" data-tab="customers">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+          <span>Customers</span>
+          <span class="sidebar-badge">Admin</span>
+        </a>
+        <a class="sidebar-link" data-tab="banks">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"/></svg>
+          <span>Banks</span>
+          <span class="sidebar-badge">Admin</span>
+        </a>
+        <a class="sidebar-link" data-tab="users">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          <span>Tenant Users</span>
+          <span class="sidebar-badge">Admin</span>
+        </a>
+      </div>
 
-      <button type="button" class="nav-tab-btn" data-tab="purchases">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
-        <span>Purchases</span>
-      </button>
+      <!-- SALES Group -->
+      <div class="sidebar-group">
+        <span class="sidebar-group-title">Sales</span>
+        <a class="sidebar-link" data-tab="line-sales">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0"/></svg>
+          <span>Line Sales</span>
+        </a>
+        <a class="sidebar-link" data-tab="counter-sales">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Counter Sales</span>
+        </a>
+      </div>
 
-      <button type="button" class="nav-tab-btn" data-tab="expenses">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-        <span>Expenses</span>
-      </button>
+      <!-- EMPLOYEE Group -->
+      <div class="sidebar-group">
+        <span class="sidebar-group-title">Employee</span>
+        <a class="sidebar-link" data-tab="attendance">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span>Attendance</span>
+        </a>
+        <a class="sidebar-link admin-only" data-tab="salaries">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"/></svg>
+          <span>Salaries</span>
+          <span class="sidebar-badge">Admin</span>
+        </a>
+      </div>
 
-      <!-- Admin Only Tabs -->
-      <button type="button" class="nav-tab-btn admin-only" data-tab="users">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-        <span>Users</span>
-        <span class="nav-tab-badge">Admin</span>
-      </button>
+      <!-- FINANCE Group -->
+      <div class="sidebar-group">
+        <span class="sidebar-group-title">Finance</span>
+        <a class="sidebar-link" data-tab="purchases">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+          <span>Purchases</span>
+        </a>
+        <a class="sidebar-link" data-tab="expenses">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          <span>Expenses</span>
+        </a>
+        <a class="sidebar-link" data-tab="cash-bank">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+          <span>Cash & Bank</span>
+        </a>
+        <a class="sidebar-link" data-tab="receivables-dues">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          <span>Receivables / Dues</span>
+        </a>
+      </div>
 
-      <button type="button" class="nav-tab-btn admin-only" data-tab="employees">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        <span>Employees</span>
-        <span class="nav-tab-badge">Admin</span>
-      </button>
+      <!-- ACCOUNT Group -->
+      <div class="sidebar-group" style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--color-border);">
+        <span class="sidebar-group-title">Account</span>
+        <a class="sidebar-link" data-tab="profile">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span>Organization & Plan</span>
+        </a>
+        <a href="/" class="sidebar-link" title="Visit Public Landing Page">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          <span>Public Website</span>
+        </a>
+        <a class="sidebar-link" id="sidebar-logout-btn" style="color: var(--color-error);">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          <span>Logout</span>
+        </a>
+      </div>
 
-      <button type="button" class="nav-tab-btn admin-only" data-tab="customers">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        <span>Customers</span>
-        <span class="nav-tab-badge">Admin</span>
-      </button>
+    </aside>
 
-      <button type="button" class="nav-tab-btn admin-only" data-tab="banks">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"/></svg>
-        <span>Banks</span>
-        <span class="nav-tab-badge">Admin</span>
-      </button>
+    <!-- Main Content Panels -->
+    <main class="app-main">
 
-      <button type="button" class="nav-tab-btn admin-only" data-tab="salaries">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z"/></svg>
-        <span>Salaries</span>
-        <span class="nav-tab-badge">Admin</span>
-      </button>
-    </div>
-  </nav>
+      <!-- ===================================================================== -->
+      <!-- TAB 1: OVERVIEW ("How is my business doing today?")                    -->
+      <!-- ===================================================================== -->
+      <section id="tab-overview" class="tab-pane">
 
-  <!-- Dashboard Main Body -->
-  <main class="dash-body">
-    <div class="container">
-
-      <!-- ========================================== -->
-      <!-- TAB 1: OVERVIEW -->
-      <!-- ========================================== -->
-      <section id="tab-overview" class="tab-content">
-        <div class="welcome-banner">
-          <h1 class="welcome-title" id="welcome-header">Welcome to your Vyavsa Dashboard</h1>
-          <p class="welcome-desc">
-            Your centralized business bookkeeping, customer credit tracking, staff management, and real-time financial ledger.
-          </p>
-        </div>
-
-        <!-- Financial KPI Summary Cards -->
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-header">
-              <span class="kpi-label">Net Cash Balance</span>
-              <div class="kpi-icon-bubble" style="background: #ecfdf5; color: #059669;">
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              </div>
-            </div>
-            <div class="kpi-val" id="kpi-net-cash">₹0.00</div>
-            <span class="kpi-trend">Liquid physical cash</span>
+        <!-- Business Header & Greeting -->
+        <div class="dashboard-greeting">
+          <div>
+            <h1 class="greeting-title" id="greeting-heading">Good day, Welcome</h1>
+            <div class="greeting-sub" id="greeting-subtext">Business Operations & Financial Ledger</div>
           </div>
-
-          <div class="kpi-card">
-            <div class="kpi-header">
-              <span class="kpi-label">Net Bank Balance</span>
-              <div class="kpi-icon-bubble" style="background: #eff6ff; color: #2563eb;">
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"/></svg>
-              </div>
-            </div>
-            <div class="kpi-val" id="kpi-net-bank">₹0.00</div>
-            <span class="kpi-trend">Bank accounts aggregate</span>
-          </div>
-
-          <div class="kpi-card">
-            <div class="kpi-header">
-              <span class="kpi-label">Pending Receivables</span>
-              <div class="kpi-icon-bubble" style="background: #fffbeb; color: #d97706;">
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              </div>
-            </div>
-            <div class="kpi-val" id="kpi-receivables">₹0.00</div>
-            <span class="kpi-trend">Customer credit dues</span>
-          </div>
-
-          <div class="kpi-card">
-            <div class="kpi-header">
-              <span class="kpi-label">Net Dues / Payables</span>
-              <div class="kpi-icon-bubble" style="background: #fef2f2; color: #dc2626;">
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              </div>
-            </div>
-            <div class="kpi-val" id="kpi-payables">₹0.00</div>
-            <span class="kpi-trend">Pending vendor dues</span>
-          </div>
-
-          <div class="kpi-card admin-only">
-            <div class="kpi-header">
-              <span class="kpi-label">Pending Staff Salary</span>
-              <div class="kpi-icon-bubble" style="background: #f5f3ff; color: #7c3aed;">
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-              </div>
-            </div>
-            <div class="kpi-val" id="kpi-pending-salary">₹0.00</div>
-            <span class="kpi-trend">Accrued wages payable</span>
+          <div class="greeting-date-badge" id="business-date-badge">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            <span id="active-business-date-text">Loading date...</span>
           </div>
         </div>
 
-        <!-- Today's Operations KPI Grid -->
-        <h3 style="font-size: 1rem; font-weight: 700; color: var(--color-text-main); margin-bottom: 1rem;">Today's Operations Summary</h3>
-        <div class="kpi-grid">
+        <!-- Dynamic Data Freshness Indicator Banner -->
+        <div id="data-freshness-banner" class="freshness-banner fresh">
+          <div class="freshness-left">
+            <span class="pulse-dot"></span>
+            <span id="freshness-banner-text">Loading today's business data...</span>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.loadDashboardMetrics()" style="padding: 0.25rem 0.625rem; font-size: 0.75rem;">
+            ↻ Refresh
+          </button>
+        </div>
+
+        <!-- Section 1: Today's Overview -->
+        <div class="section-strip">
+          <span class="section-strip-title">Today's Overview</span>
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);" id="today-overview-sub">Key daily inflow & outflow</span>
+        </div>
+
+        <div class="kpi-grid-5">
+          <!-- Total Sales -->
           <div class="kpi-card">
             <div class="kpi-header">
               <span class="kpi-label">Today's Sales</span>
-              <span class="status-badge paid">Live</span>
+              <div class="kpi-icon-bubble" style="background: #ecfdf5; color: #059669;">₹</div>
             </div>
             <div class="kpi-val" id="kpi-today-sales">₹0.00</div>
             <span class="kpi-trend">Line + Counter total</span>
           </div>
 
+          <!-- Purchases -->
           <div class="kpi-card">
             <div class="kpi-header">
-              <span class="kpi-label">Today's Purchases</span>
-              <span class="status-badge cleared">Procured</span>
+              <span class="kpi-label">Purchases</span>
+              <div class="kpi-icon-bubble" style="background: #eff6ff; color: #2563eb;">📦</div>
             </div>
             <div class="kpi-val" id="kpi-today-purchases">₹0.00</div>
-            <span class="kpi-trend">Stock purchases</span>
+            <span class="kpi-trend">Inventory procurement</span>
           </div>
 
+          <!-- Expenses -->
           <div class="kpi-card">
             <div class="kpi-header">
-              <span class="kpi-label">Today's Expenses</span>
-              <span class="status-badge pending">Overhead</span>
+              <span class="kpi-label">Expenses</span>
+              <div class="kpi-icon-bubble" style="background: #fffbeb; color: #d97706;">⚡</div>
             </div>
             <div class="kpi-val" id="kpi-today-expenses">₹0.00</div>
-            <span class="kpi-trend">Operational expenses</span>
+            <span class="kpi-trend">Operating expenses</span>
           </div>
 
+          <!-- Net Cash Balance -->
           <div class="kpi-card">
             <div class="kpi-header">
-              <span class="kpi-label">Staff Attendance</span>
-              <span class="status-badge cleared">Today</span>
+              <span class="kpi-label">Cash Balance</span>
+              <div class="kpi-icon-bubble" style="background: #ecfdf5; color: #047857;">💵</div>
             </div>
-            <div class="kpi-val" id="kpi-today-attendance" style="font-size: 1.25rem;">0 Present / 0 Absent</div>
-            <span class="kpi-trend">Active headcount</span>
+            <div class="kpi-val" id="kpi-net-cash">₹0.00</div>
+            <span class="kpi-trend">Physical cash in drawer</span>
+          </div>
+
+          <!-- Net Bank Balance -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Bank Balance</span>
+              <div class="kpi-icon-bubble" style="background: #eff6ff; color: #1d4ed8;">🏦</div>
+            </div>
+            <div class="kpi-val" id="kpi-net-bank">₹0.00</div>
+            <span class="kpi-trend">Total in bank accounts</span>
           </div>
         </div>
 
-        <!-- Quick Operational Actions -->
+        <!-- Section 2: Financial Position -->
+        <div class="section-strip">
+          <span class="section-strip-title">Financial Position</span>
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">Authoritative ledger balances</span>
+        </div>
+
+        <div class="kpi-grid-3">
+          <!-- Receivables -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Pending Receivables</span>
+              <span class="status-badge pending">Due</span>
+            </div>
+            <div class="kpi-val" id="kpi-receivables">₹0.00</div>
+            <span class="kpi-trend">Pending customer credit collections</span>
+          </div>
+
+          <!-- Net Dues -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Net Dues (Payables)</span>
+              <span class="status-badge danger">Payable</span>
+            </div>
+            <div class="kpi-val" id="kpi-payables">₹0.00</div>
+            <span class="kpi-trend">Supplier dues + accrued staff salary</span>
+          </div>
+
+          <!-- Pending Salary -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Pending Staff Salary</span>
+              <span class="status-badge cleared">Accrued</span>
+            </div>
+            <div class="kpi-val" id="kpi-pending-salary">₹0.00</div>
+            <span class="kpi-trend">Wages balance payable to staff</span>
+          </div>
+        </div>
+
+        <!-- Section 2B: Individual Bank Accounts -->
+        <div class="section-strip" style="margin-top: 0.5rem;">
+          <span class="section-strip-title">Individual Bank Accounts</span>
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">Separate balance tracking per registered bank</span>
+        </div>
+
+        <div id="overview-bank-balances-container" class="bank-cards-grid">
+          <div style="grid-column: 1/-1; padding: 1rem 1.5rem; text-align: center; color: var(--color-text-muted); background: var(--color-surface); border: 1px dashed var(--color-border); border-radius: var(--radius-md); font-size: 0.875rem;">
+            Loading bank account balances...
+          </div>
+        </div>
+
+        <!-- Section 3: Today's Operations -->
+        <div class="section-strip">
+          <span class="section-strip-title">Today's Operations Breakdown</span>
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">Activity details for the current day</span>
+        </div>
+
+        <div class="kpi-grid-4">
+          <!-- Staff Attendance -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Staff Attendance</span>
+              <span class="status-badge cleared">Active</span>
+            </div>
+            <div class="kpi-val" id="kpi-today-attendance" style="font-size: 1.35rem;">0 Present / 0 Absent</div>
+            <span class="kpi-trend">Present staff on duty today</span>
+          </div>
+
+          <!-- Today's Employee Salary -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Today's Staff Salary</span>
+              <span class="status-badge cleared">Earned</span>
+            </div>
+            <div class="kpi-val" id="kpi-today-salary">₹0.00</div>
+            <span class="kpi-trend">Earned by present staff today</span>
+          </div>
+
+          <!-- Line Sales Breakdown -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Line Sales</span>
+              <span class="status-badge paid">Route</span>
+            </div>
+            <div class="kpi-val" id="kpi-today-line-sales">₹0.00</div>
+            <span class="kpi-trend">Route distribution deliveries</span>
+          </div>
+
+          <!-- Counter Sales Breakdown -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Counter Sales</span>
+              <span class="status-badge paid">Direct</span>
+            </div>
+            <div class="kpi-val" id="kpi-today-counter-sales">₹0.00</div>
+            <span class="kpi-trend">Point-of-sale shop transactions</span>
+          </div>
+        </div>
+
+        <!-- Section 4: Quick Actions -->
         <div class="panel-card">
           <div class="panel-header">
             <h2 class="panel-title">Quick Operations</h2>
+            <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Common one-click business tasks</span>
           </div>
           <div class="quick-actions-grid">
             <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-add-line-sale')">
@@ -731,31 +736,23 @@
               <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               <div>
                 <div>Record Counter Sale</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Direct cash/UPI sale</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Walk-in shop billing</div>
               </div>
             </button>
 
             <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-mark-attendance')">
               <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
               <div>
-                <div>Mark Staff Attendance</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Log daily attendance</div>
+                <div>Mark Attendance</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Staff daily attendance</div>
               </div>
             </button>
 
-            <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-record-ot')">
-              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              <div>
-                <div>Log Overtime (OT)</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Staff overtime hours</div>
-              </div>
-            </button>
-
-            <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-record-advance')">
+            <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-add-expense')">
               <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
               <div>
-                <div>Employee Advance</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Staff cash advance</div>
+                <div>Record Expense</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Utilities, fuel, rent</div>
               </div>
             </button>
 
@@ -763,15 +760,32 @@
               <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
               <div>
                 <div>Record Purchase</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Log vendor inventory</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Stock intake & supplier</div>
               </div>
             </button>
 
-            <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-add-expense')">
-              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"/></svg>
+            <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-record-advance')">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
               <div>
-                <div>Record Expense</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Log operating expenses</div>
+                <div>Employee Advance</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Cash advance paid</div>
+              </div>
+            </button>
+
+            <button type="button" class="action-btn-item" onclick="Operations.openModal('modal-record-ot')">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <div>
+                <div>Log Overtime (OT)</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Staff OT hours</div>
+              </div>
+            </button>
+
+            <!-- Admin Only Quick Actions -->
+            <button type="button" class="action-btn-item admin-only" onclick="Operations.openModal('modal-add-employee')">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+              <div>
+                <div>Add Employee</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Onboard staff member</div>
               </div>
             </button>
 
@@ -779,27 +793,40 @@
               <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
               <div>
                 <div>Add Customer</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Register new customer</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Client credit ledger</div>
               </div>
             </button>
 
-            <button type="button" class="action-btn-item admin-only" onclick="Operations.openModal('modal-add-employee')">
-              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+            <button type="button" class="action-btn-item admin-only" onclick="Operations.openModal('modal-add-bank')">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"/></svg>
               <div>
-                <div>Onboard Employee</div>
-                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Add employee record</div>
+                <div>Add Bank Account</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Account & IFSC</div>
+              </div>
+            </button>
+
+            <button type="button" class="action-btn-item admin-only" onclick="Operations.openModal('modal-add-user')">
+              <svg class="action-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              <div>
+                <div>Add Tenant User</div>
+                <div style="font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted);">Staff login access</div>
               </div>
             </button>
           </div>
         </div>
 
-        <!-- Recent Transactions & Bill-Book Entries -->
+        <!-- Section 5: Recent Operations Activity (Dynamic from API) -->
         <div class="panel-card">
           <div class="panel-header">
-            <h2 class="panel-title">Recent Transactions & Bill-Book Entries</h2>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.switchTab('line-sales')">View Full Ledger →</button>
+            <div>
+              <h2 class="panel-title">Recent Transactions &amp; Activity</h2>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Real-time stream of latest operational entries</div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.switchTab('line-sales')">
+              View All Sales →
+            </button>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -810,45 +837,19 @@
                   <th>Status</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr>
-                  <td><strong>Invoice #1048 - Retail Sale</strong></td>
-                  <td>Cash Sale</td>
-                  <td>Today, 02:45 PM</td>
-                  <td style="color: var(--color-success); font-weight: 700;">+ ₹12,500</td>
-                  <td><span class="status-badge paid"><span class="status-dot"></span>Paid</span></td>
-                </tr>
-                <tr>
-                  <td><strong>Gupta Hardware Credit</strong></td>
-                  <td>Customer Due</td>
-                  <td>Today, 11:20 AM</td>
-                  <td style="color: var(--color-warning); font-weight: 700;">₹4,200</td>
-                  <td><span class="status-badge pending"><span class="status-dot" style="background: var(--color-warning);"></span>Pending</span></td>
-                </tr>
-                <tr>
-                  <td><strong>Shop Inventory Restock</strong></td>
-                  <td>Supplier Payment</td>
-                  <td>Yesterday, 04:10 PM</td>
-                  <td style="color: var(--color-error); font-weight: 700;">- ₹28,000</td>
-                  <td><span class="status-badge cleared"><span class="status-dot" style="background: #3b82f6;"></span>Cleared</span></td>
-                </tr>
-                <tr>
-                  <td><strong>Staff Advance - Ramesh</strong></td>
-                  <td>Salary Advance</td>
-                  <td>28 Sep, 01:15 PM</td>
-                  <td style="color: var(--color-error); font-weight: 700;">- ₹3,000</td>
-                  <td><span class="status-badge cleared"><span class="status-dot" style="background: #3b82f6;"></span>Recorded</span></td>
-                </tr>
+              <tbody id="recent-activity-table-body">
+                <tr><td colspan="5" style="text-align: center; padding: 2.5rem; color: var(--color-text-muted);">Loading recent activity...</td></tr>
               </tbody>
             </table>
           </div>
         </div>
+
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 2: LINE SALES -->
-      <!-- ========================================== -->
-      <section id="tab-line-sales" class="tab-content" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 2: LINE SALES                                                     -->
+      <!-- ===================================================================== -->
+      <section id="tab-line-sales" class="tab-pane" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
@@ -863,17 +864,17 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>Customer</th>
                   <th>Route</th>
+                  <th>Salesman</th>
                   <th>Date</th>
                   <th>Total Amount</th>
                   <th>Cash In</th>
                   <th>Credit Due</th>
-                  <th>Status</th>
                   <th style="text-align: right;">Action</th>
                 </tr>
               </thead>
@@ -885,15 +886,15 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 3: COUNTER SALES -->
-      <!-- ========================================== -->
-      <section id="tab-counter-sales" class="tab-content" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 3: COUNTER SALES                                                  -->
+      <!-- ===================================================================== -->
+      <section id="tab-counter-sales" class="tab-pane" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
               <h2 class="panel-title">Counter Sales (Direct Point of Sale)</h2>
-              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Walk-in counter sales, physical shop billing, and instant payments.</div>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Walk-in counter sales, shop billing, and instant payments.</div>
             </div>
             <div class="panel-actions">
               <input type="date" id="filter-counter-sales-date" class="form-control" style="width: auto;">
@@ -902,7 +903,7 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -911,7 +912,7 @@
                   <th>Payment Method</th>
                   <th>Total Amount</th>
                   <th>Cash Received</th>
-                  <th>Account / UPI</th>
+                  <th>Account / Online</th>
                   <th style="text-align: right;">Action</th>
                 </tr>
               </thead>
@@ -923,14 +924,14 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 4: ATTENDANCE & STAFF -->
-      <!-- ========================================== -->
-      <section id="tab-attendance" class="tab-content" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 4: ATTENDANCE & STAFF                                             -->
+      <!-- ===================================================================== -->
+      <section id="tab-attendance" class="tab-pane" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
-              <h2 class="panel-title">Staff Attendance & Daily Log</h2>
+              <h2 class="panel-title">Staff Attendance & Daily Operations</h2>
               <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Daily presence, overtime hours, and cash advances.</div>
             </div>
             <div class="panel-actions">
@@ -946,7 +947,7 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -966,15 +967,15 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 5: PURCHASES -->
-      <!-- ========================================== -->
-      <section id="tab-purchases" class="tab-content" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 5: PURCHASES                                                      -->
+      <!-- ===================================================================== -->
+      <section id="tab-purchases" class="tab-pane" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
               <h2 class="panel-title">Purchases & Stock Intake</h2>
-              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Raw materials, inventory purchases, supplier invoices, and settlements.</div>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Inventory procurement, supplier bills, and payment tracking.</div>
             </div>
             <div class="panel-actions">
               <input type="date" id="filter-purchases-date" class="form-control" style="width: auto;">
@@ -983,7 +984,7 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1004,15 +1005,15 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 6: EXPENSES -->
-      <!-- ========================================== -->
-      <section id="tab-expenses" class="tab-content" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 6: EXPENSES                                                       -->
+      <!-- ===================================================================== -->
+      <section id="tab-expenses" class="tab-pane" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
               <h2 class="panel-title">Operating Expenses & Utilities</h2>
-              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Rent, electricity, fuel, delivery charges, maintenance, and miscellaneous cash-outs.</div>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Rent, electricity, transport, fuel, maintenance, and supplies.</div>
             </div>
             <div class="panel-actions">
               <input type="date" id="filter-expenses-date" class="form-control" style="width: auto;">
@@ -1021,7 +1022,7 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1039,15 +1040,144 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 7: USERS (Admin Only) -->
-      <!-- ========================================== -->
-      <section id="tab-users" class="tab-content admin-only" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 7: CASH & BANK                                                    -->
+      <!-- ===================================================================== -->
+      <section id="tab-cash-bank" class="tab-pane" style="display: none;">
+        <div class="kpi-grid-3">
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Cash in Drawer</span>
+              <span class="status-badge paid">Liquid</span>
+            </div>
+            <div class="kpi-val" id="cb-cash-balance">₹0.00</div>
+            <span class="kpi-trend">Authoritative cash on hand</span>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Bank Accounts Total</span>
+              <span class="status-badge cleared">Bank</span>
+            </div>
+            <div class="kpi-val" id="cb-bank-balance">₹0.00</div>
+            <span class="kpi-trend">All registered bank accounts</span>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Total Liquid Capital</span>
+              <span class="status-badge paid">Total</span>
+            </div>
+            <div class="kpi-val" id="cb-total-liquid">₹0.00</div>
+            <span class="kpi-trend">Cash + Bank combined</span>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Registered Bank Accounts</h2>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Organization bank conduits and settlement details</div>
+            </div>
+            <div class="panel-actions admin-only">
+              <button type="button" class="btn btn-primary btn-sm" onclick="Operations.openModal('modal-add-bank')">
+                + Add Bank Account
+              </button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Bank Name</th>
+                  <th>Account Number</th>
+                  <th>IFSC Code</th>
+                  <th>Current Balance</th>
+                  <th>Status</th>
+                  <th style="text-align: right;" class="admin-only">Action</th>
+                </tr>
+              </thead>
+              <tbody id="cb-banks-table-body">
+                <tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--color-text-muted);">Loading bank accounts...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 8: RECEIVABLES & DUES                                             -->
+      <!-- ===================================================================== -->
+      <section id="tab-receivables-dues" class="tab-pane" style="display: none;">
+        <div class="kpi-grid-3">
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Total Receivables</span>
+              <span class="status-badge pending">Due from Buyers</span>
+            </div>
+            <div class="kpi-val" id="rd-receivables">₹0.00</div>
+            <span class="kpi-trend">Customer credit dues</span>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Total Vendor Payables</span>
+              <span class="status-badge danger">Owed to Suppliers</span>
+            </div>
+            <div class="kpi-val" id="rd-payables">₹0.00</div>
+            <span class="kpi-trend">Pending purchase bills</span>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Pending Staff Salaries</span>
+              <span class="status-badge cleared">Accrued</span>
+            </div>
+            <div class="kpi-val" id="rd-salary">₹0.00</div>
+            <span class="kpi-trend">Wages balance to be paid</span>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Customer Credit Ledgers (Receivables)</h2>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Outstanding amounts owed by credit customers</div>
+            </div>
+            <div class="panel-actions admin-only">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.switchTab('customers')">
+                Manage Customers →
+              </button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Customer Name</th>
+                  <th>Phone</th>
+                  <th>Opening Balance</th>
+                  <th>Current Balance Due</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="rd-customers-table-body">
+                <tr><td colspan="5" style="text-align: center; padding: 2rem; color: var(--color-text-muted);">Loading customer credit balances...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 9: USERS (Admin Only)                                             -->
+      <!-- ===================================================================== -->
+      <section id="tab-users" class="tab-pane admin-only" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
               <h2 class="panel-title">Tenant Users & Role Management</h2>
-              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Manage business collaborators and their operational access levels.</div>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Staff operators and business administrators with dashboard access.</div>
             </div>
             <div class="panel-actions">
               <input type="text" id="search-users" class="form-control" placeholder="Search user by name or email..." style="width: 240px;">
@@ -1056,7 +1186,7 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1075,15 +1205,15 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 8: EMPLOYEES (Admin Only) -->
-      <!-- ========================================== -->
-      <section id="tab-employees" class="tab-content admin-only" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 10: EMPLOYEES (Admin Only)                                        -->
+      <!-- ===================================================================== -->
+      <section id="tab-employees" class="tab-pane admin-only" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
               <h2 class="panel-title">Employees & Staff Pay Scales</h2>
-              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Manage employee profiles, base salary rates, and hourly overtime policies.</div>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Staff directory, base salary rates, and hourly overtime policies.</div>
             </div>
             <div class="panel-actions">
               <input type="text" id="search-employees" class="form-control" placeholder="Search staff by name or phone..." style="width: 240px;">
@@ -1092,7 +1222,7 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1112,10 +1242,10 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 9: CUSTOMERS (Admin Only) -->
-      <!-- ========================================== -->
-      <section id="tab-customers" class="tab-content admin-only" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 11: CUSTOMERS (Admin Only)                                        -->
+      <!-- ===================================================================== -->
+      <section id="tab-customers" class="tab-pane admin-only" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
@@ -1129,7 +1259,7 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1149,10 +1279,10 @@
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 10: BANKS (Admin Only) -->
-      <!-- ========================================== -->
-      <section id="tab-banks" class="tab-content admin-only" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 12: BANKS (Admin Only)                                            -->
+      <!-- ===================================================================== -->
+      <section id="tab-banks" class="tab-pane admin-only" style="display: none;">
         <div class="panel-card">
           <div class="panel-header">
             <div>
@@ -1165,29 +1295,30 @@
               </button>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>Bank Name</th>
                   <th>Account Number</th>
                   <th>IFSC Code</th>
+                  <th>Current Balance</th>
                   <th>Status</th>
                   <th style="text-align: right;">Action</th>
                 </tr>
               </thead>
               <tbody id="banks-table-body">
-                <tr><td colspan="5" style="text-align: center; padding: 2rem; color: var(--color-text-muted);">Loading bank accounts...</td></tr>
+                <tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--color-text-muted);">Loading bank accounts...</td></tr>
               </tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <!-- ========================================== -->
-      <!-- TAB 11: SALARIES (Admin Only) -->
-      <!-- ========================================== -->
-      <section id="tab-salaries" class="tab-content admin-only" style="display: none;">
+      <!-- ===================================================================== -->
+      <!-- TAB 13: SALARIES (Admin Only)                                         -->
+      <!-- ===================================================================== -->
+      <section id="tab-salaries" class="tab-pane admin-only" style="display: none;">
         <!-- Pending Disbursements Section -->
         <div class="panel-card" style="border-left: 4px solid var(--color-warning);">
           <div class="panel-header">
@@ -1196,7 +1327,7 @@
               <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Staff members with accrued positive salary balances ready for payout.</div>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1218,10 +1349,10 @@
           <div class="panel-header">
             <div>
               <h2 class="panel-title">All Employee Salary Balances</h2>
-              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Complete employee payroll balance ledger with adjustments.</div>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Complete employee payroll balance ledger with rate adjustments.</div>
             </div>
           </div>
-          <div style="overflow-x: auto;">
+          <div class="table-responsive">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1240,12 +1371,64 @@
         </div>
       </section>
 
-    </div>
-  </main>
+      <!-- ===================================================================== -->
+      <!-- TAB 14: PROFILE & ORGANIZATION                                        -->
+      <!-- ===================================================================== -->
+      <section id="tab-profile" class="tab-pane" style="display: none;">
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Business Organization & Subscription</h2>
+              <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Account profile, tenant isolation boundaries, and active plan.</div>
+            </div>
+          </div>
+          <div style="padding: 1.5rem;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;">
+              
+              <!-- Business Info Card -->
+              <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 1.25rem;">
+                <h3 style="font-size: 0.9375rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--color-primary);">Business Organization</h3>
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.84375rem;">
+                  <div><strong>Name:</strong> <span id="profile-biz-name">—</span></div>
+                  <div><strong>Email:</strong> <span id="profile-biz-email">—</span></div>
+                  <div><strong>Phone:</strong> <span id="profile-biz-phone">—</span></div>
+                  <div><strong>Status:</strong> <span id="profile-biz-status" class="status-badge paid">active</span></div>
+                  <div><strong>Tenant ID:</strong> <span id="profile-biz-id" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-muted);">—</span></div>
+                </div>
+              </div>
 
-  <!-- ========================================== -->
-  <!-- MODALS -->
-  <!-- ========================================== -->
+              <!-- Current User Info Card -->
+              <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 1.25rem;">
+                <h3 style="font-size: 0.9375rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--color-primary);">Active User Session</h3>
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.84375rem;">
+                  <div><strong>User Name:</strong> <span id="profile-user-name">—</span></div>
+                  <div><strong>Email:</strong> <span id="profile-user-email">—</span></div>
+                  <div><strong>Role:</strong> <span id="profile-user-role" class="status-badge cleared">User</span></div>
+                  <div><strong>Session Type:</strong> <span>Encrypted JWT (Standard Bearer)</span></div>
+                </div>
+              </div>
+
+              <!-- Subscription Info Card -->
+              <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 1.25rem;">
+                <h3 style="font-size: 0.9375rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--color-primary);">Subscription Plan</h3>
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.84375rem;">
+                  <div><strong>Plan:</strong> <span id="profile-plan-name">Standard Tier</span></div>
+                  <div><strong>Status:</strong> <span id="profile-plan-status" class="status-badge paid">active</span></div>
+                  <div><strong>Billing Cycle:</strong> <span>Monthly SaaS</span></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODALS (CREATE, EDIT, VIEW DETAILS)                                       -->
+  <!-- ========================================================================= -->
 
   <!-- 1. Modal: Add Tenant User -->
   <div id="modal-add-user" class="modal-overlay">
@@ -1258,28 +1441,69 @@
         <div class="modal-body">
           <div class="form-group">
             <label for="user-form-name">Full Name *</label>
-            <input type="text" id="user-form-name" class="form-control" required placeholder="e.g. John Sharma">
+            <input type="text" id="user-form-name" class="form-control" required placeholder="e.g. Rahul Sharma">
           </div>
           <div class="form-group">
             <label for="user-form-email">Email Address *</label>
-            <input type="email" id="user-form-email" class="form-control" required placeholder="user@company.com">
+            <input type="email" id="user-form-email" class="form-control" required placeholder="user@business.com">
           </div>
           <div class="form-group">
             <label for="user-form-password">Temporary Password *</label>
-            <input type="password" id="user-form-password" class="form-control" required minlength="8" placeholder="At least 8 characters">
+            <input type="password" id="user-form-password" class="form-control" required minlength="6" placeholder="At least 6 characters">
           </div>
           <div class="form-group">
             <label for="user-form-role">Operational Role *</label>
             <select id="user-form-role" class="form-control" required>
-              <option value="user">Tenant User (Daily Operator)</option>
+              <option value="user">Tenant User (Daily Operations Only)</option>
               <option value="admin">Tenant Admin (Full Management)</option>
             </select>
-            <div class="form-hint">Tenant users can log daily sales, attendance, and expenses. Admins have access to configuration and reports.</div>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-user')">Cancel</button>
           <button type="submit" id="btn-submit-user" class="btn btn-primary btn-sm">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 1B. Modal: Edit Tenant User -->
+  <div id="modal-edit-user" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Tenant User</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-user')">&times;</button>
+      </div>
+      <form id="form-edit-user">
+        <input type="hidden" id="edit-user-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-user-name">Full Name</label>
+            <input type="text" id="edit-user-name" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="edit-user-role">Role</label>
+            <select id="edit-user-role" class="form-control">
+              <option value="user">Tenant User (Operator)</option>
+              <option value="admin">Tenant Admin</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-user-status">Account Status</label>
+            <select id="edit-user-status" class="form-control">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-user-password">New Password (leave blank to keep unchanged)</label>
+            <input type="password" id="edit-user-password" class="form-control" minlength="6" placeholder="Leave empty to preserve">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-user')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-user" class="btn btn-primary btn-sm">Save Changes</button>
         </div>
       </form>
     </div>
@@ -1304,18 +1528,63 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label for="emp-form-salary">Monthly / Base Salary (₹)</label>
-              <input type="number" step="0.01" id="emp-form-salary" class="form-control" placeholder="0.00">
+              <label for="emp-form-salary">Monthly / Base Salary (₹) *</label>
+              <input type="number" step="0.01" id="emp-form-salary" class="form-control" required placeholder="0.00">
             </div>
             <div class="form-group">
               <label for="emp-form-ot">Overtime Rate (₹/hr)</label>
-              <input type="number" step="0.01" id="emp-form-ot" class="form-control" placeholder="0.00">
+              <input type="number" step="0.01" id="emp-form-ot" class="form-control" value="0.00">
             </div>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-employee')">Cancel</button>
           <button type="submit" id="btn-submit-employee" class="btn btn-primary btn-sm">Save Employee</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2B. Modal: Edit Employee -->
+  <div id="modal-edit-employee" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Employee</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-employee')">&times;</button>
+      </div>
+      <form id="form-edit-employee">
+        <input type="hidden" id="edit-emp-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-emp-name">Employee Name</label>
+            <input type="text" id="edit-emp-name" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label for="edit-emp-phone">Phone Number</label>
+            <input type="tel" id="edit-emp-phone" class="form-control">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-emp-salary">Base Salary (₹)</label>
+              <input type="number" step="0.01" id="edit-emp-salary" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="edit-emp-ot">OT Rate (₹/hr)</label>
+              <input type="number" step="0.01" id="edit-emp-ot" class="form-control">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="edit-emp-status">Status</label>
+            <select id="edit-emp-status" class="form-control">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="terminated">Terminated</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-employee')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-employee" class="btn btn-primary btn-sm">Save Changes</button>
         </div>
       </form>
     </div>
@@ -1341,12 +1610,104 @@
           <div class="form-group">
             <label for="cust-form-opening">Opening Credit Due Balance (₹)</label>
             <input type="number" step="0.01" id="cust-form-opening" class="form-control" value="0.00">
-            <div class="form-hint">Enter existing pending credit before system onboarding, or 0 for fresh account.</div>
+            <div class="form-hint">Enter existing pending credit before onboarding, or 0 for fresh account.</div>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-customer')">Cancel</button>
           <button type="submit" id="btn-submit-customer" class="btn btn-primary btn-sm">Save Customer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3B. Modal: Edit Customer -->
+  <div id="modal-edit-customer" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Customer</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-customer')">&times;</button>
+      </div>
+      <form id="form-edit-customer">
+        <input type="hidden" id="edit-cust-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-cust-name">Customer Name</label>
+            <input type="text" id="edit-cust-name" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label for="edit-cust-phone">Phone Number</label>
+            <input type="tel" id="edit-cust-phone" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="edit-cust-status">Status</label>
+            <select id="edit-cust-status" class="form-control">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-customer')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-customer" class="btn btn-primary btn-sm">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3C. Modal: Adjust Customer Balance -->
+  <div id="modal-adjust-customer-balance" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Adjust Customer Balance</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-adjust-customer-balance')">&times;</button>
+      </div>
+      <form id="form-adjust-customer-balance">
+        <input type="hidden" id="adj-cust-id">
+        <div class="modal-body">
+          <div style="background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0.875rem 1rem; margin-bottom: 1.25rem;">
+            <div style="font-size: 0.8125rem; color: var(--color-text-muted);">Customer: <strong id="adj-cust-name" style="color: var(--color-text-main);"></strong></div>
+            <div style="font-size: 1.125rem; font-weight: 700; margin-top: 0.25rem;">
+              Current Due Balance: <span id="adj-cust-current-bal" style="color: var(--color-warning);">₹0.00</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="adj-cust-type">Adjustment Mode *</label>
+            <select id="adj-cust-type" class="form-control" onchange="Operations.handleCustomerAdjustmentTypeChange()">
+              <option value="new_balance">Set Exact New Balance</option>
+              <option value="delta">Adjust by Amount (+ Increase / - Decrease)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label id="adj-cust-amount-label" for="adj-cust-amount">New Balance (₹) *</label>
+            <input type="number" step="0.01" id="adj-cust-amount" class="form-control" required placeholder="0.00" oninput="Operations.calcCustomerAdjustmentPreview()">
+            <div id="adj-cust-hint" class="form-hint">Enter the new total balance for this customer.</div>
+          </div>
+
+          <div id="adj-cust-preview-box" class="payment-calc-box" style="margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Balance Preview:</span>
+              <span id="adj-cust-preview-val" style="font-weight: 700; font-size: 1rem;">₹0.00</span>
+            </div>
+            <div id="adj-cust-preview-diff" style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.25rem;">Net change: ₹0.00</div>
+          </div>
+
+          <div class="form-group">
+            <label for="adj-cust-reason">Reason for Adjustment *</label>
+            <input type="text" id="adj-cust-reason" class="form-control" required placeholder="e.g. Audit reconciliation, ledger correction, discount waiver">
+          </div>
+
+          <!-- Recent adjustments list -->
+          <div id="adj-cust-history-section" style="margin-top: 1.25rem; display: none;">
+            <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); margin-bottom: 0.5rem;">Recent Adjustment History</div>
+            <div id="adj-cust-history-list" style="max-height: 140px; overflow-y: auto; font-size: 0.75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0.5rem;"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-adjust-customer-balance')">Cancel</button>
+          <button type="submit" id="btn-submit-adjust-customer" class="btn btn-primary btn-sm">Update Balance</button>
         </div>
       </form>
     </div>
@@ -1363,7 +1724,7 @@
         <div class="modal-body">
           <div class="form-group">
             <label for="bank-form-name">Bank & Branch Name *</label>
-            <input type="text" id="bank-form-name" class="form-control" required placeholder="e.g. HDFC Bank - Main Market Branch">
+            <input type="text" id="bank-form-name" class="form-control" required placeholder="e.g. HDFC Bank - Main Branch">
           </div>
           <div class="form-group">
             <label for="bank-form-account">Account Number</label>
@@ -1373,10 +1734,53 @@
             <label for="bank-form-ifsc">IFSC Code</label>
             <input type="text" id="bank-form-ifsc" class="form-control" placeholder="e.g. HDFC0001234">
           </div>
+          <div class="form-group">
+            <label for="bank-form-opening">Opening Balance (₹)</label>
+            <input type="number" step="0.01" id="bank-form-opening" class="form-control" value="0.00" placeholder="0.00">
+            <div class="form-hint">Initial current balance for this bank account.</div>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-bank')">Cancel</button>
           <button type="submit" id="btn-submit-bank" class="btn btn-primary btn-sm">Save Bank Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4B. Modal: Edit Bank Account -->
+  <div id="modal-edit-bank" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Bank Account</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-bank')">&times;</button>
+      </div>
+      <form id="form-edit-bank">
+        <input type="hidden" id="edit-bank-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-bank-name">Bank Name</label>
+            <input type="text" id="edit-bank-name" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label for="edit-bank-account">Account Number</label>
+            <input type="text" id="edit-bank-account" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="edit-bank-ifsc">IFSC Code</label>
+            <input type="text" id="edit-bank-ifsc" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="edit-bank-status">Status</label>
+            <select id="edit-bank-status" class="form-control">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-bank')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-bank" class="btn btn-primary btn-sm">Save Changes</button>
         </div>
       </form>
     </div>
@@ -1410,25 +1814,40 @@
           <div class="form-row">
             <div class="form-group">
               <label for="ls-form-amount">Total Invoice Amount (₹) *</label>
-              <input type="number" step="0.01" id="ls-form-amount" class="form-control" required placeholder="0.00">
+              <input type="number" step="0.01" id="ls-form-amount" class="form-control" required placeholder="0.00" oninput="Operations.calcLineSaleDue()">
             </div>
             <div class="form-group">
               <label for="ls-form-cash">Instant Cash Collected (₹)</label>
-              <input type="number" step="0.01" id="ls-form-cash" class="form-control" value="0.00">
+              <input type="number" step="0.01" id="ls-form-cash" class="form-control" value="0.00" oninput="Operations.calcLineSaleDue()">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label for="ls-form-bank">Bank / UPI Account</label>
-              <select id="ls-form-bank" class="form-control select-bank">
-                <option value="">None / Not Applicable</option>
+              <select id="ls-form-bank" class="form-control select-bank" onchange="Operations.calcLineSaleDue()">
+                <option value="">None / Cash Only</option>
               </select>
             </div>
             <div class="form-group">
               <label for="ls-form-bank-amount">Bank / UPI Amount (₹)</label>
-              <input type="number" step="0.01" id="ls-form-bank-amount" class="form-control" value="0.00">
+              <input type="number" step="0.01" id="ls-form-bank-amount" class="form-control" value="0.00" oninput="Operations.calcLineSaleDue()">
             </div>
           </div>
+
+          <div class="payment-calc-box" id="ls-calc-box">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Collected Amount (Cash + Bank):</span>
+              <strong id="ls-calc-collected" style="color: var(--color-success); font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Due Balance (Customer Ledger):</span>
+              <strong id="ls-calc-due" style="color: var(--color-warning); font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div id="ls-calc-warning" style="display: none; color: var(--color-error); font-size: 0.75rem; margin-top: 0.35rem; font-weight: 600;">
+              ⚠️ Collected amount cannot exceed total invoice amount.
+            </div>
+          </div>
+
           <div class="form-group">
             <label for="ls-form-note">Note / Dispatch Reference</label>
             <input type="text" id="ls-form-note" class="form-control" placeholder="Optional delivery remarks">
@@ -1437,6 +1856,49 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-line-sale')">Cancel</button>
           <button type="submit" id="btn-submit-line-sale" class="btn btn-primary btn-sm">Record Sale</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5B. Modal: Edit Line Sale -->
+  <div id="modal-edit-line-sale" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Line Sale</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-line-sale')">&times;</button>
+      </div>
+      <form id="form-edit-line-sale">
+        <input type="hidden" id="edit-ls-id">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-ls-route">Route</label>
+              <input type="text" id="edit-ls-route" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="edit-ls-salesman">Salesman</label>
+              <input type="text" id="edit-ls-salesman" class="form-control">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-ls-amount">Total Amount (₹)</label>
+              <input type="number" step="0.01" id="edit-ls-amount" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="edit-ls-cash">Total Cash In (₹)</label>
+              <input type="number" step="0.01" id="edit-ls-cash" class="form-control">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="edit-ls-note">Note</label>
+            <input type="text" id="edit-ls-note" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-line-sale')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-ls" class="btn btn-primary btn-sm">Save Changes</button>
         </div>
       </form>
     </div>
@@ -1462,31 +1924,94 @@
             </div>
             <div class="form-group">
               <label for="cs-form-total">Total Amount (₹) *</label>
-              <input type="number" step="0.01" id="cs-form-total" class="form-control" required placeholder="0.00">
+              <input type="number" step="0.01" id="cs-form-total" class="form-control" required placeholder="0.00" oninput="Operations.calcCounterSaleDue()">
             </div>
           </div>
           <div class="form-group">
             <label for="cs-form-method">Payment Mode *</label>
-            <select id="cs-form-method" class="form-control" required>
+            <select id="cs-form-method" class="form-control" required onchange="Operations.handleCounterSaleMethodChange()">
               <option value="cash">Physical Cash</option>
-              <option value="online">Online / UPI / QR</option>
-              <option value="split">Split (Cash + Online)</option>
+              <option value="bank">Bank / Online / UPI</option>
+              <option value="split">Split (Cash + Bank)</option>
+            </select>
+          </div>
+          <div class="form-group" id="cs-bank-select-group" style="display: none;">
+            <label for="cs-form-bank">Select Bank Account *</label>
+            <select id="cs-form-bank" class="form-control select-bank" onchange="Operations.calcCounterSaleDue()">
+              <option value="">Select Bank Account...</option>
             </select>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" id="cs-cash-group">
               <label for="cs-form-cash">Cash Amount (₹)</label>
-              <input type="number" step="0.01" id="cs-form-cash" class="form-control" value="0.00">
+              <input type="number" step="0.01" id="cs-form-cash" class="form-control" value="0.00" oninput="Operations.calcCounterSaleDue()">
             </div>
-            <div class="form-group">
-              <label for="cs-form-account">Bank / Online Amount (₹)</label>
-              <input type="number" step="0.01" id="cs-form-account" class="form-control" value="0.00">
+            <div class="form-group" id="cs-bank-group">
+              <label for="cs-form-account">Bank Amount (₹)</label>
+              <input type="number" step="0.01" id="cs-form-account" class="form-control" value="0.00" oninput="Operations.calcCounterSaleDue()">
+            </div>
+          </div>
+
+          <div class="payment-calc-box" id="cs-calc-box">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Collected Amount (Cash + Bank):</span>
+              <strong id="cs-calc-collected" style="color: var(--color-success); font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Due Amount:</span>
+              <strong id="cs-calc-due" style="color: var(--color-warning); font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div id="cs-calc-warning" style="display: none; color: var(--color-error); font-size: 0.75rem; margin-top: 0.35rem; font-weight: 600;">
+              ⚠️ Collected amount cannot exceed total sale amount.
             </div>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-counter-sale')">Cancel</button>
           <button type="submit" id="btn-submit-counter-sale" class="btn btn-primary btn-sm">Record Sale</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 6B. Modal: Edit Counter Sale -->
+  <div id="modal-edit-counter-sale" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Counter Sale</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-counter-sale')">&times;</button>
+      </div>
+      <form id="form-edit-counter-sale">
+        <input type="hidden" id="edit-cs-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-cs-item">Item Description</label>
+            <input type="text" id="edit-cs-item" class="form-control" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-cs-price">Price (₹)</label>
+              <input type="number" step="0.01" id="edit-cs-price" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="edit-cs-total">Total Amount (₹)</label>
+              <input type="number" step="0.01" id="edit-cs-total" class="form-control">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-cs-cash">Cash Amount (₹)</label>
+              <input type="number" step="0.01" id="edit-cs-cash" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="edit-cs-account">Account Amount (₹)</label>
+              <input type="number" step="0.01" id="edit-cs-account" class="form-control">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-counter-sale')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-cs" class="btn btn-primary btn-sm">Save Changes</button>
         </div>
       </form>
     </div>
@@ -1503,7 +2028,7 @@
         <div class="modal-body">
           <div class="form-group">
             <label for="purch-form-item">Material / Item Description *</label>
-            <input type="text" id="purch-form-item" class="form-control" required placeholder="e.g. Packing Boxes / Raw Oil">
+            <input type="text" id="purch-form-item" class="form-control" required placeholder="e.g. Packing Boxes / Raw Material">
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -1524,20 +2049,57 @@
               <label for="purch-form-method">Payment Source</label>
               <select id="purch-form-method" class="form-control">
                 <option value="cash">Cash in Hand</option>
-                <option value="bank">Bank / Digital Transfer</option>
+                <option value="bank">Bank / Online Transfer</option>
               </select>
             </div>
           </div>
           <div class="form-group">
-            <label for="purch-form-bank">Bank Account (if digital payment)</label>
+            <label for="purch-form-bank">Bank Account (if paying via bank)</label>
             <select id="purch-form-bank" class="form-control select-bank">
-              <option value="">None / Cash Payment</option>
+              <option value="">None / Cash</option>
             </select>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-purchase')">Cancel</button>
           <button type="submit" id="btn-submit-purchase" class="btn btn-primary btn-sm">Record Purchase</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 7B. Modal: Edit Purchase -->
+  <div id="modal-edit-purchase" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Purchase</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-purchase')">&times;</button>
+      </div>
+      <form id="form-edit-purchase">
+        <input type="hidden" id="edit-purch-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-purch-item">Item Description</label>
+            <input type="text" id="edit-purch-item" class="form-control" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-purch-quantity">Quantity</label>
+              <input type="number" id="edit-purch-quantity" class="form-control" min="1">
+            </div>
+            <div class="form-group">
+              <label for="edit-purch-total">Total Amount (₹)</label>
+              <input type="number" step="0.01" id="edit-purch-total" class="form-control">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="edit-purch-paid">Total Paid (₹)</label>
+            <input type="number" step="0.01" id="edit-purch-paid" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-purchase')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-purch" class="btn btn-primary btn-sm">Save Changes</button>
         </div>
       </form>
     </div>
@@ -1565,7 +2127,7 @@
               <label for="exp-form-method">Payment Mode</label>
               <select id="exp-form-method" class="form-control">
                 <option value="cash">Cash in Hand</option>
-                <option value="bank">Bank / Online</option>
+                <option value="bank">Bank / Digital Account</option>
               </select>
             </div>
           </div>
@@ -1579,6 +2141,33 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-add-expense')">Cancel</button>
           <button type="submit" id="btn-submit-expense" class="btn btn-primary btn-sm">Record Expense</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 8B. Modal: Edit Expense -->
+  <div id="modal-edit-expense" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Expense</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-expense')">&times;</button>
+      </div>
+      <form id="form-edit-expense">
+        <input type="hidden" id="edit-exp-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-exp-item">Expense Item</label>
+            <input type="text" id="edit-exp-item" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label for="edit-exp-amount">Amount (₹)</label>
+            <input type="number" step="0.01" id="edit-exp-amount" class="form-control" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-expense')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-exp" class="btn btn-primary btn-sm">Save Changes</button>
         </div>
       </form>
     </div>
@@ -1628,6 +2217,48 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-mark-attendance')">Cancel</button>
           <button type="submit" id="btn-submit-attendance" class="btn btn-primary btn-sm">Save Attendance</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 9B. Modal: Edit Attendance -->
+  <div id="modal-edit-attendance" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Attendance Record</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-edit-attendance')">&times;</button>
+      </div>
+      <form id="form-edit-attendance">
+        <input type="hidden" id="edit-att-id">
+        <div class="modal-body">
+          <div style="background: #f8fafc; border: 1px solid var(--color-border); border-radius: var(--radius-xs); padding: 0.75rem 1rem; margin-bottom: 1rem;">
+            <div style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--color-text-muted);">Employee</div>
+            <div id="edit-att-empname" style="font-weight: 700; color: var(--color-text-main);">Staff Member</div>
+          </div>
+          <div class="form-group">
+            <label for="edit-att-status">Attendance Status</label>
+            <select id="edit-att-status" class="form-control" required>
+              <option value="present">Present (Full Day)</option>
+              <option value="half_day">Half Day</option>
+              <option value="absent">Absent</option>
+              <option value="leave">Approved Leave</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-att-ot">Overtime Hours</label>
+              <input type="number" step="0.5" id="edit-att-ot" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="edit-att-advance">Cash Advance (₹)</label>
+              <input type="number" step="0.01" id="edit-att-advance" class="form-control">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-edit-attendance')">Cancel</button>
+          <button type="submit" id="btn-submit-edit-att" class="btn btn-primary btn-sm">Update Record</button>
         </div>
       </form>
     </div>
@@ -1785,9 +2416,25 @@
     </div>
   </div>
 
+  <!-- 14. Modal: View Details Generic Inspector -->
+  <div id="modal-view-details" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title" id="view-details-title">Transaction Details</h3>
+        <button type="button" class="modal-close-btn" onclick="Operations.closeModal('modal-view-details')">&times;</button>
+      </div>
+      <div class="modal-body" id="view-details-content">
+        <!-- Injected dynamically -->
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-sm" onclick="Operations.closeModal('modal-view-details')">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Footer -->
-  <footer class="container" style="padding: 1.75rem 0; border-top: 1px solid var(--color-border); text-align: center; font-size: 0.8125rem; color: var(--color-text-muted);">
-    © {{.CurrentYear}} Vyavsa Business Management. Production encrypted tenant session.
+  <footer style="padding: 1.25rem 2rem; border-top: 1px solid var(--color-border); text-align: center; font-size: 0.8125rem; color: var(--color-text-muted); background: #ffffff;">
+    © {{.CurrentYear}} Vyavsa Business Management. Secure multi-tenant cloud bill book.
   </footer>
 
   <!-- Scripts -->
@@ -1813,14 +2460,21 @@
         if (displayEl) displayEl.textContent = name;
         const initialEl = document.getElementById('user-avatar-initial');
         if (initialEl) initialEl.textContent = name.charAt(0).toUpperCase();
-        const welcomeEl = document.getElementById('welcome-header');
-        if (welcomeEl) welcomeEl.textContent = `Welcome back, ${name}`;
+        const welcomeEl = document.getElementById('greeting-heading');
+        if (welcomeEl) welcomeEl.textContent = `Good day, ${name}`;
       }
 
-      // Wire logout button
+      // Wire logout buttons
       const logoutBtn = document.getElementById('logout-btn');
       if (logoutBtn) {
         logoutBtn.addEventListener('click', () => {
+          window.Auth.logout();
+        });
+      }
+
+      const sidebarLogout = document.getElementById('sidebar-logout-btn');
+      if (sidebarLogout) {
+        sidebarLogout.addEventListener('click', () => {
           window.Auth.logout();
         });
       }
