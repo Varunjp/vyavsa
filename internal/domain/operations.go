@@ -194,6 +194,36 @@ type TenantDailyStats struct {
 	UpdatedAt           time.Time       `json:"updated_at"`
 }
 
+// TodayAttendanceOverview represents today's staff attendance details
+type TodayAttendanceOverview struct {
+	Present    int  `json:"present"`
+	Total      int  `json:"total"`
+	Absent     int  `json:"absent"`
+	HasRecords bool `json:"has_records"`
+}
+
+// CurrentItemOverview represents inventory/stock intake item information
+type CurrentItemOverview struct {
+	Name         string          `json:"name"`
+	Quantity     int             `json:"quantity,omitempty"`
+	TotalAmount  decimal.Decimal `json:"total_amount"`
+	TotalPaid    decimal.Decimal `json:"total_paid,omitempty"`
+	TotalPending decimal.Decimal `json:"total_pending,omitempty"`
+	Date         string          `json:"date,omitempty"`
+	IsToday      bool            `json:"is_today"`
+	Source       string          `json:"source,omitempty"` // purchase, counter_sale
+}
+
+// TodayOverview aggregates the key daily metrics for the tenant dashboard
+type TodayOverview struct {
+	Attendance      TodayAttendanceOverview `json:"attendance"`
+	LineSale        decimal.Decimal         `json:"line_sale"`
+	CounterSale     decimal.Decimal         `json:"counter_sale"`
+	EmployeeAdvance decimal.Decimal         `json:"employee_advance"`
+	CurrentItem     any                     `json:"current_item"`
+	Date            string                  `json:"date"`
+}
+
 // FinancialMetrics aggregates all live cash, bank, dues, receivables, and pending salaries
 type FinancialMetrics struct {
 	CashBalance         decimal.Decimal   `json:"cash_balance"`
@@ -206,6 +236,7 @@ type FinancialMetrics struct {
 	TodayEmployeeSalary decimal.Decimal   `json:"today_employee_salary"`
 	BankBalances        []TenantBank      `json:"bank_balances,omitempty"`
 	TodayStats          *TenantDailyStats `json:"today_stats,omitempty"`
+	TodayOverview       *TodayOverview    `json:"today_overview,omitempty"`
 	RequestedDate       string            `json:"requested_date,omitempty"`
 	DataDate            string            `json:"data_date,omitempty"`
 	IsCurrent           bool              `json:"is_current"`

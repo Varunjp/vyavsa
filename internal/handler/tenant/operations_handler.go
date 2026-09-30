@@ -1529,3 +1529,19 @@ func (h *OperationsHandler) GetFinancialMetrics(c *gin.Context) {
 
 	response.Success(c, metrics, "financial summary and dashboard metrics retrieved")
 }
+
+func (h *OperationsHandler) GetTodayOverview(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	overview, err := h.svc.GetTodayOverview(c.Request.Context(), tenantID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, overview, "today's overview metrics retrieved")
+}

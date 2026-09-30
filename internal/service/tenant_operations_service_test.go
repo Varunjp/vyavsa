@@ -1249,3 +1249,208 @@ func TestOperationsService_CustomerBalanceAdjustmentAndTenantIsolation(t *testin
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "customer not found")
 }
+
+func TestOperationsService_TodayOverview_Empty(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	overview, err := svc.GetTodayOverview(ctx, tenantID)
+	require.NoError(t, err)
+	require.NotNil(t, overview)
+
+	assert.Equal(t, 0, overview.Attendance.Present)
+	assert.Equal(t, 0, overview.Attendance.Total)
+	assert.False(t, overview.Attendance.HasRecords)
+	assert.True(t, overview.LineSale.IsZero())
+	assert.True(t, overview.CounterSale.IsZero())
+	assert.True(t, overview.EmployeeAdvance.IsZero())
+	assert.Equal(t, struct{}{}, overview.CurrentItem)
+}
+
+func TestOperationsService_TodayOverview_NormalAndMultiple(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+	today := todayString()
+
+	// 1. Create 3 employees
+	emp1, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Worker Alpha",
+		Phone:  "9876543210",
+		Salary: decimal.NewFromFloat(15000),
+		Status: "active",
+	})
+	require.NoError(t, err)
+
+	emp2, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Worker Beta",
+		Phone:  "9876543211",
+		Salary: decimal.NewFromFloat(12000),
+		Status: "active",
+	})
+	require.NoError(t, err)
+
+	emp3, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Worker Gamma",
+		Phone:  "9876543212",
+		Salary: decimal.NewFromFloat(10000),
+		Status: "active",
+	})
+	require.NoError(t, err)
+	_ = emp3
+
+	// 2. Mark attendance for emp1 (present) and emp2 (absent)
+	_, err = svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp1.ID,
+		Date:       today,
+		Status:     "present",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp2.ID,
+		Date:       today,
+		Status:     "absent",
+	})
+	require.NoError(t, err)
+
+	// 3. Record advances for emp1 (1500) and emp2 (2000)
+	_, err = svc.RecordAdvance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAdvanceRequest{
+		EmployeeID: emp1.ID,
+		Date:       today,
+		Amount:     decimal.NewFromFloat(1500.00),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.RecordAdvance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAdvanceRequest{
+		EmployeeID: emp2.ID,
+		Date:       today,
+		Amount:     decimal.NewFromFloat(2000.00),
+	})
+	require.NoError(t, err)
+
+	// 4. Record a purchase item
+	purch, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+		Item:        "Raw Milk 500L",
+		Quantity:    500,
+		TotalAmount: decimal.NewFromFloat(25000.00),
+		TotalPaid:   decimal.NewFromFloat(25000.00),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, purch)
+
+	// 5. Update stats mock with today's aggregates
+	_ = svc.statsRepo.Upsert(ctx, &domain.TenantDailyStats{
+		ID:                uuid.New(),
+		TenantID:          tenantID,
+		Date:              today,
+		LineSaleAmount:    decimal.NewFromFloat(12450.00),
+		CounterSaleAmount: decimal.NewFromFloat(8750.00),
+		AdvanceAmount:     decimal.NewFromFloat(3500.00),
+		AttendancePresent: 1,
+		AttendanceAbsent:  1,
+	})
+
+	overview, err := svc.GetTodayOverview(ctx, tenantID)
+	require.NoError(t, err)
+	require.NotNil(t, overview)
+
+	// Verify Staff Attendance: 1 present / 3 total employees
+	assert.Equal(t, 1, overview.Attendance.Present)
+	assert.Equal(t, 3, overview.Attendance.Total)
+	assert.Equal(t, 1, overview.Attendance.Absent)
+	assert.True(t, overview.Attendance.HasRecords)
+
+	// Verify Sales & Advances
+	assert.True(t, overview.LineSale.Equal(decimal.NewFromFloat(12450.00)))
+	assert.True(t, overview.CounterSale.Equal(decimal.NewFromFloat(8750.00)))
+	assert.True(t, overview.EmployeeAdvance.Equal(decimal.NewFromFloat(3500.00)))
+
+	// Verify Current Item
+	ci, ok := overview.CurrentItem.(*domain.CurrentItemOverview)
+	require.True(t, ok)
+	assert.Equal(t, "Raw Milk 500L", ci.Name)
+	assert.Equal(t, 500, ci.Quantity)
+	assert.True(t, ci.TotalAmount.Equal(decimal.NewFromFloat(25000.00)))
+	assert.True(t, ci.IsToday)
+	assert.Equal(t, "purchase", ci.Source)
+
+	// Also verify that GetFinancialMetrics contains the TodayOverview
+	metrics, err := svc.GetFinancialMetrics(ctx, tenantID)
+	require.NoError(t, err)
+	require.NotNil(t, metrics)
+	require.NotNil(t, metrics.TodayOverview)
+	assert.Equal(t, 1, metrics.TodayOverview.Attendance.Present)
+	assert.Equal(t, 3, metrics.TodayOverview.Attendance.Total)
+	assert.True(t, metrics.TodayOverview.LineSale.Equal(decimal.NewFromFloat(12450.00)))
+}
+
+func TestOperationsService_TodayOverview_DateFiltering(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+	today := todayString()
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+
+	// Store yesterday stats
+	_ = svc.statsRepo.Upsert(ctx, &domain.TenantDailyStats{
+		ID:                uuid.New(),
+		TenantID:          tenantID,
+		Date:              yesterday,
+		LineSaleAmount:    decimal.NewFromFloat(50000.00),
+		CounterSaleAmount: decimal.NewFromFloat(30000.00),
+		AdvanceAmount:     decimal.NewFromFloat(5000.00),
+		AttendancePresent: 4,
+		AttendanceAbsent:  0,
+	})
+
+	// For today, empty stats (no sales today)
+	_ = svc.statsRepo.Upsert(ctx, &domain.TenantDailyStats{
+		ID:                uuid.New(),
+		TenantID:          tenantID,
+		Date:              today,
+		LineSaleAmount:    decimal.Zero,
+		CounterSaleAmount: decimal.Zero,
+		AdvanceAmount:     decimal.Zero,
+		AttendancePresent: 0,
+		AttendanceAbsent:  0,
+	})
+
+	overview, err := svc.GetTodayOverview(ctx, tenantID)
+	require.NoError(t, err)
+	require.NotNil(t, overview)
+
+	// Today's metrics must strictly be for today, not yesterday!
+	assert.True(t, overview.LineSale.IsZero())
+	assert.True(t, overview.CounterSale.IsZero())
+	assert.True(t, overview.EmployeeAdvance.IsZero())
+	assert.Equal(t, 0, overview.Attendance.Present)
+	assert.False(t, overview.Attendance.HasRecords)
+}
+
+func TestOperationsService_TodayOverview_TenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	svcA, tenantIDA := setupTestOperationsService()
+	svcB, tenantIDB := setupTestOperationsService()
+	today := todayString()
+
+	// Tenant A has 2 present, ₹20,000 line sale, ₹5,000 counter sale, ₹1,000 advance
+	_ = svcA.statsRepo.Upsert(ctx, &domain.TenantDailyStats{
+		ID:                uuid.New(),
+		TenantID:          tenantIDA,
+		Date:              today,
+		LineSaleAmount:    decimal.NewFromFloat(20000.00),
+		CounterSaleAmount: decimal.NewFromFloat(5000.00),
+		AdvanceAmount:     decimal.NewFromFloat(1000.00),
+		AttendancePresent: 2,
+		AttendanceAbsent:  0,
+	})
+
+	overviewB, err := svcB.GetTodayOverview(ctx, tenantIDB)
+	require.NoError(t, err)
+	require.NotNil(t, overviewB)
+
+	// Tenant B must have zero metrics, completely isolated from Tenant A
+	assert.True(t, overviewB.LineSale.IsZero())
+	assert.True(t, overviewB.CounterSale.IsZero())
+	assert.True(t, overviewB.EmployeeAdvance.IsZero())
+	assert.Equal(t, 0, overviewB.Attendance.Present)
+}

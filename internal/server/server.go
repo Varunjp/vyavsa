@@ -408,6 +408,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			// Daily Stats & Dashboard Summary
 			tenant.GET("/daily-stats", opsHandler.GetDailyStats)
 			tenant.GET("/dashboard", opsHandler.GetFinancialMetrics)
+			tenant.GET("/dashboard/today", opsHandler.GetTodayOverview)
+			tenant.GET("/dashboard/overview", opsHandler.GetTodayOverview)
 			tenant.GET("/metrics", opsHandler.GetFinancialMetrics)
 
 			// ----------------------------------------------------

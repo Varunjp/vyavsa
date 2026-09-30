@@ -1732,7 +1732,10 @@ func (s *TenantOperationsService) GetDailyStats(ctx context.Context, tenantID uu
 
 func (s *TenantOperationsService) GetFinancialMetrics(ctx context.Context, tenantID uuid.UUID) (*domain.FinancialMetrics, error) {
 	if s.summaryRepo == nil {
-		return &domain.FinancialMetrics{}, nil
+		todayOverview, _ := s.GetTodayOverview(ctx, tenantID)
+		return &domain.FinancialMetrics{
+			TodayOverview: todayOverview,
+		}, nil
 	}
 	summary, err := s.summaryRepo.GetByTenantID(ctx, tenantID)
 	if err != nil {
@@ -1816,6 +1819,8 @@ func (s *TenantOperationsService) GetFinancialMetrics(ctx context.Context, tenan
 		todaySalaryEarned, _ = s.attRepo.GetTodaySalaryEarned(ctx, tenantID, today)
 	}
 
+	todayOverview, _ := s.GetTodayOverview(ctx, tenantID)
+
 	return &domain.FinancialMetrics{
 		CashBalance:         summary.CashBalance,
 		BankBalance:         summary.BankBalance,
@@ -1827,9 +1832,153 @@ func (s *TenantOperationsService) GetFinancialMetrics(ctx context.Context, tenan
 		TodayEmployeeSalary: todaySalaryEarned,
 		BankBalances:        activeBanks,
 		TodayStats:          activeStats,
+		TodayOverview:       todayOverview,
 		RequestedDate:       requestedDate,
 		DataDate:            dataDate,
 		IsCurrent:           isCurrent,
 		DaysOld:             daysOld,
+	}, nil
+}
+
+// GetTodayOverview aggregates the current day's key business and staff metrics
+func (s *TenantOperationsService) GetTodayOverview(ctx context.Context, tenantID uuid.UUID) (*domain.TodayOverview, error) {
+	today := todayString()
+
+	var todayStats *domain.TenantDailyStats
+	if s.statsRepo != nil {
+		todayStats, _ = s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, today)
+	}
+	if todayStats == nil {
+		todayStats = &domain.TenantDailyStats{
+			TenantID:          tenantID,
+			Date:              today,
+			LineSaleAmount:    decimal.Zero,
+			CounterSaleAmount: decimal.Zero,
+			TotalSales:        decimal.Zero,
+			PurchaseAmount:    decimal.Zero,
+			ExpenseAmount:     decimal.Zero,
+			AdvanceAmount:     decimal.Zero,
+		}
+	}
+
+	// 1. Staff Attendance & Total Employee Count
+	totalStaff := 0
+	if s.empRepo != nil {
+		_, activeCount, err := s.empRepo.List(ctx, tenantID, 1, 1, "", "active")
+		if err == nil && activeCount > 0 {
+			totalStaff = int(activeCount)
+		} else {
+			_, allCount, err := s.empRepo.List(ctx, tenantID, 1, 1, "", "")
+			if err == nil {
+				totalStaff = int(allCount)
+			}
+		}
+	}
+
+	recordedTotal := todayStats.AttendancePresent + todayStats.AttendanceAbsent
+	if recordedTotal > totalStaff {
+		totalStaff = recordedTotal
+	}
+	hasRecords := recordedTotal > 0
+
+	attOverview := domain.TodayAttendanceOverview{
+		Present:    todayStats.AttendancePresent,
+		Total:      totalStaff,
+		Absent:     todayStats.AttendanceAbsent,
+		HasRecords: hasRecords,
+	}
+
+	// 2. Line Sale (today's transactions only)
+	lineSale := todayStats.LineSaleAmount
+
+	// 3. Counter Sale (today's transactions only)
+	counterSale := todayStats.CounterSaleAmount
+
+	// 4. Employee Total Advance (today's records only)
+	empAdvance := todayStats.AdvanceAmount
+
+	// 5. Current Item (from existing inventory/purchase data or fallback to counter sales)
+	var currentItem *domain.CurrentItemOverview
+	if s.purchRepo != nil {
+		// First check if an inventory purchase occurred today
+		todayPurchases, _, err := s.purchRepo.List(ctx, tenantID, 1, 1, today, "")
+		if err == nil && len(todayPurchases) > 0 {
+			p := todayPurchases[0]
+			currentItem = &domain.CurrentItemOverview{
+				Name:         p.Item,
+				Quantity:     p.Quantity,
+				TotalAmount:  p.TotalAmount,
+				TotalPaid:    p.TotalPaid,
+				TotalPending: p.TotalPending,
+				Date:         p.CreatedAt.Format("2006-01-02"),
+				IsToday:      true,
+				Source:       "purchase",
+			}
+		} else {
+			// Check latest available inventory procurement
+			allPurchases, _, err := s.purchRepo.List(ctx, tenantID, 1, 1, "", "")
+			if err == nil && len(allPurchases) > 0 {
+				p := allPurchases[0]
+				isToday := p.CreatedAt.Format("2006-01-02") == today
+				currentItem = &domain.CurrentItemOverview{
+					Name:         p.Item,
+					Quantity:     p.Quantity,
+					TotalAmount:  p.TotalAmount,
+					TotalPaid:    p.TotalPaid,
+					TotalPending: p.TotalPending,
+					Date:         p.CreatedAt.Format("2006-01-02"),
+					IsToday:      isToday,
+					Source:       "purchase",
+				}
+			}
+		}
+	}
+
+	// Fallback to counter sale item if no purchase item exists
+	if currentItem == nil && s.countSaleRepo != nil {
+		todaySales, _, err := s.countSaleRepo.List(ctx, tenantID, 1, 1, today, "")
+		if err == nil && len(todaySales) > 0 {
+			cs := todaySales[0]
+			currentItem = &domain.CurrentItemOverview{
+				Name:         cs.Item,
+				Quantity:     1,
+				TotalAmount:  cs.TotalAmount,
+				TotalPaid:    cs.CollectedAmount,
+				TotalPending: cs.Account,
+				Date:         cs.CreatedAt.Format("2006-01-02"),
+				IsToday:      true,
+				Source:       "counter_sale",
+			}
+		} else {
+			allSales, _, err := s.countSaleRepo.List(ctx, tenantID, 1, 1, "", "")
+			if err == nil && len(allSales) > 0 {
+				cs := allSales[0]
+				isToday := cs.CreatedAt.Format("2006-01-02") == today
+				currentItem = &domain.CurrentItemOverview{
+					Name:         cs.Item,
+					Quantity:     1,
+					TotalAmount:  cs.TotalAmount,
+					TotalPaid:    cs.CollectedAmount,
+					TotalPending: cs.Account,
+					Date:         cs.CreatedAt.Format("2006-01-02"),
+					IsToday:      isToday,
+					Source:       "counter_sale",
+				}
+			}
+		}
+	}
+
+	var currentItemVal any = struct{}{}
+	if currentItem != nil {
+		currentItemVal = currentItem
+	}
+
+	return &domain.TodayOverview{
+		Attendance:      attOverview,
+		LineSale:        lineSale,
+		CounterSale:     counterSale,
+		EmployeeAdvance: empAdvance,
+		CurrentItem:     currentItemVal,
+		Date:            today,
 	}, nil
 }

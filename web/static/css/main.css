@@ -1075,3 +1075,118 @@ button, input, select, textarea {
     width: 100% !important;
   }
 }
+
+/* ==========================================================================
+   Enhanced Today's Overview Dashboard Styles
+   ========================================================================== */
+.today-overview-container {
+  margin-bottom: 2rem;
+}
+
+.today-overview-grid-top {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.today-overview-grid-bottom {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.4fr);
+  gap: 1.25rem;
+}
+
+.today-kpi-card {
+  position: relative;
+  overflow: hidden;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.today-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+  border-color: #cbd5e1;
+}
+
+.kpi-val-denom {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: normal;
+  margin-left: 0.25rem;
+}
+
+.current-item-card {
+  background: linear-gradient(180deg, var(--color-surface) 0%, #fafbfc 100%);
+}
+
+.overview-item-title {
+  font-size: 1.1875rem;
+  font-weight: 800;
+  color: var(--color-text-main);
+  letter-spacing: -0.015em;
+  margin: 0.25rem 0 0.5rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-item-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.overview-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.overview-pill.highlight {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+  font-weight: 700;
+}
+
+.overview-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+}
+
+.overview-empty-text {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+@media (max-width: 900px) {
+  .today-overview-grid-top {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .today-overview-grid-bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .today-overview-grid-top {
+    grid-template-columns: 1fr;
+  }
+}
