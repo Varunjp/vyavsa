@@ -81,3 +81,10 @@ type TenantFinancialSummary struct {
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
+
+// CachedTenantPlan represents cached subscription and plan validation status in Redis
+type CachedTenantPlan struct {
+	Active bool       `json:"active"`
+	PlanID *uuid.UUID `json:"plan_id,omitempty"`
+	Status string     `json:"status"`
+}

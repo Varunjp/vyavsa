@@ -90,6 +90,7 @@ func Error(c *gin.Context, err error) {
 
 	c.JSON(appErr.HTTPStatus, Response{
 		Success: false,
+		Message: appErr.Message,
 		Error: &ErrorInfo{
 			Code:    appErr.Code,
 			Message: appErr.Message,

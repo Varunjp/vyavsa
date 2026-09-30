@@ -34,6 +34,11 @@ type Metrics struct {
 	passwordResetSuccessTotal          prometheus.Counter
 	passwordResetFailedTotal           prometheus.Counter
 	passwordResetRateLimitedTotal      prometheus.Counter
+
+	// Tenant Plan Cache & Validation Metrics
+	tenantPlanCacheHitsTotal          prometheus.Counter
+	tenantPlanCacheMissesTotal        prometheus.Counter
+	tenantPlanValidationFailuresTotal prometheus.Counter
 }
 
 // New initializes application metrics and registers them with a custom Prometheus registry
@@ -183,6 +188,31 @@ func New() *Metrics {
 				Help:      "Total count of rate-limited password reset requests",
 			},
 		),
+
+		tenantPlanCacheHitsTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "plan",
+				Name:      "tenant_plan_cache_hits_total",
+				Help:      "Total count of tenant plan cache hits",
+			},
+		),
+		tenantPlanCacheMissesTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "plan",
+				Name:      "tenant_plan_cache_misses_total",
+				Help:      "Total count of tenant plan cache misses",
+			},
+		),
+		tenantPlanValidationFailuresTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "plan",
+				Name:      "tenant_plan_validation_failures_total",
+				Help:      "Total count of tenant plan mutation validation failures",
+			},
+		),
 	}
 
 	reg.MustRegister(
@@ -201,6 +231,9 @@ func New() *Metrics {
 		m.passwordResetSuccessTotal,
 		m.passwordResetFailedTotal,
 		m.passwordResetRateLimitedTotal,
+		m.tenantPlanCacheHitsTotal,
+		m.tenantPlanCacheMissesTotal,
+		m.tenantPlanValidationFailuresTotal,
 	)
 
 	return m
@@ -279,6 +312,27 @@ func (m *Metrics) IncPasswordResetFailed() {
 func (m *Metrics) IncPasswordResetRateLimited() {
 	if m != nil && m.passwordResetRateLimitedTotal != nil {
 		m.passwordResetRateLimitedTotal.Inc()
+	}
+}
+
+// IncTenantPlanCacheHits increments the tenant plan cache hit counter
+func (m *Metrics) IncTenantPlanCacheHits() {
+	if m != nil && m.tenantPlanCacheHitsTotal != nil {
+		m.tenantPlanCacheHitsTotal.Inc()
+	}
+}
+
+// IncTenantPlanCacheMisses increments the tenant plan cache miss counter
+func (m *Metrics) IncTenantPlanCacheMisses() {
+	if m != nil && m.tenantPlanCacheMissesTotal != nil {
+		m.tenantPlanCacheMissesTotal.Inc()
+	}
+}
+
+// IncTenantPlanValidationFailures increments the tenant plan mutation rejection counter
+func (m *Metrics) IncTenantPlanValidationFailures() {
+	if m != nil && m.tenantPlanValidationFailuresTotal != nil {
+		m.tenantPlanValidationFailuresTotal.Inc()
 	}
 }
 
