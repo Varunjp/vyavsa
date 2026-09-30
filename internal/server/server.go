@@ -166,10 +166,23 @@ func (s *Server) setupWebRoutes() {
 	s.router.GET("/platform/login", webHandler.ShowPlatformLogin)
 	s.router.GET("/dashboard", webHandler.ShowDashboard)
 
+	// Platform Admin Web Views
+	s.router.GET("/platform", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/platform/dashboard")
+	})
+	s.router.GET("/platform/dashboard", webHandler.ShowPlatformDashboard)
+	s.router.GET("/platform/tenants", webHandler.ShowPlatformDashboard)
+	s.router.GET("/platform/tenants/:id", webHandler.ShowPlatformDashboard)
+	s.router.GET("/platform/plans", webHandler.ShowPlatformDashboard)
+	s.router.GET("/platform/subscriptions", webHandler.ShowPlatformDashboard)
+	s.router.GET("/platform/transactions", webHandler.ShowPlatformDashboard)
+	s.router.GET("/platform/metrics", webHandler.ShowPlatformDashboard)
+
 	// Favicon shortcut
 	s.router.GET("/favicon.ico", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/static/images/favicon.svg")
 	})
+
 }
 
 func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
@@ -348,8 +361,14 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			platform.POST("/tenants", platformTenantHandler.Onboard)
 			platform.GET("/tenants", platformTenantHandler.List)
 			platform.GET("/tenants/:id", platformTenantHandler.GetByID)
+			platform.PUT("/tenants/:id", platformTenantHandler.UpdateTenant)
 			platform.PATCH("/tenants/:id/status", platformTenantHandler.UpdateStatus)
 			platform.POST("/tenants/:id/subscription", platformTenantHandler.ChangeSubscription)
+
+			// Platform Dashboard, Subscriptions & Transactions
+			platform.GET("/dashboard/metrics", platformTenantHandler.GetDashboardMetrics)
+			platform.GET("/subscriptions", platformTenantHandler.ListSubscriptions)
+			platform.GET("/transactions", platformTenantHandler.ListTransactions)
 		}
 
 		// ----------------------------------------------------

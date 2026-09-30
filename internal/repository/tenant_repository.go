@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/Varunjp/vyavsa/internal/domain"
 	"github.com/google/uuid"
@@ -15,4 +16,6 @@ type TenantRepository interface {
 	List(ctx context.Context, page, pageSize int, status, search string) ([]domain.Tenant, int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	Update(ctx context.Context, tenant *domain.Tenant) error
+	CountByStatus(ctx context.Context, status string) (int64, error)
+	CountSince(ctx context.Context, since time.Time) (int64, error)
 }

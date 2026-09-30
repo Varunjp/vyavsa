@@ -11,9 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Check if platform admin already authenticated
   if (window.Auth && window.Auth.isPlatformAuthenticated()) {
-    window.location.href = '/dashboard';
+    window.location.href = '/platform/dashboard';
     return;
   }
+
 
   if (!form) return;
 
@@ -62,8 +63,9 @@ document.addEventListener('DOMContentLoaded', () => {
       submitBtn.classList.add('btn-success');
 
       setTimeout(() => {
-        window.location.href = '/dashboard';
+        window.location.href = '/platform/dashboard';
       }, 500);
+
 
     } catch (err) {
       window.Auth.setButtonLoading(submitBtn, false);

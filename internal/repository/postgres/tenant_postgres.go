@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Varunjp/vyavsa/internal/domain"
 	appErrors "github.com/Varunjp/vyavsa/pkg/errors"
@@ -191,4 +192,24 @@ func (r *TenantPostgres) Update(ctx context.Context, tenant *domain.Tenant) erro
 		return MapDBError(err, "failed to update tenant")
 	}
 	return nil
+}
+
+func (r *TenantPostgres) CountByStatus(ctx context.Context, status string) (int64, error) {
+	query := `SELECT COUNT(*) FROM tenants WHERE ($1 = '' OR status = $1)`
+	exec := GetExecutor(ctx, r.pool)
+	var count int64
+	if err := exec.QueryRow(ctx, query, status).Scan(&count); err != nil {
+		return 0, MapDBError(err, "failed to count tenants by status")
+	}
+	return count, nil
+}
+
+func (r *TenantPostgres) CountSince(ctx context.Context, since time.Time) (int64, error) {
+	query := `SELECT COUNT(*) FROM tenants WHERE created_at >= $1`
+	exec := GetExecutor(ctx, r.pool)
+	var count int64
+	if err := exec.QueryRow(ctx, query, since).Scan(&count); err != nil {
+		return 0, MapDBError(err, "failed to count tenants since timestamp")
+	}
+	return count, nil
 }

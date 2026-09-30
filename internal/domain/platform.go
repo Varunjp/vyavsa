@@ -57,3 +57,35 @@ type PlatformPlanTransaction struct {
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
 }
+
+// PlatformSubscriptionWithTenant includes tenant business details for platform administrative listings
+type PlatformSubscriptionWithTenant struct {
+	ID              uuid.UUID  `json:"id"`
+	TenantID        uuid.UUID  `json:"tenant_id"`
+	TenantName      string     `json:"tenant_name"`
+	TenantEmail     string     `json:"tenant_email"`
+	CurrentPlanID   uuid.UUID  `json:"current_plan_id"`
+	CurrentPlanName string     `json:"current_plan_name"`
+	Status          string     `json:"status"`
+	StartDate       *time.Time `json:"start_date,omitempty"`
+	EndDate         *time.Time `json:"end_date,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// PlatformPlanTransactionWithTenant includes tenant business details for platform administrative transaction records
+type PlatformPlanTransactionWithTenant struct {
+	ID            uuid.UUID       `json:"id"`
+	TenantID      uuid.UUID       `json:"tenant_id"`
+	TenantName    string          `json:"tenant_name"`
+	TenantEmail   string          `json:"tenant_email"`
+	TransactionID string          `json:"transaction_id"`
+	PaymentMethod string          `json:"payment_method"`
+	PlanID        uuid.UUID       `json:"plan_id"`
+	PlanName      string          `json:"plan_name"`
+	Amount        decimal.Decimal `json:"amount"`
+	Status        string          `json:"status"`
+	FailureReason string          `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+}

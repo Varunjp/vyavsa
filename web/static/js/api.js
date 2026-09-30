@@ -51,7 +51,8 @@ const API = (() => {
 
     // Attach token if available and not explicitly skipped
     if (!options.skipAuth && window.Auth) {
-      const token = options.isPlatform ? window.Auth.getPlatformToken() : window.Auth.getAccessToken();
+      const isPlatform = options.isPlatform || (typeof window !== 'undefined' && window.location && window.location.pathname.startsWith('/platform'));
+      const token = isPlatform ? window.Auth.getPlatformToken() : window.Auth.getAccessToken();
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -110,9 +111,11 @@ const API = (() => {
     get: (endpoint, options = {}) => request(endpoint, { ...options, method: 'GET' }),
     post: (endpoint, body, options = {}) => request(endpoint, { ...options, method: 'POST', body }),
     put: (endpoint, body, options = {}) => request(endpoint, { ...options, method: 'PUT', body }),
+    patch: (endpoint, body, options = {}) => request(endpoint, { ...options, method: 'PATCH', body }),
     delete: (endpoint, options = {}) => request(endpoint, { ...options, method: 'DELETE' }),
     request
   };
+
 })();
 
 window.API = API;

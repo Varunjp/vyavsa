@@ -11,6 +11,7 @@ import (
 	"github.com/Varunjp/vyavsa/internal/dto"
 	"github.com/Varunjp/vyavsa/internal/logger"
 	"github.com/Varunjp/vyavsa/internal/metrics"
+	"github.com/Varunjp/vyavsa/internal/repository"
 	appErrors "github.com/Varunjp/vyavsa/pkg/errors"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -87,6 +88,26 @@ func (m *mockTenantRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	return nil
 }
 
+func (m *mockTenantRepo) CountByStatus(ctx context.Context, status string) (int64, error) {
+	var count int64
+	for _, t := range m.tenants {
+		if status == "" || t.Status == status {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockTenantRepo) CountSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	for _, t := range m.tenants {
+		if t.CreatedAt.After(since) || t.CreatedAt.Equal(since) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // Mock FinancialSummaryRepo
 type mockFinancialSummaryRepo struct {
 	summaries map[uuid.UUID]*domain.TenantFinancialSummary
@@ -157,6 +178,28 @@ func (m *mockSubscriptionRepo) Update(ctx context.Context, sub *domain.PlatformS
 	return nil
 }
 
+func (m *mockSubscriptionRepo) List(ctx context.Context, page, pageSize int, status string) ([]domain.PlatformSubscriptionWithTenant, int64, error) {
+	var items []domain.PlatformSubscriptionWithTenant
+	for _, sub := range m.subs {
+		if status == "" || sub.Status == status {
+			items = append(items, domain.PlatformSubscriptionWithTenant{
+				ID:              sub.ID,
+				TenantID:        sub.TenantID,
+				TenantName:      "Mock Tenant",
+				TenantEmail:     "mock@vyavsa.test",
+				CurrentPlanID:   sub.CurrentPlanID,
+				CurrentPlanName: sub.CurrentPlanName,
+				Status:          sub.Status,
+				StartDate:       sub.StartDate,
+				EndDate:         sub.EndDate,
+				CreatedAt:       sub.CreatedAt,
+				UpdatedAt:       sub.UpdatedAt,
+			})
+		}
+	}
+	return items, int64(len(items)), nil
+}
+
 // Mock PlanTxnRepo
 type mockPlanTxnRepo struct {
 	txns map[uuid.UUID]*domain.PlatformPlanTransaction
@@ -199,6 +242,44 @@ func (m *mockPlanTxnRepo) GetByTransactionID(ctx context.Context, tenantID uuid.
 		}
 	}
 	return nil, appErrors.NewNotFound("transaction not found")
+}
+
+func (m *mockPlanTxnRepo) ListAll(ctx context.Context, page, pageSize int, status string) ([]domain.PlatformPlanTransactionWithTenant, int64, error) {
+	var items []domain.PlatformPlanTransactionWithTenant
+	for _, tx := range m.txns {
+		if status == "" || tx.Status == status {
+			items = append(items, domain.PlatformPlanTransactionWithTenant{
+				ID:            tx.ID,
+				TenantID:      tx.TenantID,
+				TenantName:    "Mock Tenant",
+				TenantEmail:   "mock@vyavsa.test",
+				TransactionID: tx.TransactionID,
+				PaymentMethod: tx.PaymentMethod,
+				PlanID:        tx.PlanID,
+				PlanName:      tx.PlanName,
+				Amount:        tx.Amount,
+				Status:        tx.Status,
+				FailureReason: tx.FailureReason,
+				CreatedAt:     tx.CreatedAt,
+				UpdatedAt:     tx.UpdatedAt,
+			})
+		}
+	}
+	return items, int64(len(items)), nil
+}
+
+func (m *mockPlanTxnRepo) GetMonthlyReceivedIncome(ctx context.Context, since time.Time) (decimal.Decimal, error) {
+	sum := decimal.Zero
+	for _, tx := range m.txns {
+		if tx.Status == "completed" && (tx.CreatedAt.After(since) || tx.CreatedAt.Equal(since)) {
+			sum = sum.Add(tx.Amount)
+		}
+	}
+	return sum, nil
+}
+
+func (m *mockPlanTxnRepo) GetMonthlyRevenueTrend(ctx context.Context, since time.Time) ([]repository.MonthlyRevenueAggregate, error) {
+	return []repository.MonthlyRevenueAggregate{}, nil
 }
 
 // Mock TenantUserRepo
@@ -710,5 +791,100 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, int64(2), count)
 		assert.Len(t, txns, 2)
+	})
+
+	t.Run("Platform Admin Dashboard, Subscriptions, Transactions, and Tenant Update", func(t *testing.T) {
+		tenantRepo := newMockTenantRepo()
+		tenantUserRepo := newMockTenantUserRepoFull()
+		summaryRepo := newMockFinancialSummaryRepo()
+		subRepo := newMockSubscriptionRepo()
+		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
+		transactor := &mockTransactor{}
+
+		svc := NewTenantService(
+			tenantRepo,
+			tenantUserRepo,
+			summaryRepo,
+			subRepo,
+			planRepo,
+			txnRepo,
+			transactor,
+			hasher,
+			jwtManager,
+			appMetrics,
+			log,
+		)
+
+		// Create a test plan
+		plan := &domain.PlatformPlan{
+			ID:       uuid.New(),
+			PlanName: "Pro Tier",
+			Price:    decimal.NewFromInt(1999),
+			Status:   "active",
+		}
+		require.NoError(t, planRepo.Create(ctx, plan))
+
+		// Onboard a tenant
+		onboardResp, err := svc.OnboardTenant(ctx, dto.OnboardTenantRequest{
+			Name:          "Platform Test Org",
+			Email:         "platform-test@vyavsa.com",
+			Phone:         "+91 9999999999",
+			AdminPassword: "password123",
+			PlanID:        plan.ID,
+		})
+		require.NoError(t, err)
+		tenantID := onboardResp.Tenant.ID
+
+		// Record a completed transaction
+		tx := &domain.PlatformPlanTransaction{
+			TenantID:      tenantID,
+			TransactionID: "TXN-PLAT-001",
+			PaymentMethod: "card",
+			PlanID:        plan.ID,
+			PlanName:      plan.PlanName,
+			Amount:        decimal.NewFromInt(1999),
+			Status:        "completed",
+		}
+		require.NoError(t, txnRepo.Create(ctx, tx))
+
+		// 1. Test GetPlatformDashboardMetrics
+		metricsResp, err := svc.GetPlatformDashboardMetrics(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, metricsResp)
+		assert.Equal(t, int64(1), metricsResp.ActiveTenants)
+		assert.Equal(t, int64(1), metricsResp.TotalTenants)
+		assert.Equal(t, int64(1), metricsResp.RecentRegistrations7d)
+		assert.True(t, metricsResp.MonthlyReceivedIncome.Equal(decimal.NewFromInt(1999)))
+		assert.Len(t, metricsResp.RevenueTrend, 6)
+
+		// 2. Test ListPlatformSubscriptions
+		subs, subCount, err := svc.ListPlatformSubscriptions(ctx, 1, 10, "")
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), subCount)
+		require.Len(t, subs, 1)
+		assert.Equal(t, tenantID, subs[0].TenantID)
+
+		// 3. Test ListPlatformTransactions
+		txns, txCount, err := svc.ListPlatformTransactions(ctx, 1, 10, "")
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), txCount)
+		require.Len(t, txns, 1)
+		assert.Equal(t, "TXN-PLAT-001", txns[0].TransactionID)
+		assert.True(t, txns[0].Amount.Equal(decimal.NewFromInt(1999)))
+
+		// 4. Test UpdateTenant
+		updateResp, err := svc.UpdateTenant(ctx, tenantID, dto.UpdatePlatformTenantRequest{
+			Name:   "Platform Test Org Updated",
+			Email:  "updated-org@vyavsa.com",
+			Phone:  "+91 8888888888",
+			Status: "inactive",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, updateResp)
+		assert.Equal(t, "Platform Test Org Updated", updateResp.Tenant.Name)
+		assert.Equal(t, "updated-org@vyavsa.com", updateResp.Tenant.Email)
+		assert.Equal(t, "+91 8888888888", updateResp.Tenant.Phone)
+		assert.Equal(t, "inactive", updateResp.Tenant.Status)
 	})
 }

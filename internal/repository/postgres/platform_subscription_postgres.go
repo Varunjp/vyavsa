@@ -97,3 +97,64 @@ func (r *PlatformSubscriptionPostgres) Update(ctx context.Context, sub *domain.P
 	}
 	return nil
 }
+
+func (r *PlatformSubscriptionPostgres) List(ctx context.Context, page, pageSize int, status string) ([]domain.PlatformSubscriptionWithTenant, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	exec := GetExecutor(ctx, r.pool)
+
+	countQuery := `
+		SELECT COUNT(*)
+		FROM platform_subscriptions s
+		JOIN tenants t ON t.id = s.tenant_id
+		WHERE ($1 = '' OR s.status = $1)
+	`
+	var total int64
+	if err := exec.QueryRow(ctx, countQuery, status).Scan(&total); err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count platform subscriptions: %w", err))
+	}
+
+	query := `
+		SELECT s.id, s.tenant_id, t.name, t.email, s.current_plan_id, s.current_plan_name,
+		       s.status, s.start_date, s.end_date, s.created_at, s.updated_at
+		FROM platform_subscriptions s
+		JOIN tenants t ON t.id = s.tenant_id
+		WHERE ($1 = '' OR s.status = $1)
+		ORDER BY s.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := exec.Query(ctx, query, status, pageSize, offset)
+	if err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list platform subscriptions: %w", err))
+	}
+	defer rows.Close()
+
+	items := make([]domain.PlatformSubscriptionWithTenant, 0, pageSize)
+	for rows.Next() {
+		var item domain.PlatformSubscriptionWithTenant
+		if err := rows.Scan(
+			&item.ID,
+			&item.TenantID,
+			&item.TenantName,
+			&item.TenantEmail,
+			&item.CurrentPlanID,
+			&item.CurrentPlanName,
+			&item.Status,
+			&item.StartDate,
+			&item.EndDate,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan platform subscription: %w", err))
+		}
+		items = append(items, item)
+	}
+
+	return items, total, nil
+}

@@ -150,4 +150,105 @@ func TestTenantEndpointsIntegration(t *testing.T) {
 		assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
 		assert.Contains(t, w.Body.String(), "VALIDATION_ERROR")
 	})
+
+	t.Run("GET /api/v1/platform/dashboard/metrics without token returns 401 Unauthorized", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/platform/dashboard/metrics", nil)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "UNAUTHORIZED")
+	})
+
+	t.Run("GET /api/v1/platform/dashboard/metrics with tenant token returns 403 Forbidden", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/platform/dashboard/metrics", nil)
+		req.Header.Set("Authorization", "Bearer "+tenantToken.AccessToken)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "FORBIDDEN")
+	})
+
+	t.Run("GET /api/v1/platform/subscriptions without token returns 401 Unauthorized", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/platform/subscriptions", nil)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "UNAUTHORIZED")
+	})
+
+	t.Run("GET /api/v1/platform/subscriptions with tenant token returns 403 Forbidden", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/platform/subscriptions", nil)
+		req.Header.Set("Authorization", "Bearer "+tenantToken.AccessToken)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "FORBIDDEN")
+	})
+
+	t.Run("GET /api/v1/platform/transactions without token returns 401 Unauthorized", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/platform/transactions", nil)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "UNAUTHORIZED")
+	})
+
+	t.Run("GET /api/v1/platform/transactions with tenant token returns 403 Forbidden", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/platform/transactions", nil)
+		req.Header.Set("Authorization", "Bearer "+tenantToken.AccessToken)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "FORBIDDEN")
+	})
+
+	t.Run("PUT /api/v1/platform/tenants/:id without token returns 401 Unauthorized", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"name":"Updated Name","email":"updated@test.com"}`)
+		req, _ := http.NewRequest(http.MethodPut, "/api/v1/platform/tenants/00000000-0000-0000-0000-000000000001", body)
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "UNAUTHORIZED")
+	})
+
+	t.Run("PUT /api/v1/platform/tenants/:id with tenant token returns 403 Forbidden", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"name":"Updated Name","email":"updated@test.com"}`)
+		req, _ := http.NewRequest(http.MethodPut, "/api/v1/platform/tenants/00000000-0000-0000-0000-000000000001", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+tenantToken.AccessToken)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "FORBIDDEN")
+	})
+
+	t.Run("PUT /api/v1/platform/tenants/:id with invalid UUID returns 400 Bad Request", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"name":"Updated Name","email":"updated@test.com"}`)
+		req, _ := http.NewRequest(http.MethodPut, "/api/v1/platform/tenants/invalid-uuid", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+adminToken.AccessToken)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+	})
 }
