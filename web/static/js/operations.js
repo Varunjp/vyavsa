@@ -1046,35 +1046,322 @@ const Operations = (() => {
     }
   }
 
-  // 14. Profile & Organization
-  async function loadProfile() {
+  // 14. Tenant Settings & Profile
+  async function loadTenantSettings() {
     try {
       const res = await window.API.get('/tenant/profile');
       if (res.ok && res.data) {
         const t = res.data;
-        document.getElementById('profile-biz-name').textContent = t.name || '—';
-        document.getElementById('profile-biz-email').textContent = t.email || '—';
-        document.getElementById('profile-biz-phone').textContent = t.phone || '—';
-        document.getElementById('profile-biz-status').textContent = t.status || 'active';
-        document.getElementById('profile-biz-id').textContent = t.id || '—';
-      }
+        const nameEl = document.getElementById('settings-tenant-name');
+        const emailEl = document.getElementById('settings-tenant-email');
+        const phoneEl = document.getElementById('settings-tenant-phone');
+        const idEl = document.getElementById('settings-display-id');
+        const statusEl = document.getElementById('settings-display-status');
+        const createdEl = document.getElementById('settings-display-created');
 
-      if (currentUser) {
-        document.getElementById('profile-user-name').textContent = currentUser.name || 'Business User';
-        document.getElementById('profile-user-email').textContent = currentUser.email || '—';
-        const roleEl = document.getElementById('profile-user-role');
-        roleEl.textContent = currentUser.role === 'admin' ? 'Tenant Administrator' : 'Tenant Operator';
-        roleEl.className = 'status-badge ' + (currentUser.role === 'admin' ? 'paid' : 'cleared');
-      }
-
-      const subRes = await window.API.get('/tenant/subscription');
-      if (subRes.ok && subRes.data) {
-        document.getElementById('profile-plan-name').textContent = subRes.data.plan_name || 'Active Plan';
-        document.getElementById('profile-plan-status').textContent = subRes.data.status || 'active';
+        if (nameEl) nameEl.value = t.name || '';
+        if (emailEl) emailEl.value = t.email || '';
+        if (phoneEl) phoneEl.value = t.phone || '';
+        if (idEl) idEl.textContent = t.id || '—';
+        if (statusEl) {
+          statusEl.textContent = t.status || 'active';
+          statusEl.className = 'status-badge ' + (t.status === 'active' ? 'paid' : 'danger');
+        }
+        if (createdEl) createdEl.textContent = formatDateTime(t.created_at);
       }
     } catch (e) {
-      console.warn('Failed loading profile:', e);
+      console.warn('Failed loading tenant settings:', e);
     }
+  }
+
+  async function submitTenantSettings(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (currentRole !== 'admin') {
+      showToast('Admin privilege required to update settings', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('btn-save-settings');
+    setButtonLoading(btn, true);
+
+    const name = document.getElementById('settings-tenant-name').value.trim();
+    const email = document.getElementById('settings-tenant-email').value.trim();
+    const phone = document.getElementById('settings-tenant-phone').value.trim();
+
+    if (!name || !email) {
+      showToast('Business name and email are required', 'error');
+      setButtonLoading(btn, false);
+      return;
+    }
+
+    try {
+      const res = await window.API.put('/tenant/settings', { name, email, phone });
+      setButtonLoading(btn, false);
+
+      if (!res.ok) {
+        showToast(res.error || 'Failed to update business settings', 'error');
+        return;
+      }
+
+      showToast('Business settings updated successfully', 'success');
+      const greetingHeading = document.getElementById('greeting-heading');
+      if (greetingHeading && res.data && res.data.name) {
+        greetingHeading.textContent = `Welcome, ${res.data.name}`;
+      }
+      loadTenantSettings();
+    } catch (err) {
+      setButtonLoading(btn, false);
+      showToast('Network error while updating settings', 'error');
+    }
+  }
+
+  // 15. Subscription & Plans Management
+  let cachedCurrentSub = null;
+
+  async function loadTenantSubscription() {
+    try {
+      const res = await window.API.get('/tenant/subscription');
+      if (res.ok && res.data) {
+        const sub = res.data;
+        cachedCurrentSub = sub;
+
+        const planNameEl = document.getElementById('sub-card-plan-name');
+        const priceEl = document.getElementById('sub-card-price');
+        const noteEl = document.getElementById('sub-card-note');
+        const startEl = document.getElementById('sub-card-start-date');
+        const endEl = document.getElementById('sub-card-end-date');
+        const daysEl = document.getElementById('sub-card-days-remaining');
+        const statusPill = document.getElementById('sub-status-pill');
+        const expiryAlert = document.getElementById('sub-expired-alert');
+        const expiryHint = document.getElementById('sub-card-expiry-hint');
+
+        if (planNameEl) planNameEl.textContent = sub.plan_name || 'Free Starter';
+        if (priceEl) priceEl.textContent = formatCurrency(sub.price || 0);
+        if (noteEl) noteEl.textContent = sub.note || 'Active Tier Subscription';
+        if (startEl) startEl.textContent = sub.start_date ? formatDate(sub.start_date) : 'Registration Date';
+        if (endEl) endEl.textContent = sub.end_date ? formatDate(sub.end_date) : 'No Expiry (Lifetime)';
+        
+        if (daysEl) {
+          if (sub.is_expired) {
+            daysEl.textContent = '0 Days';
+            daysEl.style.color = 'var(--color-error)';
+          } else {
+            daysEl.textContent = sub.end_date ? `${sub.days_remaining} Days` : 'Unlimited';
+            daysEl.style.color = 'var(--color-primary)';
+          }
+        }
+
+        if (sub.is_expired) {
+          if (expiryAlert) expiryAlert.style.display = 'flex';
+          if (statusPill) {
+            statusPill.textContent = 'Expired';
+            statusPill.className = 'status-badge danger';
+          }
+          if (expiryHint) {
+            expiryHint.textContent = 'Subscription Expired';
+            expiryHint.style.color = 'var(--color-error)';
+          }
+        } else {
+          if (expiryAlert) expiryAlert.style.display = 'none';
+          if (statusPill) {
+            statusPill.textContent = 'Active';
+            statusPill.className = 'status-badge paid';
+          }
+          if (expiryHint) {
+            expiryHint.textContent = `${sub.days_remaining} days left in billing cycle`;
+            expiryHint.style.color = 'var(--color-text-muted)';
+          }
+        }
+      }
+
+      await loadAvailablePlans();
+    } catch (e) {
+      console.warn('Failed loading subscription:', e);
+    }
+  }
+
+  async function loadAvailablePlans() {
+    const container = document.getElementById('plans-container');
+    if (!container) return;
+
+    try {
+      const res = await window.API.get('/tenant/subscription/plans');
+      if (!res.ok || !res.data) {
+        container.innerHTML = '<div style="color:var(--color-text-muted);padding:2rem;text-align:center;grid-column:1/-1;">No subscription plans available at this time.</div>';
+        return;
+      }
+
+      const plans = res.data;
+      if (plans.length === 0) {
+        container.innerHTML = '<div style="color:var(--color-text-muted);padding:2rem;text-align:center;grid-column:1/-1;">No subscription plans configured.</div>';
+        return;
+      }
+
+      const currentPlanId = cachedCurrentSub ? cachedCurrentSub.plan_id : null;
+      const isSubExpired = cachedCurrentSub ? cachedCurrentSub.is_expired : false;
+
+      container.innerHTML = plans.map(p => {
+        const isCurrent = currentPlanId === p.id && !isSubExpired;
+        const priceNum = parseFloat(p.price) || 0;
+        const priceDisplay = priceNum === 0 ? 'Free' : formatCurrency(priceNum);
+
+        return `
+          <div class="plan-card ${isCurrent ? 'current-active' : ''}">
+            ${isCurrent ? '<span class="plan-badge-active">Current Plan</span>' : ''}
+            <div style="font-size: 1.125rem; font-weight: 800; color: var(--color-text-main);">${escapeHTML(p.name)}</div>
+            <div style="font-size: 0.8125rem; color: var(--color-text-muted); min-height: 2.2rem; margin-top: 0.25rem;">${escapeHTML(p.description || 'Full-featured small business billing & operations.')}</div>
+            
+            <div class="plan-price-tag">
+              ${priceDisplay}
+              ${priceNum > 0 ? '<span class="plan-price-period">/ 30 days</span>' : '<span class="plan-price-period">/ starter</span>'}
+            </div>
+
+            <ul class="plan-features-list">
+              <li>
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <span>Full Counter & Line Sale Billing</span>
+              </li>
+              <li>
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <span>Staff Attendance & Salary Ledger</span>
+              </li>
+              <li>
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <span>Live Cash & Multi-Bank Balances</span>
+              </li>
+              <li>
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <span>Receivables & Dues Settlement</span>
+              </li>
+            </ul>
+
+            <div style="margin-top: 1rem;">
+              ${isCurrent ? `
+                <button type="button" class="btn btn-secondary btn-sm" disabled style="width: 100%; opacity: 0.85; cursor: default;">
+                  ✓ Currently Active
+                </button>
+              ` : `
+                <button type="button" class="btn btn-primary btn-sm" style="width: 100%;" onclick="Operations.openPurchaseModal('${p.id}', '${escapeHTML(p.name)}', ${priceNum})">
+                  ${isSubExpired && currentPlanId === p.id ? 'Renew Plan' : 'Select / Upgrade'}
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      container.innerHTML = '<div style="color:var(--color-error);padding:2rem;text-align:center;grid-column:1/-1;">Failed to load available plans.</div>';
+    }
+  }
+
+  function scrollToPlans() {
+    const el = document.getElementById('available-plans-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function openPurchaseModal(planId, planName, planPrice) {
+    if (currentRole !== 'admin') {
+      showToast('Admin privilege required to purchase or upgrade plans', 'error');
+      return;
+    }
+
+    const idInput = document.getElementById('purchase-plan-id');
+    const nameEl = document.getElementById('purchase-modal-plan-name');
+    const priceEl = document.getElementById('purchase-modal-plan-price');
+
+    if (idInput) idInput.value = planId;
+    if (nameEl) nameEl.textContent = planName || 'Pro Tier';
+    if (priceEl) priceEl.textContent = planPrice === 0 ? 'Free' : formatCurrency(planPrice);
+
+    openModal('modal-purchase-plan');
+  }
+
+  async function submitPurchasePlan(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (currentRole !== 'admin') {
+      showToast('Admin privilege required to purchase plans', 'error');
+      return;
+    }
+
+    const planId = document.getElementById('purchase-plan-id').value;
+    const paymentMethod = document.getElementById('purchase-payment-method').value;
+    const btn = document.getElementById('btn-submit-purchase');
+
+    setButtonLoading(btn, true);
+
+    try {
+      const res = await window.API.post('/tenant/subscription/purchase', {
+        plan_id: planId,
+        payment_method: paymentMethod
+      });
+      setButtonLoading(btn, false);
+
+      if (!res.ok) {
+        showToast(res.error || 'Failed to process subscription purchase', 'error');
+        return;
+      }
+
+      closeModal('modal-purchase-plan');
+      showToast('Subscription plan activated successfully!', 'success');
+      await loadTenantSubscription();
+      loadTenantTransactions();
+    } catch (err) {
+      setButtonLoading(btn, false);
+      showToast('Network error during plan purchase', 'error');
+    }
+  }
+
+  // 16. Tenant Transactions History
+  async function loadTenantTransactions() {
+    const tbody = document.getElementById('table-transactions-body');
+    const countBadge = document.getElementById('txn-count-badge');
+    if (!tbody) return;
+
+    try {
+      const res = await window.API.get('/tenant/subscription/transactions?page=1&page_size=50');
+      if (!res.ok || !res.data) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-text-muted);padding:2rem;">No billing transactions recorded yet.</td></tr>';
+        if (countBadge) countBadge.textContent = '0';
+        return;
+      }
+
+      const txns = res.data;
+      if (countBadge) countBadge.textContent = String(txns.length);
+
+      if (txns.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-text-muted);padding:2rem;">No billing transactions found for this business.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = txns.map(t => {
+        let statusBadge = '<span class="status-badge paid">Completed</span>';
+        if (t.status === 'pending') {
+          statusBadge = '<span class="status-badge pending">Pending</span>';
+        } else if (t.status === 'failed') {
+          statusBadge = '<span class="status-badge danger">Failed</span>';
+        }
+
+        return `
+          <tr>
+            <td><code style="font-family: var(--font-mono); font-size: 0.75rem;">${escapeHTML(t.transaction_id)}</code></td>
+            <td><strong>${escapeHTML(t.plan_name || 'Standard Plan')}</strong></td>
+            <td><strong style="color: var(--color-primary);">${formatCurrency(t.amount)}</strong></td>
+            <td><span class="status-badge cleared" style="text-transform: uppercase;">${escapeHTML(t.payment_method)}</span></td>
+            <td>${statusBadge}</td>
+            <td style="font-size: 0.8125rem; color: var(--color-text-muted);">${formatDateTime(t.created_at)}</td>
+            <td style="font-size: 0.8125rem; color: var(--color-text-muted);">${escapeHTML(t.failure_reason || '—')}</td>
+          </tr>
+        `;
+      }).join('');
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-error);padding:2rem;">Failed to load transactions.</td></tr>';
+    }
+  }
+
+  // Legacy profile compatibility loader
+  async function loadProfile() {
+    loadTenantSettings();
+    loadTenantSubscription();
   }
 
   // ==========================================
@@ -2441,8 +2728,17 @@ const Operations = (() => {
       case 'receivables-dues':
         loadReceivablesDues();
         break;
+      case 'settings':
+        loadTenantSettings();
+        break;
+      case 'subscription':
+        loadTenantSubscription();
+        break;
+      case 'transactions':
+        loadTenantTransactions();
+        break;
       case 'profile':
-        loadProfile();
+        switchTab('settings');
         break;
     }
   }
@@ -2694,7 +2990,15 @@ const Operations = (() => {
     loadSalaries,
     loadCashBank,
     loadReceivablesDues,
-    loadDashboardMetrics
+    loadDashboardMetrics,
+    loadTenantSettings,
+    submitTenantSettings,
+    loadTenantSubscription,
+    loadAvailablePlans,
+    scrollToPlans,
+    openPurchaseModal,
+    submitPurchasePlan,
+    loadTenantTransactions
   };
 })();
 

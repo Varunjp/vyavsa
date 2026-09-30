@@ -169,3 +169,26 @@ func (r *TenantPostgres) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	}
 	return nil
 }
+
+func (r *TenantPostgres) Update(ctx context.Context, tenant *domain.Tenant) error {
+	query := `
+		UPDATE tenants
+		SET name = $1, email = $2, phone = $3, updated_at = NOW()
+		WHERE id = $4
+		RETURNING updated_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, query,
+		tenant.Name,
+		tenant.Email,
+		tenant.Phone,
+		tenant.ID,
+	).Scan(&tenant.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return appErrors.NewNotFound("tenant not found")
+		}
+		return MapDBError(err, "failed to update tenant")
+	}
+	return nil
+}

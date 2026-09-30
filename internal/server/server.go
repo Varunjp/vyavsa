@@ -183,6 +183,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	var tenantRepo repository.TenantRepository
 	var summaryRepo repository.TenantFinancialSummaryRepository
 	var subRepo repository.PlatformSubscriptionRepository
+	var txnRepo repository.PlatformPlanTransactionRepository
 	var transactor repository.Transactor
 
 	var empRepo repository.TenantEmployeeRepository
@@ -203,6 +204,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		tenantRepo = postgresRepo.NewTenantPostgres(s.db.Pool)
 		summaryRepo = postgresRepo.NewTenantFinancialSummaryPostgres(s.db.Pool)
 		subRepo = postgresRepo.NewPlatformSubscriptionPostgres(s.db.Pool)
+		txnRepo = postgresRepo.NewPlatformPlanTransactionPostgres(s.db.Pool)
 		transactor = postgresRepo.NewPostgresTransactor(s.db.Pool)
 
 		empRepo = postgresRepo.NewTenantEmployeePostgres(s.db.Pool)
@@ -251,6 +253,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		summaryRepo,
 		subRepo,
 		planRepo,
+		txnRepo,
 		transactor,
 		hasher,
 		jwtManager,
@@ -366,8 +369,11 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 
 			// Tenant Organization Profile & Financial Insights
 			tenant.GET("/profile", tenantHandler.GetProfile)
+			tenant.GET("/settings", tenantHandler.GetProfile)
 			tenant.GET("/financial-summary", tenantHandler.GetFinancialSummary)
 			tenant.GET("/subscription", tenantHandler.GetSubscription)
+			tenant.GET("/subscription/plans", tenantHandler.ListPlans)
+			tenant.GET("/plans", tenantHandler.ListPlans)
 
 			// Line Sales (Admin & Tenant User)
 			tenant.POST("/line-sales", opsHandler.CreateLineSale)
@@ -418,6 +424,16 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenantAdmin := tenant.Group("")
 			tenantAdmin.Use(middleware.RequireRole(auth.RoleTenantAdmin))
 			{
+				// Tenant Organization Settings
+				tenantAdmin.PUT("/settings", tenantHandler.UpdateSettings)
+				tenantAdmin.PUT("/profile", tenantHandler.UpdateSettings)
+
+				// Subscription & Transactions Management
+				tenantAdmin.POST("/subscription/purchase", tenantHandler.PurchasePlan)
+				tenantAdmin.POST("/subscription/upgrade", tenantHandler.PurchasePlan)
+				tenantAdmin.GET("/transactions", tenantHandler.ListTransactions)
+				tenantAdmin.GET("/subscription/transactions", tenantHandler.ListTransactions)
+
 				// Tenant Users Management
 				tenantAdmin.POST("/users", opsHandler.CreateTenantUser)
 				tenantAdmin.GET("/users", opsHandler.ListTenantUsers)

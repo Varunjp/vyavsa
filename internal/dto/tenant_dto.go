@@ -34,6 +34,13 @@ type TenantRegisterRequest struct {
 	PlanID    *uuid.UUID `json:"plan_id,omitempty"` // Optional: Defaults to free plan if omitted
 }
 
+// UpdateTenantSettingsRequest represents payload to update tenant business details
+type UpdateTenantSettingsRequest struct {
+	Name  string `json:"name" binding:"required,min=2,max=255"`
+	Email string `json:"email" binding:"required,email"`
+	Phone string `json:"phone" binding:"omitempty,max=30"`
+}
+
 // UpdateTenantStatusRequest represents tenant status modification payload
 type UpdateTenantStatusRequest struct {
 	Status string `json:"status" binding:"required,oneof=active inactive suspended"`
@@ -42,6 +49,54 @@ type UpdateTenantStatusRequest struct {
 // ChangeSubscriptionRequest represents changing subscription plan
 type ChangeSubscriptionRequest struct {
 	PlanID uuid.UUID `json:"plan_id" binding:"required"`
+}
+
+// PurchasePlanRequest represents payload for a tenant admin to purchase or upgrade a subscription plan
+type PurchasePlanRequest struct {
+	PlanID        uuid.UUID `json:"plan_id" binding:"required"`
+	PaymentMethod string    `json:"payment_method" binding:"required,oneof=card upi netbanking cash bank_transfer mock_gateway"`
+	SimulateFail  bool      `json:"simulate_fail,omitempty"`
+}
+
+// PlanTransactionResponse represents transaction history record for plan purchases
+type PlanTransactionResponse struct {
+	ID            uuid.UUID       `json:"id"`
+	TenantID      uuid.UUID       `json:"tenant_id"`
+	TransactionID string          `json:"transaction_id"`
+	PaymentMethod string          `json:"payment_method"`
+	PlanID        uuid.UUID       `json:"plan_id"`
+	PlanName      string          `json:"plan_name"`
+	Amount        decimal.Decimal `json:"amount"`
+	Status        string          `json:"status"`
+	FailureReason string          `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+}
+
+// ToPlanTransactionResponse converts domain.PlatformPlanTransaction to PlanTransactionResponse
+func ToPlanTransactionResponse(t *domain.PlatformPlanTransaction) PlanTransactionResponse {
+	return PlanTransactionResponse{
+		ID:            t.ID,
+		TenantID:      t.TenantID,
+		TransactionID: t.TransactionID,
+		PaymentMethod: t.PaymentMethod,
+		PlanID:        t.PlanID,
+		PlanName:      t.PlanName,
+		Amount:        t.Amount,
+		Status:        t.Status,
+		FailureReason: t.FailureReason,
+		CreatedAt:     t.CreatedAt,
+		UpdatedAt:     t.UpdatedAt,
+	}
+}
+
+// ToPlanTransactionListResponse converts a slice of domain.PlatformPlanTransaction to PlanTransactionResponse
+func ToPlanTransactionListResponse(txns []domain.PlatformPlanTransaction) []PlanTransactionResponse {
+	resp := make([]PlanTransactionResponse, len(txns))
+	for i := range txns {
+		resp[i] = ToPlanTransactionResponse(&txns[i])
+	}
+	return resp
 }
 
 // TenantResponse represents public summary of a tenant
@@ -79,25 +134,56 @@ func ToTenantListResponse(tenants []domain.Tenant) []TenantResponse {
 
 // TenantSubscriptionResponse represents subscription details for a tenant
 type TenantSubscriptionResponse struct {
-	ID              uuid.UUID  `json:"id"`
-	TenantID        uuid.UUID  `json:"tenant_id"`
-	CurrentPlanID   uuid.UUID  `json:"current_plan_id"`
-	CurrentPlanName string     `json:"current_plan_name"`
-	Status          string     `json:"status"`
-	EndDate         *time.Time `json:"end_date,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID              uuid.UUID       `json:"id"`
+	TenantID        uuid.UUID       `json:"tenant_id"`
+	CurrentPlanID   uuid.UUID       `json:"current_plan_id"`
+	CurrentPlanName string          `json:"current_plan_name"`
+	Price           decimal.Decimal `json:"price"`
+	Note            string          `json:"note,omitempty"`
+	Status          string          `json:"status"`
+	StartDate       *time.Time      `json:"start_date,omitempty"`
+	EndDate         *time.Time      `json:"end_date,omitempty"`
+	IsExpired       bool            `json:"is_expired"`
+	DaysRemaining   int             `json:"days_remaining"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // ToSubscriptionResponse converts domain.PlatformSubscription to TenantSubscriptionResponse
 func ToSubscriptionResponse(s *domain.PlatformSubscription) TenantSubscriptionResponse {
+	now := time.Now().UTC()
+	isExpired := false
+	daysRemaining := 0
+	if s.EndDate != nil {
+		if s.EndDate.Before(now) {
+			isExpired = true
+			daysRemaining = 0
+		} else {
+			daysRemaining = int(s.EndDate.Sub(now).Hours() / 24)
+			if daysRemaining < 0 {
+				daysRemaining = 0
+			}
+		}
+	}
+	startDate := s.StartDate
+	if startDate == nil {
+		startDate = &s.CreatedAt
+	}
+	status := s.Status
+	if isExpired && status == "active" {
+		status = "expired"
+	}
+
 	return TenantSubscriptionResponse{
 		ID:              s.ID,
 		TenantID:        s.TenantID,
 		CurrentPlanID:   s.CurrentPlanID,
 		CurrentPlanName: s.CurrentPlanName,
-		Status:          s.Status,
+		Status:          status,
+		StartDate:       startDate,
 		EndDate:         s.EndDate,
+		IsExpired:       isExpired,
+		DaysRemaining:   daysRemaining,
 		CreatedAt:       s.CreatedAt,
 		UpdatedAt:       s.UpdatedAt,
 	}

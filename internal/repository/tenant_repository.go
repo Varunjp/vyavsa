@@ -14,4 +14,5 @@ type TenantRepository interface {
 	GetByEmail(ctx context.Context, email string) (*domain.Tenant, error)
 	List(ctx context.Context, page, pageSize int, status, search string) ([]domain.Tenant, int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	Update(ctx context.Context, tenant *domain.Tenant) error
 }

@@ -24,8 +24,8 @@ func NewPlatformSubscriptionPostgres(pool *pgxpool.Pool) *PlatformSubscriptionPo
 
 func (r *PlatformSubscriptionPostgres) Create(ctx context.Context, sub *domain.PlatformSubscription) error {
 	query := `
-		INSERT INTO platform_subscriptions (tenant_id, current_plan_id, current_plan_name, status, end_date)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO platform_subscriptions (tenant_id, current_plan_id, current_plan_name, status, start_date, end_date)
+		VALUES ($1, $2, $3, $4, COALESCE($5, NOW()), $6)
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -34,6 +34,7 @@ func (r *PlatformSubscriptionPostgres) Create(ctx context.Context, sub *domain.P
 		sub.CurrentPlanID,
 		sub.CurrentPlanName,
 		sub.Status,
+		sub.StartDate,
 		sub.EndDate,
 	).Scan(&sub.ID, &sub.CreatedAt, &sub.UpdatedAt)
 	if err != nil {
@@ -44,7 +45,8 @@ func (r *PlatformSubscriptionPostgres) Create(ctx context.Context, sub *domain.P
 
 func (r *PlatformSubscriptionPostgres) GetByTenantID(ctx context.Context, tenantID uuid.UUID) (*domain.PlatformSubscription, error) {
 	query := `
-		SELECT id, tenant_id, current_plan_id, current_plan_name, status, end_date, created_at, updated_at
+		SELECT id, tenant_id, current_plan_id, current_plan_name, status,
+		       COALESCE(start_date, created_at), end_date, created_at, updated_at
 		FROM platform_subscriptions
 		WHERE tenant_id = $1
 	`
@@ -56,6 +58,7 @@ func (r *PlatformSubscriptionPostgres) GetByTenantID(ctx context.Context, tenant
 		&sub.CurrentPlanID,
 		&sub.CurrentPlanName,
 		&sub.Status,
+		&sub.StartDate,
 		&sub.EndDate,
 		&sub.CreatedAt,
 		&sub.UpdatedAt,
@@ -72,8 +75,9 @@ func (r *PlatformSubscriptionPostgres) GetByTenantID(ctx context.Context, tenant
 func (r *PlatformSubscriptionPostgres) Update(ctx context.Context, sub *domain.PlatformSubscription) error {
 	query := `
 		UPDATE platform_subscriptions
-		SET current_plan_id = $1, current_plan_name = $2, status = $3, end_date = $4, updated_at = NOW()
-		WHERE tenant_id = $5
+		SET current_plan_id = $1, current_plan_name = $2, status = $3,
+		    start_date = COALESCE($4, start_date, NOW()), end_date = $5, updated_at = NOW()
+		WHERE tenant_id = $6
 		RETURNING id, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -81,6 +85,7 @@ func (r *PlatformSubscriptionPostgres) Update(ctx context.Context, sub *domain.P
 		sub.CurrentPlanID,
 		sub.CurrentPlanName,
 		sub.Status,
+		sub.StartDate,
 		sub.EndDate,
 		sub.TenantID,
 	).Scan(&sub.ID, &sub.UpdatedAt)
