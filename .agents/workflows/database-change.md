@@ -1,3 +1,7 @@
+---
+description: Implement a database/schema change safely
+---
+
 # Database Change
 
 Implement a database/schema change safely.
