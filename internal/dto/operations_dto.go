@@ -247,6 +247,7 @@ type UpdateCounterSaleRequest struct {
 	TotalAmount   *decimal.Decimal `json:"total_amount" binding:"omitempty"`
 	PaymentMethod string           `json:"payment_method" binding:"omitempty"`
 	Cash          *decimal.Decimal `json:"cash" binding:"omitempty"`
+	BankAmount    *decimal.Decimal `json:"bank_amount" binding:"omitempty"`
 	Account       *decimal.Decimal `json:"account" binding:"omitempty"`
 }
 

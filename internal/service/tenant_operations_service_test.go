@@ -1454,3 +1454,146 @@ func TestOperationsService_TodayOverview_TenantIsolation(t *testing.T) {
 	assert.True(t, overviewB.EmployeeAdvance.IsZero())
 	assert.Equal(t, 0, overviewB.Attendance.Present)
 }
+
+func TestOperationsService_FinancialConsistencyOnMutationsAndDeletions(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	t.Run("Purchase lifecycle updates TotalPayable and CashBalance atomically", func(t *testing.T) {
+		// Initial balances: Cash = 50,000, TotalPayable = 0
+		metricsBefore, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.True(t, metricsBefore.TotalPayable.IsZero())
+		assert.Equal(t, 50000.0, metricsBefore.CashBalance.InexactFloat64())
+
+		// 1. Create Purchase: Total 5000, Paid 2000 cash, Remaining = 3000
+		purch, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			Item:        "Wholesale Rice Bags",
+			Quantity:    10,
+			TotalAmount: decimal.NewFromFloat(5000),
+			TotalPaid:   decimal.NewFromFloat(2000),
+		})
+		require.NoError(t, err)
+
+		metricsAfterCreate, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 3000.0, metricsAfterCreate.TotalPayable.InexactFloat64())
+		assert.Equal(t, 48000.0, metricsAfterCreate.CashBalance.InexactFloat64())
+
+		// 2. Update Purchase: Total 6000, Paid 3000 cash, Remaining = 3000 (delta total = +1000, delta paid = +1000)
+		newTotal := decimal.NewFromFloat(6000)
+		newPaid := decimal.NewFromFloat(3000)
+		_, err = svc.UpdatePurchase(ctx, tenantID, purch.ID, auth.RoleTenantAdmin, &dto.UpdatePurchaseRequest{
+			TotalAmount: &newTotal,
+			TotalPaid:   &newPaid,
+		})
+		require.NoError(t, err)
+
+		metricsAfterUpdate, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 3000.0, metricsAfterUpdate.TotalPayable.InexactFloat64())
+		assert.Equal(t, 47000.0, metricsAfterUpdate.CashBalance.InexactFloat64())
+
+		// 3. Delete Purchase: reverses 3000 payable (becomes 0), and refunds 3000 cash (becomes 50,000)
+		err = svc.DeletePurchase(ctx, tenantID, purch.ID, auth.RoleTenantAdmin)
+		require.NoError(t, err)
+
+		metricsAfterDelete, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, metricsAfterDelete.TotalPayable.InexactFloat64())
+		assert.Equal(t, 50000.0, metricsAfterDelete.CashBalance.InexactFloat64())
+	})
+
+	t.Run("Line sale lifecycle updates customer balance and summary receivables atomically", func(t *testing.T) {
+		// Create customer
+		cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+			CustomerName: "Ramesh Customer",
+		})
+		require.NoError(t, err)
+		assert.True(t, cust.CurrentBalance.IsZero())
+
+		// Initial cash: 50,000, Receivables: 0
+		metricsBefore, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.True(t, metricsBefore.TotalReceivable.IsZero())
+
+		// 1. Create Line Sale: Total 10,000, Received 4000 cash, Balance/Receivable = 6000
+		sale, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			TotalCashIn: decimal.NewFromFloat(4000),
+		})
+		require.NoError(t, err)
+
+		metricsAfterSale, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 6000.0, metricsAfterSale.TotalReceivable.InexactFloat64())
+		assert.Equal(t, 54000.0, metricsAfterSale.CashBalance.InexactFloat64())
+
+		// Check customer balance
+		custUpdated, err := svc.GetCustomerByID(ctx, tenantID, cust.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 6000.0, custUpdated.CurrentBalance.InexactFloat64())
+
+		// 2. Update Line Sale: Total 12,000, Received 5000 cash, Balance = 7000 (delta remaining = +1000, delta cash = +1000)
+		newTotal := decimal.NewFromFloat(12000)
+		newCashIn := decimal.NewFromFloat(5000)
+		_, err = svc.UpdateLineSale(ctx, tenantID, sale.ID, auth.RoleTenantAdmin, &dto.UpdateLineSaleRequest{
+			TotalAmount: &newTotal,
+			TotalCashIn: &newCashIn,
+		})
+		require.NoError(t, err)
+
+		metricsAfterUpdate, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 7000.0, metricsAfterUpdate.TotalReceivable.InexactFloat64())
+		assert.Equal(t, 55000.0, metricsAfterUpdate.CashBalance.InexactFloat64())
+
+		// 3. Delete Line Sale: removes 7000 from receivable, reverts 5000 cash
+		err = svc.DeleteLineSale(ctx, tenantID, sale.ID, auth.RoleTenantAdmin)
+		require.NoError(t, err)
+
+		metricsAfterDelete, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, metricsAfterDelete.TotalReceivable.InexactFloat64())
+		assert.Equal(t, 50000.0, metricsAfterDelete.CashBalance.InexactFloat64())
+
+		custAfterDelete, err := svc.GetCustomerByID(ctx, tenantID, cust.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, custAfterDelete.CurrentBalance.InexactFloat64())
+	})
+
+	t.Run("Counter sale lifecycle updates cash/bank and daily stats", func(t *testing.T) {
+		// 1. Create counter sale: 2000 total (1500 cash, 500 bank)
+		bank, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+			BankName:      "HDFC Current",
+			AccountNumber: "1234567890",
+		})
+		require.NoError(t, err)
+
+		sale, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:          "Counter Items",
+			Price:         decimal.NewFromFloat(2000),
+			TotalAmount:   decimal.NewFromFloat(2000),
+			PaymentMethod: "split",
+			Cash:          decimal.NewFromFloat(1500),
+			BankAmount:    decimal.NewFromFloat(500),
+			BankID:        &bank.ID,
+		})
+		require.NoError(t, err)
+
+		metrics, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 51500.0, metrics.CashBalance.InexactFloat64())
+		assert.Equal(t, 100500.0, metrics.BankBalance.InexactFloat64())
+
+		// 2. Delete counter sale: reverts balances back
+		err = svc.DeleteCounterSale(ctx, tenantID, sale.ID, auth.RoleTenantAdmin)
+		require.NoError(t, err)
+
+		metricsAfterDelete, err := svc.GetFinancialMetrics(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, 50000.0, metricsAfterDelete.CashBalance.InexactFloat64())
+		assert.Equal(t, 100000.0, metricsAfterDelete.BankBalance.InexactFloat64())
+	})
+}

@@ -13,4 +13,5 @@ type TenantFinancialSummaryRepository interface {
 	GetByTenantID(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error)
 	GetByTenantIDForUpdate(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error)
 	Update(ctx context.Context, summary *domain.TenantFinancialSummary) error
+	SyncFromSourceRecords(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Varunjp/vyavsa/internal/auth"
@@ -25,10 +26,14 @@ type TenantService interface {
 	UpdateTenantStatus(ctx context.Context, id uuid.UUID, status string) error
 	ChangeSubscription(ctx context.Context, tenantID, planID uuid.UUID) (*dto.TenantSubscriptionResponse, error)
 
-	// Tenant Member Operations
+	// Tenant Member & Admin Operations
 	GetTenantProfile(ctx context.Context, tenantID uuid.UUID) (*dto.TenantResponse, error)
+	UpdateTenantSettings(ctx context.Context, tenantID uuid.UUID, req dto.UpdateTenantSettingsRequest) (*dto.TenantResponse, error)
 	GetTenantFinancialSummary(ctx context.Context, tenantID uuid.UUID) (*dto.TenantFinancialSummaryResponse, error)
 	GetTenantSubscription(ctx context.Context, tenantID uuid.UUID) (*dto.TenantSubscriptionResponse, error)
+	ListAvailablePlans(ctx context.Context) ([]dto.PlanResponse, error)
+	PurchasePlan(ctx context.Context, tenantID uuid.UUID, req dto.PurchasePlanRequest) (*dto.TenantSubscriptionResponse, *dto.PlanTransactionResponse, error)
+	ListTenantTransactions(ctx context.Context, tenantID uuid.UUID, page, pageSize int) ([]dto.PlanTransactionResponse, int64, error)
 }
 
 type tenantService struct {
@@ -37,6 +42,7 @@ type tenantService struct {
 	summaryRepo      repository.TenantFinancialSummaryRepository
 	subscriptionRepo repository.PlatformSubscriptionRepository
 	planRepo         repository.PlatformPlanRepository
+	txnRepo          repository.PlatformPlanTransactionRepository
 	transactor       repository.Transactor
 	hasher           auth.PasswordHasher
 	jwtManager       auth.JWTManager
@@ -51,6 +57,7 @@ func NewTenantService(
 	summaryRepo repository.TenantFinancialSummaryRepository,
 	subscriptionRepo repository.PlatformSubscriptionRepository,
 	planRepo repository.PlatformPlanRepository,
+	txnRepo repository.PlatformPlanTransactionRepository,
 	transactor repository.Transactor,
 	hasher auth.PasswordHasher,
 	jwtManager auth.JWTManager,
@@ -63,6 +70,7 @@ func NewTenantService(
 		summaryRepo:      summaryRepo,
 		subscriptionRepo: subscriptionRepo,
 		planRepo:         planRepo,
+		txnRepo:          txnRepo,
 		transactor:       transactor,
 		hasher:           hasher,
 		jwtManager:       jwtManager,
@@ -498,7 +506,52 @@ func (s *tenantService) GetTenantProfile(ctx context.Context, tenantID uuid.UUID
 	return &resp, nil
 }
 
+func (s *tenantService) UpdateTenantSettings(ctx context.Context, tenantID uuid.UUID, req dto.UpdateTenantSettingsRequest) (*dto.TenantResponse, error) {
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, appErrors.NewValidation("business name is required", map[string]string{"name": "cannot be empty"})
+	}
+	if strings.TrimSpace(req.Email) == "" {
+		return nil, appErrors.NewValidation("email is required", map[string]string{"email": "cannot be empty"})
+	}
+
+	tenant, err := s.tenantRepo.GetByID(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Email != tenant.Email {
+		existing, err := s.tenantRepo.GetByEmail(ctx, req.Email)
+		if err == nil && existing != nil && existing.ID != tenantID {
+			return nil, appErrors.NewConflict(fmt.Sprintf("a business organization with email '%s' already exists", req.Email))
+		}
+	}
+
+	tenant.Name = req.Name
+	tenant.Email = req.Email
+	tenant.Phone = req.Phone
+
+	if err := s.tenantRepo.Update(ctx, tenant); err != nil {
+		return nil, err
+	}
+
+	s.log.InfoContext(ctx, "tenant settings updated",
+		slog.String("tenant_id", tenantID.String()),
+		slog.String("name", tenant.Name),
+		slog.String("email", tenant.Email),
+	)
+
+	resp := dto.ToTenantResponse(tenant)
+	return &resp, nil
+}
+
 func (s *tenantService) GetTenantFinancialSummary(ctx context.Context, tenantID uuid.UUID) (*dto.TenantFinancialSummaryResponse, error) {
+	if s.summaryRepo != nil {
+		if synced, err := s.summaryRepo.SyncFromSourceRecords(ctx, tenantID); err == nil && synced != nil {
+			resp := dto.ToFinancialSummaryResponse(synced)
+			return &resp, nil
+		}
+	}
+
 	summary, err := s.summaryRepo.GetByTenantID(ctx, tenantID)
 	if err != nil {
 		return nil, err
@@ -512,6 +565,170 @@ func (s *tenantService) GetTenantSubscription(ctx context.Context, tenantID uuid
 	if err != nil {
 		return nil, err
 	}
+
+	now := time.Now().UTC()
+	if sub.EndDate != nil && sub.EndDate.Before(now) {
+		if sub.Status == "active" {
+			sub.Status = "expired"
+			_ = s.subscriptionRepo.Update(ctx, sub)
+		}
+	}
+
 	resp := dto.ToSubscriptionResponse(sub)
+	if s.planRepo != nil {
+		plan, planErr := s.planRepo.GetByID(ctx, sub.CurrentPlanID)
+		if planErr == nil && plan != nil {
+			resp.Price = plan.Price
+			resp.Note = plan.Note
+		}
+	}
+
 	return &resp, nil
+}
+
+func (s *tenantService) ListAvailablePlans(ctx context.Context) ([]dto.PlanResponse, error) {
+	plans, _, err := s.planRepo.List(ctx, 1, 50, "active")
+	if err != nil {
+		return nil, err
+	}
+	return dto.ToPlanListResponse(plans), nil
+}
+
+func (s *tenantService) PurchasePlan(ctx context.Context, tenantID uuid.UUID, req dto.PurchasePlanRequest) (*dto.TenantSubscriptionResponse, *dto.PlanTransactionResponse, error) {
+	// 1. Verify Plan
+	plan, err := s.planRepo.GetByID(ctx, req.PlanID)
+	if err != nil {
+		if appErrors.IsNotFound(err) {
+			return nil, nil, appErrors.NewValidation("invalid plan selection", map[string]string{"plan_id": "selected subscription plan does not exist"})
+		}
+		return nil, nil, err
+	}
+	if plan.Status != "active" {
+		return nil, nil, appErrors.NewValidation("invalid plan selection", map[string]string{"plan_id": "selected subscription plan is not active"})
+	}
+
+	// 2. Validate Payment Method
+	switch req.PaymentMethod {
+	case "card", "upi", "netbanking", "cash", "bank_transfer", "mock_gateway":
+	default:
+		return nil, nil, appErrors.NewValidation("invalid payment method", map[string]string{"payment_method": "payment method must be one of: card, upi, netbanking, cash, bank_transfer, mock_gateway"})
+	}
+
+	txnID := fmt.Sprintf("TXN-%d-%s", time.Now().Unix(), strings.ToUpper(uuid.New().String()[:8]))
+
+	// 3. Simulated Gateway Failure Handling
+	if req.SimulateFail {
+		failedTxn := &domain.PlatformPlanTransaction{
+			TenantID:      tenantID,
+			TransactionID: txnID,
+			PaymentMethod: req.PaymentMethod,
+			PlanID:        plan.ID,
+			PlanName:      plan.PlanName,
+			Amount:        plan.Price,
+			Status:        "failed",
+			FailureReason: "Payment declined by payment gateway",
+		}
+		if s.txnRepo != nil {
+			_ = s.txnRepo.Create(ctx, failedTxn)
+		}
+		resp := dto.ToPlanTransactionResponse(failedTxn)
+		return nil, &resp, appErrors.NewBadRequest("payment declined by payment gateway")
+	}
+
+	// 4. Atomic Execution of Successful Purchase & Subscription Upgrade
+	var subResp dto.TenantSubscriptionResponse
+	var txnResp dto.PlanTransactionResponse
+
+	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		// Record successful transaction
+		txn := &domain.PlatformPlanTransaction{
+			TenantID:      tenantID,
+			TransactionID: txnID,
+			PaymentMethod: req.PaymentMethod,
+			PlanID:        plan.ID,
+			PlanName:      plan.PlanName,
+			Amount:        plan.Price,
+			Status:        "completed",
+		}
+		if s.txnRepo != nil {
+			if err := s.txnRepo.Create(txCtx, txn); err != nil {
+				return fmt.Errorf("failed to record plan transaction: %w", err)
+			}
+		}
+
+		// Update or Create Subscription
+		sub, err := s.subscriptionRepo.GetByTenantID(txCtx, tenantID)
+		now := time.Now().UTC()
+		var startDate time.Time = now
+		var newEndDate time.Time
+
+		if err != nil {
+			if appErrors.IsNotFound(err) {
+				newEndDate = now.AddDate(0, 1, 0)
+				sub = &domain.PlatformSubscription{
+					TenantID:        tenantID,
+					CurrentPlanID:   plan.ID,
+					CurrentPlanName: plan.PlanName,
+					Status:          "active",
+					StartDate:       &startDate,
+					EndDate:         &newEndDate,
+				}
+				if err := s.subscriptionRepo.Create(txCtx, sub); err != nil {
+					return fmt.Errorf("failed to create subscription: %w", err)
+				}
+			} else {
+				return err
+			}
+		} else {
+			if sub.EndDate != nil && sub.EndDate.After(now) && sub.Status == "active" {
+				// Extend from current active end date
+				newEndDate = sub.EndDate.AddDate(0, 1, 0)
+				if sub.StartDate != nil {
+					startDate = *sub.StartDate
+				}
+			} else {
+				// Starting new period
+				newEndDate = now.AddDate(0, 1, 0)
+			}
+			sub.CurrentPlanID = plan.ID
+			sub.CurrentPlanName = plan.PlanName
+			sub.Status = "active"
+			sub.StartDate = &startDate
+			sub.EndDate = &newEndDate
+			if err := s.subscriptionRepo.Update(txCtx, sub); err != nil {
+				return fmt.Errorf("failed to update subscription: %w", err)
+			}
+		}
+
+		subResp = dto.ToSubscriptionResponse(sub)
+		subResp.Price = plan.Price
+		subResp.Note = plan.Note
+		txnResp = dto.ToPlanTransactionResponse(txn)
+		return nil
+	})
+
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to purchase plan", slog.String("tenant_id", tenantID.String()), slog.String("error", err.Error()))
+		return nil, nil, err
+	}
+
+	s.log.InfoContext(ctx, "subscription plan purchased successfully",
+		slog.String("tenant_id", tenantID.String()),
+		slog.String("plan_name", plan.PlanName),
+		slog.String("transaction_id", txnID),
+		slog.String("amount", plan.Price.String()),
+	)
+
+	return &subResp, &txnResp, nil
+}
+
+func (s *tenantService) ListTenantTransactions(ctx context.Context, tenantID uuid.UUID, page, pageSize int) ([]dto.PlanTransactionResponse, int64, error) {
+	if s.txnRepo == nil {
+		return []dto.PlanTransactionResponse{}, 0, nil
+	}
+	txns, total, err := s.txnRepo.ListByTenantID(ctx, tenantID, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	return dto.ToPlanTransactionListResponse(txns), total, nil
 }

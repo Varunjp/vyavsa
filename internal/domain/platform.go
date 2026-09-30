@@ -37,6 +37,7 @@ type PlatformSubscription struct {
 	CurrentPlanID   uuid.UUID  `json:"current_plan_id"`
 	CurrentPlanName string     `json:"current_plan_name"`
 	Status          string     `json:"status"`
+	StartDate       *time.Time `json:"start_date,omitempty"`
 	EndDate         *time.Time `json:"end_date,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
@@ -49,8 +50,10 @@ type PlatformPlanTransaction struct {
 	TransactionID string          `json:"transaction_id"`
 	PaymentMethod string          `json:"payment_method"`
 	PlanID        uuid.UUID       `json:"plan_id"`
+	PlanName      string          `json:"plan_name,omitempty"`
 	Amount        decimal.Decimal `json:"amount"`
 	Status        string          `json:"status"`
+	FailureReason string          `json:"failure_reason,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
 }

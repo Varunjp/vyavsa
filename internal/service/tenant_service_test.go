@@ -67,6 +67,16 @@ func (m *mockTenantRepo) List(ctx context.Context, page, pageSize int, status, s
 	return result, int64(len(result)), nil
 }
 
+func (m *mockTenantRepo) Update(ctx context.Context, tenant *domain.Tenant) error {
+	_, ok := m.tenants[tenant.ID]
+	if !ok {
+		return appErrors.NewNotFound("tenant not found")
+	}
+	tenant.UpdatedAt = time.Now().UTC()
+	m.tenants[tenant.ID] = tenant
+	return nil
+}
+
 func (m *mockTenantRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	t, ok := m.tenants[id]
 	if !ok {
@@ -106,6 +116,10 @@ func (m *mockFinancialSummaryRepo) GetByTenantIDForUpdate(ctx context.Context, t
 	return m.GetByTenantID(ctx, tenantID)
 }
 
+func (m *mockFinancialSummaryRepo) SyncFromSourceRecords(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error) {
+	return m.GetByTenantID(ctx, tenantID)
+}
+
 func (m *mockFinancialSummaryRepo) Update(ctx context.Context, s *domain.TenantFinancialSummary) error {
 	s.UpdatedAt = time.Now().UTC()
 	m.summaries[s.TenantID] = s
@@ -141,6 +155,50 @@ func (m *mockSubscriptionRepo) Update(ctx context.Context, sub *domain.PlatformS
 	sub.UpdatedAt = time.Now().UTC()
 	m.subs[sub.TenantID] = sub
 	return nil
+}
+
+// Mock PlanTxnRepo
+type mockPlanTxnRepo struct {
+	txns map[uuid.UUID]*domain.PlatformPlanTransaction
+}
+
+func newMockPlanTxnRepo() *mockPlanTxnRepo {
+	return &mockPlanTxnRepo{txns: make(map[uuid.UUID]*domain.PlatformPlanTransaction)}
+}
+
+func (m *mockPlanTxnRepo) Create(ctx context.Context, tx *domain.PlatformPlanTransaction) error {
+	tx.ID = uuid.New()
+	tx.CreatedAt = time.Now().UTC()
+	tx.UpdatedAt = time.Now().UTC()
+	m.txns[tx.ID] = tx
+	return nil
+}
+
+func (m *mockPlanTxnRepo) ListByTenantID(ctx context.Context, tenantID uuid.UUID, page, pageSize int) ([]domain.PlatformPlanTransaction, int64, error) {
+	var res []domain.PlatformPlanTransaction
+	for _, tx := range m.txns {
+		if tx.TenantID == tenantID {
+			res = append(res, *tx)
+		}
+	}
+	return res, int64(len(res)), nil
+}
+
+func (m *mockPlanTxnRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.PlatformPlanTransaction, error) {
+	tx, ok := m.txns[id]
+	if !ok || tx.TenantID != tenantID {
+		return nil, appErrors.NewNotFound("transaction not found")
+	}
+	return tx, nil
+}
+
+func (m *mockPlanTxnRepo) GetByTransactionID(ctx context.Context, tenantID uuid.UUID, transactionID string) (*domain.PlatformPlanTransaction, error) {
+	for _, tx := range m.txns {
+		if tx.TenantID == tenantID && tx.TransactionID == transactionID {
+			return tx, nil
+		}
+	}
+	return nil, appErrors.NewNotFound("transaction not found")
 }
 
 // Mock TenantUserRepo
@@ -261,12 +319,15 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		}
 		require.NoError(t, planRepo.Create(ctx, freePlan))
 
+		txnRepo := newMockPlanTxnRepo()
+
 		svc := NewTenantService(
 			tenantRepo,
 			userRepo,
 			summaryRepo,
 			subRepo,
 			planRepo,
+			txnRepo,
 			transactor,
 			hasher,
 			jwtManager,
@@ -305,12 +366,13 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		summaryRepo := newMockFinancialSummaryRepo()
 		subRepo := newMockSubscriptionRepo()
 		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
 		transactor := &mockTransactor{}
 
 		freePlan := &domain.PlatformPlan{PlanName: "Free Starter", Price: decimal.Zero, Status: "active"}
 		require.NoError(t, planRepo.Create(ctx, freePlan))
 
-		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, txnRepo, transactor, hasher, jwtManager, appMetrics, log)
 
 		req := dto.TenantRegisterRequest{
 			Name:     "Quick Mart",
@@ -331,6 +393,7 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		summaryRepo := newMockFinancialSummaryRepo()
 		subRepo := newMockSubscriptionRepo()
 		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
 		transactor := &mockTransactor{}
 
 		// Seed a plan
@@ -347,6 +410,7 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 			summaryRepo,
 			subRepo,
 			planRepo,
+			txnRepo,
 			transactor,
 			hasher,
 			jwtManager,
@@ -393,12 +457,13 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		summaryRepo := newMockFinancialSummaryRepo()
 		subRepo := newMockSubscriptionRepo()
 		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
 		transactor := &mockTransactor{}
 
 		plan := &domain.PlatformPlan{PlanName: "Pro Tier", Price: decimal.NewFromFloat(499), Status: "active"}
 		require.NoError(t, planRepo.Create(ctx, plan))
 
-		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, txnRepo, transactor, hasher, jwtManager, appMetrics, log)
 
 		req := dto.OnboardTenantRequest{
 			Name:          "Single Email Mart",
@@ -420,9 +485,10 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		summaryRepo := newMockFinancialSummaryRepo()
 		subRepo := newMockSubscriptionRepo()
 		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
 		transactor := &mockTransactor{}
 
-		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, txnRepo, transactor, hasher, jwtManager, appMetrics, log)
 
 		req := dto.OnboardTenantRequest{
 			Name:          "Test Store",
@@ -446,12 +512,13 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		summaryRepo := newMockFinancialSummaryRepo()
 		subRepo := newMockSubscriptionRepo()
 		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
 		transactor := &mockTransactor{}
 
 		plan := &domain.PlatformPlan{PlanName: "Free", Price: decimal.Zero, Status: "active"}
 		require.NoError(t, planRepo.Create(ctx, plan))
 
-		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, transactor, hasher, jwtManager, appMetrics, log)
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, txnRepo, transactor, hasher, jwtManager, appMetrics, log)
 
 		resp, err := svc.OnboardTenant(ctx, dto.OnboardTenantRequest{
 			Name:          "Status Store",
@@ -469,5 +536,179 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		updated, err := svc.GetTenantByID(ctx, resp.Tenant.ID)
 		require.NoError(t, err)
 		assert.Equal(t, "suspended", updated.Tenant.Status)
+	})
+
+	t.Run("UpdateTenantSettings updates tenant name, email, phone with validation and conflict checks", func(t *testing.T) {
+		tenantRepo := newMockTenantRepo()
+		userRepo := newMockTenantUserRepoFull()
+		summaryRepo := newMockFinancialSummaryRepo()
+		subRepo := newMockSubscriptionRepo()
+		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
+		transactor := &mockTransactor{}
+
+		freePlan := &domain.PlatformPlan{PlanName: "Free", Price: decimal.Zero, Status: "active"}
+		require.NoError(t, planRepo.Create(ctx, freePlan))
+
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, txnRepo, transactor, hasher, jwtManager, appMetrics, log)
+
+		resp1, err := svc.RegisterTenant(ctx, dto.TenantRegisterRequest{
+			Name:      "First Store",
+			Email:     "first@store.com",
+			Password:  "Secret@123",
+			Phone:     "+919876543210",
+			AdminName: "First Admin",
+		})
+		require.NoError(t, err)
+
+		resp2, err := svc.RegisterTenant(ctx, dto.TenantRegisterRequest{
+			Name:      "Second Store",
+			Email:     "second@store.com",
+			Password:  "Secret@123",
+			Phone:     "+919876543211",
+			AdminName: "Second Admin",
+		})
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp2.Tenant.ID)
+
+		// 1. Success update
+		newName := "First Store Updated"
+		newPhone := "+919999988888"
+		updated, err := svc.UpdateTenantSettings(ctx, resp1.Tenant.ID, dto.UpdateTenantSettingsRequest{
+			Name:  newName,
+			Email: "first@store.com",
+			Phone: newPhone,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, newName, updated.Name)
+		assert.Equal(t, newPhone, updated.Phone)
+
+		// Verify in repo
+		fetched, err := svc.GetTenantByID(ctx, resp1.Tenant.ID)
+		require.NoError(t, err)
+		assert.Equal(t, newName, fetched.Tenant.Name)
+		assert.Equal(t, newPhone, fetched.Tenant.Phone)
+
+		// 2. Conflict update: attempting to update email to second store's email
+		_, err = svc.UpdateTenantSettings(ctx, resp1.Tenant.ID, dto.UpdateTenantSettingsRequest{
+			Name:  newName,
+			Email: "second@store.com",
+		})
+		require.Error(t, err)
+		var appErr *appErrors.AppError
+		require.ErrorAs(t, err, &appErr)
+		assert.Equal(t, appErrors.CodeConflict, appErr.Code)
+
+		// 3. Validation error: empty name
+		_, err = svc.UpdateTenantSettings(ctx, resp1.Tenant.ID, dto.UpdateTenantSettingsRequest{
+			Name:  "",
+			Email: "valid@store.com",
+		})
+		require.Error(t, err)
+		require.ErrorAs(t, err, &appErr)
+		assert.Equal(t, appErrors.CodeValidation, appErr.Code)
+	})
+
+	t.Run("Subscription lifecycle: Active, Expired, ListPlans, and PurchasePlan", func(t *testing.T) {
+		tenantRepo := newMockTenantRepo()
+		userRepo := newMockTenantUserRepoFull()
+		summaryRepo := newMockFinancialSummaryRepo()
+		subRepo := newMockSubscriptionRepo()
+		planRepo := newMockPlanRepo()
+		txnRepo := newMockPlanTxnRepo()
+		transactor := &mockTransactor{}
+
+		// Create plans
+		freePlan := &domain.PlatformPlan{PlanName: "Free Tier", Price: decimal.Zero, Status: "active"}
+		require.NoError(t, planRepo.Create(ctx, freePlan))
+
+		silverPlan := &domain.PlatformPlan{PlanName: "Silver Tier", Price: decimal.NewFromFloat(299), Status: "active"}
+		require.NoError(t, planRepo.Create(ctx, silverPlan))
+
+		goldPlan := &domain.PlatformPlan{PlanName: "Gold Tier", Price: decimal.NewFromFloat(999), Status: "active"}
+		require.NoError(t, planRepo.Create(ctx, goldPlan))
+
+		svc := NewTenantService(tenantRepo, userRepo, summaryRepo, subRepo, planRepo, txnRepo, transactor, hasher, jwtManager, appMetrics, log)
+
+		// Register tenant
+		regResp, err := svc.RegisterTenant(ctx, dto.TenantRegisterRequest{
+			Name:      "Sub Tester",
+			Email:     "sub@tester.com",
+			Password:  "Pass@12345",
+			Phone:     "+919876543201",
+			AdminName: "Sub Admin",
+		})
+		require.NoError(t, err)
+		tenantID := regResp.Tenant.ID
+
+		// 1. Check current subscription
+		subResp, err := svc.GetTenantSubscription(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, "Free Tier", subResp.CurrentPlanName)
+		assert.False(t, subResp.IsExpired)
+		assert.True(t, subResp.Price.IsZero())
+
+		// 2. List available plans
+		plans, err := svc.ListAvailablePlans(ctx)
+		require.NoError(t, err)
+		assert.Len(t, plans, 3)
+
+		// 3. Purchase / Upgrade to Silver Tier
+		purchasedSub, txn, err := svc.PurchasePlan(ctx, tenantID, dto.PurchasePlanRequest{
+			PlanID:        silverPlan.ID,
+			PaymentMethod: "upi",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, purchasedSub)
+		require.NotNil(t, txn)
+		assert.Equal(t, "Silver Tier", purchasedSub.CurrentPlanName)
+		assert.Equal(t, "active", purchasedSub.Status)
+		assert.False(t, purchasedSub.IsExpired)
+		assert.True(t, purchasedSub.DaysRemaining >= 29)
+		assert.Equal(t, "completed", txn.Status)
+		assert.Equal(t, "upi", txn.PaymentMethod)
+		assert.Equal(t, "Silver Tier", txn.PlanName)
+		assert.True(t, txn.Amount.Equal(decimal.NewFromFloat(299)))
+
+		// 4. Verify transaction list
+		txns, count, err := svc.ListTenantTransactions(ctx, tenantID, 1, 10)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), count)
+		assert.Len(t, txns, 1)
+		assert.Equal(t, txn.TransactionID, txns[0].TransactionID)
+
+		// 5. Test expired subscription handling
+		// Artificially expire the subscription
+		subEntity, err := subRepo.GetByTenantID(ctx, tenantID)
+		require.NoError(t, err)
+		pastDate := time.Now().UTC().AddDate(0, 0, -5)
+		subEntity.EndDate = &pastDate
+		require.NoError(t, subRepo.Update(ctx, subEntity))
+
+		// Fetch subscription - should gracefully report expired
+		expiredResp, err := svc.GetTenantSubscription(ctx, tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, "expired", expiredResp.Status)
+		assert.True(t, expiredResp.IsExpired)
+		assert.Equal(t, 0, expiredResp.DaysRemaining)
+
+		// 6. Renew / Upgrade to Gold from expired state
+		renewedSub, renewTxn, err := svc.PurchasePlan(ctx, tenantID, dto.PurchasePlanRequest{
+			PlanID:        goldPlan.ID,
+			PaymentMethod: "card",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, renewedSub)
+		require.NotNil(t, renewTxn)
+		assert.Equal(t, "Gold Tier", renewedSub.CurrentPlanName)
+		assert.Equal(t, "active", renewedSub.Status)
+		assert.False(t, renewedSub.IsExpired)
+		assert.True(t, renewedSub.DaysRemaining >= 29)
+
+		// 7. Verify 2 transactions in history
+		txns, count, err = svc.ListTenantTransactions(ctx, tenantID, 1, 10)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), count)
+		assert.Len(t, txns, 2)
 	})
 }

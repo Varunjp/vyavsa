@@ -351,7 +351,15 @@ func (s *TenantOperationsService) UpdateCustomer(ctx context.Context, tenantID, 
 }
 
 func (s *TenantOperationsService) DeleteCustomer(ctx context.Context, tenantID, id uuid.UUID) error {
-	return s.custRepo.Delete(ctx, tenantID, id)
+	return s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.custRepo.Delete(txCtx, tenantID, id); err != nil {
+			return err
+		}
+		if s.summaryRepo != nil {
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+		return nil
+	})
 }
 
 func (s *TenantOperationsService) GetCustomerByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantCustomer, error) {
@@ -515,7 +523,15 @@ func (s *TenantOperationsService) UpdateBank(ctx context.Context, tenantID, id u
 }
 
 func (s *TenantOperationsService) DeleteBank(ctx context.Context, tenantID, id uuid.UUID) error {
-	return s.bankRepo.Delete(ctx, tenantID, id)
+	return s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.bankRepo.Delete(txCtx, tenantID, id); err != nil {
+			return err
+		}
+		if s.summaryRepo != nil {
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+		return nil
+	})
 }
 
 func (s *TenantOperationsService) GetBankByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantBank, error) {
@@ -700,6 +716,9 @@ func (s *TenantOperationsService) UpdateLineSale(ctx context.Context, tenantID, 
 		return nil, err
 	}
 
+	oldBalance := sale.Balance
+	oldCash := sale.TotalCashIn
+
 	if req.Route != "" {
 		sale.Route = req.Route
 	}
@@ -718,11 +737,46 @@ func (s *TenantOperationsService) UpdateLineSale(ctx context.Context, tenantID, 
 		sale.Balance = sale.TotalAmount.Sub(sale.TotalCashIn)
 	}
 
-	if err := s.lineSaleRepo.Update(ctx, sale); err != nil {
+	deltaBalance := sale.Balance.Sub(oldBalance)
+	deltaCash := sale.TotalCashIn.Sub(oldCash)
+
+	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		// 1. Adjust customer balance by delta in credit
+		if !deltaBalance.IsZero() && s.custRepo != nil {
+			if err := s.custRepo.AdjustBalance(txCtx, tenantID, sale.CustomerID, deltaBalance); err != nil {
+				return fmt.Errorf("failed to adjust customer balance on line sale update: %w", err)
+			}
+		}
+
+		// 2. Update line sale record
+		if err := s.lineSaleRepo.Update(txCtx, sale); err != nil {
+			return err
+		}
+
+		// 3. Update financial summary cash balance and sync authoritative balances
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Add(deltaCash)
+				summary.TotalReceivable = summary.TotalReceivable.Add(deltaBalance)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+
+		// 4. Compute and sync daily stats
+		if s.statsRepo != nil {
+			_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02"))
+			if sale.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	_, _ = s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, sale.CreatedAt.Format("2006-01-02"))
 	return sale, nil
 }
 
@@ -738,7 +792,7 @@ func (s *TenantOperationsService) DeleteLineSale(ctx context.Context, tenantID, 
 
 	return s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
 		// Reverse balance on customer if unpaid
-		if sale.Balance.GreaterThan(decimal.Zero) {
+		if sale.Balance.GreaterThan(decimal.Zero) && s.custRepo != nil {
 			if err := s.custRepo.AdjustBalance(txCtx, tenantID, sale.CustomerID, sale.Balance.Neg()); err != nil {
 				return fmt.Errorf("failed to reverse customer balance on line sale deletion: %w", err)
 			}
@@ -746,8 +800,24 @@ func (s *TenantOperationsService) DeleteLineSale(ctx context.Context, tenantID, 
 		if err := s.lineSaleRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02")); err != nil {
-			s.logger.WarnContext(txCtx, "failed to sync daily stats after line sale deletion", "error", err.Error())
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Sub(sale.TotalCashIn)
+				summary.BankBalance = summary.BankBalance.Sub(sale.BankAmount)
+				summary.TotalReceivable = summary.TotalReceivable.Sub(sale.Balance)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+		if s.statsRepo != nil {
+			_, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02"))
+			if err != nil {
+				s.logger.WarnContext(txCtx, "failed to sync daily stats after line sale deletion", "error", err.Error())
+			}
+			if sale.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
 		}
 		return nil
 	})
@@ -918,6 +988,9 @@ func (s *TenantOperationsService) UpdateCounterSale(ctx context.Context, tenantI
 		return nil, err
 	}
 
+	oldCash := sale.Cash
+	oldBank := sale.BankAmount
+
 	if req.Item != "" {
 		sale.Item = req.Item
 	}
@@ -933,15 +1006,43 @@ func (s *TenantOperationsService) UpdateCounterSale(ctx context.Context, tenantI
 	if req.Cash != nil {
 		sale.Cash = *req.Cash
 	}
+	if req.BankAmount != nil {
+		sale.BankAmount = *req.BankAmount
+	}
 	if req.Account != nil {
 		sale.Account = *req.Account
 	}
 
-	if err := s.countSaleRepo.Update(ctx, sale); err != nil {
+	deltaCash := sale.Cash.Sub(oldCash)
+	deltaBank := sale.BankAmount.Sub(oldBank)
+
+	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.countSaleRepo.Update(txCtx, sale); err != nil {
+			return err
+		}
+
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Add(deltaCash)
+				summary.BankBalance = summary.BankBalance.Add(deltaBank)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+
+		if s.statsRepo != nil {
+			_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02"))
+			if sale.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	_, _ = s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, sale.CreatedAt.Format("2006-01-02"))
 	return sale, nil
 }
 
@@ -959,8 +1060,20 @@ func (s *TenantOperationsService) DeleteCounterSale(ctx context.Context, tenantI
 		if err := s.countSaleRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02")); err != nil {
-			s.logger.WarnContext(txCtx, "failed to sync daily stats after counter sale deletion", "error", err.Error())
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Sub(sale.Cash)
+				summary.BankBalance = summary.BankBalance.Sub(sale.BankAmount)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+		if s.statsRepo != nil {
+			_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, sale.CreatedAt.Format("2006-01-02"))
+			if sale.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
 		}
 		return nil
 	})
@@ -1072,6 +1185,9 @@ func (s *TenantOperationsService) UpdatePurchase(ctx context.Context, tenantID, 
 		return nil, err
 	}
 
+	oldPaid := purchase.TotalPaid
+	oldPending := purchase.TotalPending
+
 	if req.Item != "" {
 		purchase.Item = req.Item
 	}
@@ -1087,11 +1203,36 @@ func (s *TenantOperationsService) UpdatePurchase(ctx context.Context, tenantID, 
 		purchase.TotalPending = purchase.TotalAmount.Sub(purchase.TotalPaid)
 	}
 
-	if err := s.purchRepo.Update(ctx, purchase); err != nil {
+	deltaPaid := purchase.TotalPaid.Sub(oldPaid)
+	deltaPending := purchase.TotalPending.Sub(oldPending)
+
+	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.purchRepo.Update(txCtx, purchase); err != nil {
+			return err
+		}
+
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Sub(deltaPaid)
+				summary.TotalPayable = summary.TotalPayable.Add(deltaPending)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+
+		if s.statsRepo != nil {
+			_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, purchase.CreatedAt.Format("2006-01-02"))
+			if purchase.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	_, _ = s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, purchase.CreatedAt.Format("2006-01-02"))
 	return purchase, nil
 }
 
@@ -1109,8 +1250,23 @@ func (s *TenantOperationsService) DeletePurchase(ctx context.Context, tenantID, 
 		if err := s.purchRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, purchase.CreatedAt.Format("2006-01-02")); err != nil {
-			s.logger.WarnContext(txCtx, "failed to sync daily stats after purchase deletion", "error", err.Error())
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Add(purchase.TotalPaid)
+				summary.TotalPayable = summary.TotalPayable.Sub(purchase.TotalPending)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+		if s.statsRepo != nil {
+			_, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, purchase.CreatedAt.Format("2006-01-02"))
+			if err != nil {
+				s.logger.WarnContext(txCtx, "failed to sync daily stats after purchase deletion", "error", err.Error())
+			}
+			if purchase.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
 		}
 		return nil
 	})
@@ -1222,6 +1378,8 @@ func (s *TenantOperationsService) UpdateExpense(ctx context.Context, tenantID, i
 		return nil, err
 	}
 
+	oldAmount := exp.TotalAmount
+
 	if req.Item != "" {
 		exp.Item = req.Item
 	}
@@ -1229,11 +1387,34 @@ func (s *TenantOperationsService) UpdateExpense(ctx context.Context, tenantID, i
 		exp.TotalAmount = *req.TotalAmount
 	}
 
-	if err := s.expRepo.Update(ctx, exp); err != nil {
+	deltaAmount := exp.TotalAmount.Sub(oldAmount)
+
+	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.expRepo.Update(txCtx, exp); err != nil {
+			return err
+		}
+
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Sub(deltaAmount)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+
+		if s.statsRepo != nil {
+			_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, exp.CreatedAt.Format("2006-01-02"))
+			if exp.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	_, _ = s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, exp.CreatedAt.Format("2006-01-02"))
 	return exp, nil
 }
 
@@ -1251,8 +1432,22 @@ func (s *TenantOperationsService) DeleteExpense(ctx context.Context, tenantID, i
 		if err := s.expRepo.Delete(txCtx, tenantID, id); err != nil {
 			return err
 		}
-		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, exp.CreatedAt.Format("2006-01-02")); err != nil {
-			s.logger.WarnContext(txCtx, "failed to sync daily stats after expense deletion", "error", err.Error())
+		if s.summaryRepo != nil {
+			summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+			if err == nil && summary != nil {
+				summary.CashBalance = summary.CashBalance.Add(exp.TotalAmount)
+				_ = s.summaryRepo.Update(txCtx, summary)
+			}
+			_, _ = s.summaryRepo.SyncFromSourceRecords(txCtx, tenantID)
+		}
+		if s.statsRepo != nil {
+			_, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, exp.CreatedAt.Format("2006-01-02"))
+			if err != nil {
+				s.logger.WarnContext(txCtx, "failed to sync daily stats after expense deletion", "error", err.Error())
+			}
+			if exp.CreatedAt.Format("2006-01-02") != todayString() {
+				_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+			}
 		}
 		return nil
 	})
@@ -1737,9 +1932,16 @@ func (s *TenantOperationsService) GetFinancialMetrics(ctx context.Context, tenan
 			TodayOverview: todayOverview,
 		}, nil
 	}
-	summary, err := s.summaryRepo.GetByTenantID(ctx, tenantID)
-	if err != nil {
-		if appErrors.IsNotFound(err) {
+	var summary *domain.TenantFinancialSummary
+	var err error
+	if s.summaryRepo != nil {
+		summary, err = s.summaryRepo.SyncFromSourceRecords(ctx, tenantID)
+		if err != nil {
+			summary, err = s.summaryRepo.GetByTenantID(ctx, tenantID)
+		}
+	}
+	if err != nil || summary == nil {
+		if err == nil || appErrors.IsNotFound(err) {
 			summary = &domain.TenantFinancialSummary{
 				TenantID:        tenantID,
 				CashBalance:     decimal.Zero,

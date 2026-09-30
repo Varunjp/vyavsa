@@ -120,3 +120,41 @@ func (r *TenantFinancialSummaryPostgres) Update(ctx context.Context, summary *do
 	}
 	return nil
 }
+
+func (r *TenantFinancialSummaryPostgres) SyncFromSourceRecords(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error) {
+	exec := GetExecutor(ctx, r.pool)
+
+	query := `
+		WITH derived AS (
+			SELECT
+				COALESCE((SELECT SUM(current_balance) FROM tenant_bank WHERE tenant_id = $1 AND status = 'active'), 0) AS bank_balance,
+				COALESCE((SELECT SUM(current_balance) FROM tenant_customer WHERE tenant_id = $1 AND current_balance > 0), 0) +
+				COALESCE((SELECT SUM(account) FROM counter_sale WHERE tenant_id = $1 AND account > 0), 0) AS total_receivable,
+				COALESCE((SELECT SUM(total_pending) FROM tenant_purchase WHERE tenant_id = $1), 0) AS total_payable
+		)
+		INSERT INTO tenant_financial_summary (tenant_id, cash_balance, bank_balance, total_receivable, total_payable)
+		SELECT $1, 0.00, d.bank_balance, d.total_receivable, d.total_payable
+		FROM derived d
+		ON CONFLICT (tenant_id) DO UPDATE
+		SET bank_balance = EXCLUDED.bank_balance,
+		    total_receivable = EXCLUDED.total_receivable,
+		    total_payable = EXCLUDED.total_payable,
+		    updated_at = NOW()
+		RETURNING id, tenant_id, cash_balance, bank_balance, total_receivable, total_payable, created_at, updated_at
+	`
+	var s domain.TenantFinancialSummary
+	err := exec.QueryRow(ctx, query, tenantID).Scan(
+		&s.ID,
+		&s.TenantID,
+		&s.CashBalance,
+		&s.BankBalance,
+		&s.TotalReceivable,
+		&s.TotalPayable,
+		&s.CreatedAt,
+		&s.UpdatedAt,
+	)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to sync financial summary from source records: %w", err))
+	}
+	return &s, nil
+}
