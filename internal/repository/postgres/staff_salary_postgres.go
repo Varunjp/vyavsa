@@ -28,10 +28,10 @@ func NewAttendancePostgres(pool *pgxpool.Pool) *AttendancePostgres {
 
 func (r *AttendancePostgres) Upsert(ctx context.Context, att *domain.Attendance) error {
 	query := `
-		INSERT INTO attendance (tenant_id, employee_id, date, status, ot, advance)
-		VALUES ($1, $2, $3::date, $4, $5, $6)
+		INSERT INTO attendance (tenant_id, employee_id, date, status, daily_salary, ot, advance)
+		VALUES ($1, $2, $3::date, $4, $5, $6, $7)
 		ON CONFLICT (tenant_id, employee_id, date)
-		DO UPDATE SET status = EXCLUDED.status, ot = EXCLUDED.ot, advance = EXCLUDED.advance, updated_at = NOW()
+		DO UPDATE SET status = EXCLUDED.status, daily_salary = EXCLUDED.daily_salary, ot = EXCLUDED.ot, advance = EXCLUDED.advance, updated_at = NOW()
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -40,6 +40,7 @@ func (r *AttendancePostgres) Upsert(ctx context.Context, att *domain.Attendance)
 		att.EmployeeID,
 		att.Date,
 		att.Status,
+		att.DailySalary,
 		att.OT,
 		att.Advance,
 	).Scan(&att.ID, &att.CreatedAt, &att.UpdatedAt)
@@ -52,7 +53,7 @@ func (r *AttendancePostgres) Upsert(ctx context.Context, att *domain.Attendance)
 func (r *AttendancePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Attendance, error) {
 	query := `
 		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
-		       a.date::text, a.status, a.ot, a.advance, a.created_at, a.updated_at
+		       a.date::text, a.status, a.daily_salary, a.ot, a.advance, a.created_at, a.updated_at
 		FROM attendance a
 		LEFT JOIN tenant_employees e ON e.id = a.employee_id
 		WHERE a.tenant_id = $1 AND a.id = $2
@@ -66,6 +67,7 @@ func (r *AttendancePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID
 		&a.EmployeeName,
 		&a.Date,
 		&a.Status,
+		&a.DailySalary,
 		&a.OT,
 		&a.Advance,
 		&a.CreatedAt,
@@ -83,7 +85,7 @@ func (r *AttendancePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID
 func (r *AttendancePostgres) GetByEmployeeAndDate(ctx context.Context, tenantID, employeeID uuid.UUID, date string) (*domain.Attendance, error) {
 	query := `
 		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
-		       a.date::text, a.status, a.ot, a.advance, a.created_at, a.updated_at
+		       a.date::text, a.status, a.daily_salary, a.ot, a.advance, a.created_at, a.updated_at
 		FROM attendance a
 		LEFT JOIN tenant_employees e ON e.id = a.employee_id
 		WHERE a.tenant_id = $1 AND a.employee_id = $2 AND a.date = $3::date
@@ -97,6 +99,7 @@ func (r *AttendancePostgres) GetByEmployeeAndDate(ctx context.Context, tenantID,
 		&a.EmployeeName,
 		&a.Date,
 		&a.Status,
+		&a.DailySalary,
 		&a.OT,
 		&a.Advance,
 		&a.CreatedAt,
@@ -114,13 +117,14 @@ func (r *AttendancePostgres) GetByEmployeeAndDate(ctx context.Context, tenantID,
 func (r *AttendancePostgres) Update(ctx context.Context, att *domain.Attendance) error {
 	query := `
 		UPDATE attendance
-		SET status = $1, ot = $2, advance = $3, updated_at = NOW()
-		WHERE tenant_id = $4 AND id = $5
+		SET status = $1, daily_salary = $2, ot = $3, advance = $4, updated_at = NOW()
+		WHERE tenant_id = $5 AND id = $6
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, query,
 		att.Status,
+		att.DailySalary,
 		att.OT,
 		att.Advance,
 		att.TenantID,
@@ -182,7 +186,7 @@ func (r *AttendancePostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 
 	listQuery := fmt.Sprintf(`
 		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
-		       a.date::text, a.status, a.ot, a.advance, a.created_at, a.updated_at
+		       a.date::text, a.status, a.daily_salary, a.ot, a.advance, a.created_at, a.updated_at
 		FROM attendance a
 		LEFT JOIN tenant_employees e ON e.id = a.employee_id
 		%s
@@ -207,6 +211,7 @@ func (r *AttendancePostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 			&a.EmployeeName,
 			&a.Date,
 			&a.Status,
+			&a.DailySalary,
 			&a.OT,
 			&a.Advance,
 			&a.CreatedAt,
@@ -218,6 +223,21 @@ func (r *AttendancePostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 	}
 
 	return list, total, nil
+}
+
+func (r *AttendancePostgres) GetTodaySalaryEarned(ctx context.Context, tenantID uuid.UUID, date string) (decimal.Decimal, error) {
+	query := `
+		SELECT COALESCE(SUM(COALESCE(a.daily_salary, e.salary)), 0)
+		FROM attendance a
+		JOIN tenant_employees e ON e.id = a.employee_id
+		WHERE a.tenant_id = $1 AND a.date = $2::date AND a.status = 'present'
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var total decimal.Decimal
+	if err := exec.QueryRow(ctx, query, tenantID, date).Scan(&total); err != nil {
+		return decimal.Zero, appErrors.NewDatabase(fmt.Errorf("failed to get today salary earned: %w", err))
+	}
+	return total, nil
 }
 
 // ==========================================
@@ -546,7 +566,7 @@ func (r *TenantDailyStatsPostgres) GetByDate(ctx context.Context, tenantID uuid.
 	query := `
 		SELECT id, tenant_id, date::text, line_sale_amount, counter_sale_amount, total_sales,
 		       purchase_amount, expense_amount, wages_amount, advance_amount,
-		       attendance_present, attendance_absent, amount_received, amount_paid,
+		       attendance_present, attendance_absent, today_employee_salary, amount_received, amount_paid,
 		       credit_sale, created_at, updated_at
 		FROM tenant_daily_stats
 		WHERE tenant_id = $1 AND date = $2::date
@@ -566,6 +586,7 @@ func (r *TenantDailyStatsPostgres) GetByDate(ctx context.Context, tenantID uuid.
 		&s.AdvanceAmount,
 		&s.AttendancePresent,
 		&s.AttendanceAbsent,
+		&s.TodayEmployeeSalary,
 		&s.AmountReceived,
 		&s.AmountPaid,
 		&s.CreditSale,
@@ -581,16 +602,95 @@ func (r *TenantDailyStatsPostgres) GetByDate(ctx context.Context, tenantID uuid.
 	return &s, nil
 }
 
+func (r *TenantDailyStatsPostgres) GetLatestAvailable(ctx context.Context, tenantID uuid.UUID, beforeDate string) (*domain.TenantDailyStats, error) {
+	exec := GetExecutor(ctx, r.pool)
+	query := `
+		SELECT id, tenant_id, date::text, line_sale_amount, counter_sale_amount, total_sales,
+		       purchase_amount, expense_amount, wages_amount, advance_amount,
+		       attendance_present, attendance_absent, today_employee_salary, amount_received, amount_paid, credit_sale,
+		       created_at, updated_at
+		FROM tenant_daily_stats
+		WHERE tenant_id = $1 AND date < $2::date
+		  AND (total_sales > 0 OR purchase_amount > 0 OR expense_amount > 0 OR attendance_present > 0 OR amount_received > 0 OR amount_paid > 0)
+		ORDER BY date DESC
+		LIMIT 1
+	`
+	var s domain.TenantDailyStats
+	err := exec.QueryRow(ctx, query, tenantID, beforeDate).Scan(
+		&s.ID,
+		&s.TenantID,
+		&s.Date,
+		&s.LineSaleAmount,
+		&s.CounterSaleAmount,
+		&s.TotalSales,
+		&s.PurchaseAmount,
+		&s.ExpenseAmount,
+		&s.WagesAmount,
+		&s.AdvanceAmount,
+		&s.AttendancePresent,
+		&s.AttendanceAbsent,
+		&s.TodayEmployeeSalary,
+		&s.AmountReceived,
+		&s.AmountPaid,
+		&s.CreditSale,
+		&s.CreatedAt,
+		&s.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			fallbackQuery := `
+				SELECT id, tenant_id, date::text, line_sale_amount, counter_sale_amount, total_sales,
+				       purchase_amount, expense_amount, wages_amount, advance_amount,
+				       attendance_present, attendance_absent, today_employee_salary, amount_received, amount_paid, credit_sale,
+				       created_at, updated_at
+				FROM tenant_daily_stats
+				WHERE tenant_id = $1 AND date < $2::date
+				ORDER BY date DESC
+				LIMIT 1
+			`
+			err2 := exec.QueryRow(ctx, fallbackQuery, tenantID, beforeDate).Scan(
+				&s.ID,
+				&s.TenantID,
+				&s.Date,
+				&s.LineSaleAmount,
+				&s.CounterSaleAmount,
+				&s.TotalSales,
+				&s.PurchaseAmount,
+				&s.ExpenseAmount,
+				&s.WagesAmount,
+				&s.AdvanceAmount,
+				&s.AttendancePresent,
+				&s.AttendanceAbsent,
+				&s.TodayEmployeeSalary,
+				&s.AmountReceived,
+				&s.AmountPaid,
+				&s.CreditSale,
+				&s.CreatedAt,
+				&s.UpdatedAt,
+			)
+			if err2 != nil {
+				if errors.Is(err2, pgx.ErrNoRows) {
+					return nil, nil
+				}
+				return nil, appErrors.NewDatabase(fmt.Errorf("failed to get fallback daily stats: %w", err2))
+			}
+			return &s, nil
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get latest available daily stats: %w", err))
+	}
+	return &s, nil
+}
+
 func (r *TenantDailyStatsPostgres) Upsert(ctx context.Context, stats *domain.TenantDailyStats) error {
 	query := `
 		INSERT INTO tenant_daily_stats (
 			tenant_id, date, line_sale_amount, counter_sale_amount, total_sales,
 			purchase_amount, expense_amount, wages_amount, advance_amount,
-			attendance_present, attendance_absent, amount_received, amount_paid, credit_sale
+			attendance_present, attendance_absent, today_employee_salary, amount_received, amount_paid, credit_sale
 		) VALUES (
 			$1, $2::date, $3, $4, $5,
 			$6, $7, $8, $9,
-			$10, $11, $12, $13, $14
+			$10, $11, $12, $13, $14, $15
 		)
 		ON CONFLICT (tenant_id, date)
 		DO UPDATE SET
@@ -603,6 +703,7 @@ func (r *TenantDailyStatsPostgres) Upsert(ctx context.Context, stats *domain.Ten
 			advance_amount = EXCLUDED.advance_amount,
 			attendance_present = EXCLUDED.attendance_present,
 			attendance_absent = EXCLUDED.attendance_absent,
+			today_employee_salary = EXCLUDED.today_employee_salary,
 			amount_received = EXCLUDED.amount_received,
 			amount_paid = EXCLUDED.amount_paid,
 			credit_sale = EXCLUDED.credit_sale,
@@ -622,6 +723,7 @@ func (r *TenantDailyStatsPostgres) Upsert(ctx context.Context, stats *domain.Ten
 		stats.AdvanceAmount,
 		stats.AttendancePresent,
 		stats.AttendanceAbsent,
+		stats.TodayEmployeeSalary,
 		stats.AmountReceived,
 		stats.AmountPaid,
 		stats.CreditSale,
@@ -719,26 +821,39 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating attendance: %w", err))
 	}
 
+	// 7. Today's Employee Salary (earned for present employees)
+	var todayEmpSalary decimal.Decimal
+	salaryEarnedQuery := `
+		SELECT COALESCE(SUM(COALESCE(a.daily_salary, e.salary)), 0)
+		FROM attendance a
+		JOIN tenant_employees e ON e.id = a.employee_id
+		WHERE a.tenant_id = $1 AND a.date = $2::date AND a.status = 'present'
+	`
+	if err := exec.QueryRow(ctx, salaryEarnedQuery, tenantID, date).Scan(&todayEmpSalary); err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating today's employee salary: %w", err))
+	}
+
 	totalSales := lineSaleAmount.Add(counterSaleAmount)
 	amountReceived := lineCashIn.Add(counterCash).Add(counterPaymentsBank)
 	amountPaid := purchasePaid.Add(expenseAmount).Add(wagesAmount).Add(advanceAmount)
 	creditSale := lineCredit.Add(counterAccount)
 
 	stats := &domain.TenantDailyStats{
-		TenantID:          tenantID,
-		Date:              date,
-		LineSaleAmount:    lineSaleAmount,
-		CounterSaleAmount: counterSaleAmount,
-		TotalSales:        totalSales,
-		PurchaseAmount:    purchaseAmount,
-		ExpenseAmount:     expenseAmount,
-		WagesAmount:       wagesAmount,
-		AdvanceAmount:     advanceAmount,
-		AttendancePresent: attPresent,
-		AttendanceAbsent:  attAbsent,
-		AmountReceived:    amountReceived,
-		AmountPaid:        amountPaid,
-		CreditSale:        creditSale,
+		TenantID:            tenantID,
+		Date:                date,
+		LineSaleAmount:      lineSaleAmount,
+		CounterSaleAmount:   counterSaleAmount,
+		TotalSales:          totalSales,
+		PurchaseAmount:      purchaseAmount,
+		ExpenseAmount:       expenseAmount,
+		WagesAmount:         wagesAmount,
+		AdvanceAmount:       advanceAmount,
+		AttendancePresent:   attPresent,
+		AttendanceAbsent:    attAbsent,
+		TodayEmployeeSalary: todayEmpSalary,
+		AmountReceived:      amountReceived,
+		AmountPaid:          amountPaid,
+		CreditSale:          creditSale,
 	}
 
 	if err := r.Upsert(ctx, stats); err != nil {

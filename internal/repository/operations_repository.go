@@ -23,6 +23,9 @@ type TenantCustomerRepository interface {
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantCustomer, error)
 	Update(ctx context.Context, cust *domain.TenantCustomer) error
 	AdjustBalance(ctx context.Context, tenantID, id uuid.UUID, delta decimal.Decimal) error
+	SetBalance(ctx context.Context, tenantID, id uuid.UUID, balance decimal.Decimal) error
+	RecordAdjustment(ctx context.Context, adj *domain.CustomerBalanceAdjustment) error
+	ListAdjustments(ctx context.Context, tenantID, customerID uuid.UUID, page, pageSize int) ([]domain.CustomerBalanceAdjustment, int64, error)
 	Delete(ctx context.Context, tenantID, id uuid.UUID) error
 	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, status string) ([]domain.TenantCustomer, int64, error)
 }
@@ -32,6 +35,9 @@ type TenantBankRepository interface {
 	Create(ctx context.Context, bank *domain.TenantBank) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantBank, error)
 	Update(ctx context.Context, bank *domain.TenantBank) error
+	AdjustBalance(ctx context.Context, tenantID, id uuid.UUID, delta decimal.Decimal) error
+	CreateTransaction(ctx context.Context, tx *domain.BankTransaction) error
+	ListTransactions(ctx context.Context, tenantID, bankID uuid.UUID, page, pageSize int) ([]domain.BankTransaction, int64, error)
 	Delete(ctx context.Context, tenantID, id uuid.UUID) error
 	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, status string) ([]domain.TenantBank, int64, error)
 }
@@ -77,6 +83,7 @@ type AttendanceRepository interface {
 	Upsert(ctx context.Context, att *domain.Attendance) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Attendance, error)
 	GetByEmployeeAndDate(ctx context.Context, tenantID, employeeID uuid.UUID, date string) (*domain.Attendance, error)
+	GetTodaySalaryEarned(ctx context.Context, tenantID uuid.UUID, date string) (decimal.Decimal, error)
 	Update(ctx context.Context, att *domain.Attendance) error
 	Delete(ctx context.Context, tenantID, id uuid.UUID) error
 	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, employeeID *uuid.UUID) ([]domain.Attendance, int64, error)
@@ -97,6 +104,7 @@ type EmployeeSalaryRepository interface {
 // TenantDailyStatsRepository defines persistence contracts for daily aggregates
 type TenantDailyStatsRepository interface {
 	GetByDate(ctx context.Context, tenantID uuid.UUID, date string) (*domain.TenantDailyStats, error)
+	GetLatestAvailable(ctx context.Context, tenantID uuid.UUID, beforeDate string) (*domain.TenantDailyStats, error)
 	Upsert(ctx context.Context, stats *domain.TenantDailyStats) error
 	ComputeAndSyncDailyStats(ctx context.Context, tenantID uuid.UUID, date string) (*domain.TenantDailyStats, error)
 }

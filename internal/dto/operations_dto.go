@@ -145,10 +145,11 @@ func ToCustomerResponse(c *domain.TenantCustomer) CustomerResponse {
 // ==========================================
 
 type CreateBankRequest struct {
-	BankName      string `json:"bank_name" binding:"required,min=2,max=255"`
-	AccountNumber string `json:"account_number" binding:"omitempty,max=100"`
-	IFSC          string `json:"ifsc" binding:"omitempty,max=50"`
-	Status        string `json:"status" binding:"omitempty,oneof=active inactive"`
+	BankName       string          `json:"bank_name" binding:"required,min=2,max=255"`
+	AccountNumber  string          `json:"account_number" binding:"omitempty,max=100"`
+	IFSC           string          `json:"ifsc" binding:"omitempty,max=50"`
+	OpeningBalance decimal.Decimal `json:"opening_balance" binding:"omitempty"`
+	Status         string          `json:"status" binding:"omitempty,oneof=active inactive"`
 }
 
 type UpdateBankRequest struct {
@@ -159,26 +160,28 @@ type UpdateBankRequest struct {
 }
 
 type BankResponse struct {
-	ID            uuid.UUID `json:"id"`
-	TenantID      uuid.UUID `json:"tenant_id"`
-	BankName      string    `json:"bank_name"`
-	AccountNumber string    `json:"account_number,omitempty"`
-	IFSC          string    `json:"ifsc,omitempty"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID             uuid.UUID       `json:"id"`
+	TenantID       uuid.UUID       `json:"tenant_id"`
+	BankName       string          `json:"bank_name"`
+	AccountNumber  string          `json:"account_number,omitempty"`
+	IFSC           string          `json:"ifsc,omitempty"`
+	CurrentBalance decimal.Decimal `json:"current_balance"`
+	Status         string          `json:"status"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 func ToBankResponse(b *domain.TenantBank) BankResponse {
 	return BankResponse{
-		ID:            b.ID,
-		TenantID:      b.TenantID,
-		BankName:      b.BankName,
-		AccountNumber: b.AccountNumber,
-		IFSC:          b.IFSC,
-		Status:        b.Status,
-		CreatedAt:     b.CreatedAt,
-		UpdatedAt:     b.UpdatedAt,
+		ID:             b.ID,
+		TenantID:       b.TenantID,
+		BankName:       b.BankName,
+		AccountNumber:  b.AccountNumber,
+		IFSC:           b.IFSC,
+		CurrentBalance: b.CurrentBalance,
+		Status:         b.Status,
+		CreatedAt:      b.CreatedAt,
+		UpdatedAt:      b.UpdatedAt,
 	}
 }
 
@@ -201,6 +204,8 @@ type CreateLineSaleRequest struct {
 	Note        string                   `json:"note" binding:"omitempty"`
 	TotalAmount decimal.Decimal          `json:"total_amount" binding:"required"`
 	TotalCashIn decimal.Decimal          `json:"total_cash_in" binding:"omitempty"`
+	BankAmount  decimal.Decimal          `json:"bank_amount" binding:"omitempty"`
+	BankID      *uuid.UUID               `json:"bank_id,omitempty"`
 	Payments    []LineSalePaymentRequest `json:"payments,omitempty"`
 }
 
@@ -230,6 +235,8 @@ type CreateCounterSaleRequest struct {
 	TotalAmount   decimal.Decimal             `json:"total_amount" binding:"required"`
 	PaymentMethod string                      `json:"payment_method" binding:"required"`
 	Cash          decimal.Decimal             `json:"cash" binding:"omitempty"`
+	BankAmount    decimal.Decimal             `json:"bank_amount" binding:"omitempty"`
+	BankID        *uuid.UUID                  `json:"bank_id,omitempty"`
 	Account       decimal.Decimal             `json:"account" binding:"omitempty"`
 	Payments      []CounterSalePaymentRequest `json:"payments,omitempty"`
 }
@@ -344,4 +351,42 @@ type PaySalaryRequest struct {
 
 type UpdateSalaryBalanceRequest struct {
 	Balance decimal.Decimal `json:"balance" binding:"required"`
+}
+
+// ==========================================
+// 11. Customer Balance Adjustment DTOs
+// ==========================================
+
+type AdjustCustomerBalanceRequest struct {
+	NewBalance       *decimal.Decimal `json:"new_balance,omitempty"`
+	AdjustmentAmount *decimal.Decimal `json:"adjustment_amount,omitempty"`
+	Reason           string           `json:"reason" binding:"required,min=2,max=500"`
+}
+
+type CustomerBalanceAdjustmentResponse struct {
+	ID               uuid.UUID       `json:"id"`
+	TenantID         uuid.UUID       `json:"tenant_id"`
+	CustomerID       uuid.UUID       `json:"customer_id"`
+	CustomerName     string          `json:"customer_name,omitempty"`
+	PreviousBalance  decimal.Decimal `json:"previous_balance"`
+	NewBalance       decimal.Decimal `json:"new_balance"`
+	AdjustmentAmount decimal.Decimal `json:"adjustment_amount"`
+	Reason           string          `json:"reason"`
+	CreatedAt        time.Time       `json:"created_at"`
+}
+
+// ==========================================
+// 12. Bank Transaction DTOs
+// ==========================================
+
+type BankTransactionResponse struct {
+	ID              uuid.UUID       `json:"id"`
+	TenantID        uuid.UUID       `json:"tenant_id"`
+	BankID          uuid.UUID       `json:"bank_id"`
+	Amount          decimal.Decimal `json:"amount"`
+	TransactionType string          `json:"transaction_type"`
+	Reason          string          `json:"reason"`
+	SaleType        string          `json:"sale_type,omitempty"`
+	SaleID          *uuid.UUID      `json:"sale_id,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
 }

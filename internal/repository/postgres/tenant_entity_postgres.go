@@ -284,6 +284,96 @@ func (r *TenantCustomerPostgres) AdjustBalance(ctx context.Context, tenantID, id
 	return nil
 }
 
+func (r *TenantCustomerPostgres) SetBalance(ctx context.Context, tenantID, id uuid.UUID, balance decimal.Decimal) error {
+	query := `
+		UPDATE tenant_customer
+		SET current_balance = $1, updated_at = NOW()
+		WHERE tenant_id = $2 AND id = $3
+	`
+	exec := GetExecutor(ctx, r.pool)
+	tag, err := exec.Exec(ctx, query, balance, tenantID, id)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to set customer balance: %w", err))
+	}
+	if tag.RowsAffected() == 0 {
+		return appErrors.NewNotFound("customer not found within tenant")
+	}
+	return nil
+}
+
+func (r *TenantCustomerPostgres) RecordAdjustment(ctx context.Context, adj *domain.CustomerBalanceAdjustment) error {
+	query := `
+		INSERT INTO customer_balance_adjustments (tenant_id, customer_id, previous_balance, new_balance, adjustment_amount, reason)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, query,
+		adj.TenantID,
+		adj.CustomerID,
+		adj.PreviousBalance,
+		adj.NewBalance,
+		adj.AdjustmentAmount,
+		adj.Reason,
+	).Scan(&adj.ID, &adj.CreatedAt)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to record customer balance adjustment: %w", err))
+	}
+	return nil
+}
+
+func (r *TenantCustomerPostgres) ListAdjustments(ctx context.Context, tenantID, customerID uuid.UUID, page, pageSize int) ([]domain.CustomerBalanceAdjustment, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	exec := GetExecutor(ctx, r.pool)
+	countQuery := `SELECT COUNT(*) FROM customer_balance_adjustments WHERE tenant_id = $1 AND customer_id = $2`
+	var total int64
+	if err := exec.QueryRow(ctx, countQuery, tenantID, customerID).Scan(&total); err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count customer adjustments: %w", err))
+	}
+
+	listQuery := `
+		SELECT a.id, a.tenant_id, a.customer_id, COALESCE(c.customer_name, ''),
+		       a.previous_balance, a.new_balance, a.adjustment_amount, a.reason, a.created_at
+		FROM customer_balance_adjustments a
+		LEFT JOIN tenant_customer c ON c.id = a.customer_id
+		WHERE a.tenant_id = $1 AND a.customer_id = $2
+		ORDER BY a.created_at DESC
+		LIMIT $3 OFFSET $4
+	`
+	rows, err := exec.Query(ctx, listQuery, tenantID, customerID, pageSize, offset)
+	if err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list customer adjustments: %w", err))
+	}
+	defer rows.Close()
+
+	adjustments := make([]domain.CustomerBalanceAdjustment, 0)
+	for rows.Next() {
+		var a domain.CustomerBalanceAdjustment
+		if err := rows.Scan(
+			&a.ID,
+			&a.TenantID,
+			&a.CustomerID,
+			&a.CustomerName,
+			&a.PreviousBalance,
+			&a.NewBalance,
+			&a.AdjustmentAmount,
+			&a.Reason,
+			&a.CreatedAt,
+		); err != nil {
+			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan customer adjustment: %w", err))
+		}
+		adjustments = append(adjustments, a)
+	}
+	return adjustments, total, nil
+}
+
 func (r *TenantCustomerPostgres) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
 	query := `DELETE FROM tenant_customer WHERE tenant_id = $1 AND id = $2`
 	exec := GetExecutor(ctx, r.pool)
@@ -380,8 +470,8 @@ func NewTenantBankPostgres(pool *pgxpool.Pool) *TenantBankPostgres {
 
 func (r *TenantBankPostgres) Create(ctx context.Context, bank *domain.TenantBank) error {
 	query := `
-		INSERT INTO tenant_bank (tenant_id, bank_name, account_number, ifsc_or_routing, status)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO tenant_bank (tenant_id, bank_name, account_number, ifsc_or_routing, current_balance, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -390,6 +480,7 @@ func (r *TenantBankPostgres) Create(ctx context.Context, bank *domain.TenantBank
 		bank.BankName,
 		bank.AccountNumber,
 		bank.IFSC,
+		bank.CurrentBalance,
 		bank.Status,
 	).Scan(&bank.ID, &bank.CreatedAt, &bank.UpdatedAt)
 	if err != nil {
@@ -400,7 +491,7 @@ func (r *TenantBankPostgres) Create(ctx context.Context, bank *domain.TenantBank
 
 func (r *TenantBankPostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantBank, error) {
 	query := `
-		SELECT id, tenant_id, bank_name, account_number, ifsc_or_routing, status, created_at, updated_at
+		SELECT id, tenant_id, bank_name, account_number, ifsc_or_routing, current_balance, status, created_at, updated_at
 		FROM tenant_bank
 		WHERE tenant_id = $1 AND id = $2
 	`
@@ -412,6 +503,7 @@ func (r *TenantBankPostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID
 		&b.BankName,
 		&b.AccountNumber,
 		&b.IFSC,
+		&b.CurrentBalance,
 		&b.Status,
 		&b.CreatedAt,
 		&b.UpdatedAt,
@@ -496,7 +588,7 @@ func (r *TenantBankPostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 	}
 
 	listQuery := fmt.Sprintf(`
-		SELECT id, tenant_id, bank_name, account_number, ifsc_or_routing, status, created_at, updated_at
+		SELECT id, tenant_id, bank_name, account_number, ifsc_or_routing, current_balance, status, created_at, updated_at
 		FROM tenant_bank
 		%s
 		ORDER BY bank_name ASC
@@ -519,6 +611,7 @@ func (r *TenantBankPostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 			&b.BankName,
 			&b.AccountNumber,
 			&b.IFSC,
+			&b.CurrentBalance,
 			&b.Status,
 			&b.CreatedAt,
 			&b.UpdatedAt,
@@ -529,4 +622,97 @@ func (r *TenantBankPostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 	}
 
 	return banks, total, nil
+}
+
+func (r *TenantBankPostgres) AdjustBalance(ctx context.Context, tenantID, id uuid.UUID, delta decimal.Decimal) error {
+	query := `
+		UPDATE tenant_bank
+		SET current_balance = current_balance + $1, updated_at = NOW()
+		WHERE tenant_id = $2 AND id = $3
+	`
+	exec := GetExecutor(ctx, r.pool)
+	tag, err := exec.Exec(ctx, query, delta, tenantID, id)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to adjust bank balance: %w", err))
+	}
+	if tag.RowsAffected() == 0 {
+		return appErrors.NewNotFound("bank account not found within tenant")
+	}
+	return nil
+}
+
+func (r *TenantBankPostgres) CreateTransaction(ctx context.Context, tx *domain.BankTransaction) error {
+	query := `
+		INSERT INTO tenant_bank_transactions (tenant_id, bank_id, amount, transaction_type, reason, sale_type, sale_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, created_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var saleTypeVal any
+	if tx.SaleType != "" {
+		saleTypeVal = tx.SaleType
+	}
+	err := exec.QueryRow(ctx, query,
+		tx.TenantID,
+		tx.BankID,
+		tx.Amount,
+		tx.TransactionType,
+		tx.Reason,
+		saleTypeVal,
+		tx.SaleID,
+	).Scan(&tx.ID, &tx.CreatedAt)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to create bank transaction: %w", err))
+	}
+	return nil
+}
+
+func (r *TenantBankPostgres) ListTransactions(ctx context.Context, tenantID, bankID uuid.UUID, page, pageSize int) ([]domain.BankTransaction, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	exec := GetExecutor(ctx, r.pool)
+	countQuery := `SELECT COUNT(*) FROM tenant_bank_transactions WHERE tenant_id = $1 AND bank_id = $2`
+	var total int64
+	if err := exec.QueryRow(ctx, countQuery, tenantID, bankID).Scan(&total); err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count bank transactions: %w", err))
+	}
+
+	listQuery := `
+		SELECT id, tenant_id, bank_id, amount, transaction_type, reason, COALESCE(sale_type, ''), sale_id, created_at
+		FROM tenant_bank_transactions
+		WHERE tenant_id = $1 AND bank_id = $2
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`
+	rows, err := exec.Query(ctx, listQuery, tenantID, bankID, pageSize, offset)
+	if err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list bank transactions: %w", err))
+	}
+	defer rows.Close()
+
+	txs := make([]domain.BankTransaction, 0)
+	for rows.Next() {
+		var t domain.BankTransaction
+		if err := rows.Scan(
+			&t.ID,
+			&t.TenantID,
+			&t.BankID,
+			&t.Amount,
+			&t.TransactionType,
+			&t.Reason,
+			&t.SaleType,
+			&t.SaleID,
+			&t.CreatedAt,
+		); err != nil {
+			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan bank transaction: %w", err))
+		}
+		txs = append(txs, t)
+	}
+	return txs, total, nil
 }

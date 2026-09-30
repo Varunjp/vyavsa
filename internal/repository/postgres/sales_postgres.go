@@ -26,8 +26,8 @@ func NewLineSalePostgres(pool *pgxpool.Pool) *LineSalePostgres {
 
 func (r *LineSalePostgres) Create(ctx context.Context, sale *domain.LineSale, payments []domain.LineSalePayment) error {
 	saleQuery := `
-		INSERT INTO line_sale (tenant_id, customer_id, customer_name, route, salesman, note, total_amount, total_cash_in, balance)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO line_sale (tenant_id, customer_id, customer_name, route, salesman, note, total_amount, total_cash_in, bank_amount, collected_amount, balance)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -40,6 +40,8 @@ func (r *LineSalePostgres) Create(ctx context.Context, sale *domain.LineSale, pa
 		sale.Note,
 		sale.TotalAmount,
 		sale.TotalCashIn,
+		sale.BankAmount,
+		sale.CollectedAmount,
 		sale.Balance,
 	).Scan(&sale.ID, &sale.CreatedAt, &sale.UpdatedAt)
 	if err != nil {
@@ -74,7 +76,7 @@ func (r *LineSalePostgres) Create(ctx context.Context, sale *domain.LineSale, pa
 
 func (r *LineSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.LineSale, error) {
 	saleQuery := `
-		SELECT id, tenant_id, customer_id, customer_name, route, salesman, note, total_amount, total_cash_in, balance, created_at, updated_at
+		SELECT id, tenant_id, customer_id, customer_name, route, salesman, note, total_amount, total_cash_in, bank_amount, collected_amount, balance, created_at, updated_at
 		FROM line_sale
 		WHERE tenant_id = $1 AND id = $2
 	`
@@ -90,6 +92,8 @@ func (r *LineSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) 
 		&sale.Note,
 		&sale.TotalAmount,
 		&sale.TotalCashIn,
+		&sale.BankAmount,
+		&sale.CollectedAmount,
 		&sale.Balance,
 		&sale.CreatedAt,
 		&sale.UpdatedAt,
@@ -139,8 +143,8 @@ func (r *LineSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) 
 func (r *LineSalePostgres) Update(ctx context.Context, sale *domain.LineSale) error {
 	query := `
 		UPDATE line_sale
-		SET customer_name = $1, route = $2, salesman = $3, note = $4, total_amount = $5, total_cash_in = $6, balance = $7, updated_at = NOW()
-		WHERE tenant_id = $8 AND id = $9
+		SET customer_name = $1, route = $2, salesman = $3, note = $4, total_amount = $5, total_cash_in = $6, bank_amount = $7, collected_amount = $8, balance = $9, updated_at = NOW()
+		WHERE tenant_id = $10 AND id = $11
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -151,6 +155,8 @@ func (r *LineSalePostgres) Update(ctx context.Context, sale *domain.LineSale) er
 		sale.Note,
 		sale.TotalAmount,
 		sale.TotalCashIn,
+		sale.BankAmount,
+		sale.CollectedAmount,
 		sale.Balance,
 		sale.TenantID,
 		sale.ID,
@@ -216,7 +222,7 @@ func (r *LineSalePostgres) List(ctx context.Context, tenantID uuid.UUID, page, p
 	}
 
 	listQuery := fmt.Sprintf(`
-		SELECT id, tenant_id, customer_id, customer_name, route, salesman, note, total_amount, total_cash_in, balance, created_at, updated_at
+		SELECT id, tenant_id, customer_id, customer_name, route, salesman, note, total_amount, total_cash_in, bank_amount, collected_amount, balance, created_at, updated_at
 		FROM line_sale
 		%s
 		ORDER BY created_at DESC
@@ -243,6 +249,8 @@ func (r *LineSalePostgres) List(ctx context.Context, tenantID uuid.UUID, page, p
 			&s.Note,
 			&s.TotalAmount,
 			&s.TotalCashIn,
+			&s.BankAmount,
+			&s.CollectedAmount,
 			&s.Balance,
 			&s.CreatedAt,
 			&s.UpdatedAt,
@@ -269,8 +277,8 @@ func NewCounterSalePostgres(pool *pgxpool.Pool) *CounterSalePostgres {
 
 func (r *CounterSalePostgres) Create(ctx context.Context, sale *domain.CounterSale, payments []domain.CounterSalePayment) error {
 	saleQuery := `
-		INSERT INTO counter_sale (tenant_id, item, price, total_amount, payment_method, cash, account)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO counter_sale (tenant_id, item, price, total_amount, payment_method, cash, bank_amount, bank_id, collected_amount, account)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -281,6 +289,9 @@ func (r *CounterSalePostgres) Create(ctx context.Context, sale *domain.CounterSa
 		sale.TotalAmount,
 		sale.PaymentMethod,
 		sale.Cash,
+		sale.BankAmount,
+		sale.BankID,
+		sale.CollectedAmount,
 		sale.Account,
 	).Scan(&sale.ID, &sale.CreatedAt, &sale.UpdatedAt)
 	if err != nil {
@@ -315,7 +326,7 @@ func (r *CounterSalePostgres) Create(ctx context.Context, sale *domain.CounterSa
 
 func (r *CounterSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.CounterSale, error) {
 	saleQuery := `
-		SELECT id, tenant_id, item, price, total_amount, payment_method, cash, account, created_at, updated_at
+		SELECT id, tenant_id, item, price, total_amount, payment_method, cash, bank_amount, bank_id, collected_amount, account, created_at, updated_at
 		FROM counter_sale
 		WHERE tenant_id = $1 AND id = $2
 	`
@@ -329,6 +340,9 @@ func (r *CounterSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUI
 		&sale.TotalAmount,
 		&sale.PaymentMethod,
 		&sale.Cash,
+		&sale.BankAmount,
+		&sale.BankID,
+		&sale.CollectedAmount,
 		&sale.Account,
 		&sale.CreatedAt,
 		&sale.UpdatedAt,
@@ -378,8 +392,8 @@ func (r *CounterSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUI
 func (r *CounterSalePostgres) Update(ctx context.Context, sale *domain.CounterSale) error {
 	query := `
 		UPDATE counter_sale
-		SET item = $1, price = $2, total_amount = $3, payment_method = $4, cash = $5, account = $6, updated_at = NOW()
-		WHERE tenant_id = $7 AND id = $8
+		SET item = $1, price = $2, total_amount = $3, payment_method = $4, cash = $5, bank_amount = $6, bank_id = $7, collected_amount = $8, account = $9, updated_at = NOW()
+		WHERE tenant_id = $10 AND id = $11
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -389,6 +403,9 @@ func (r *CounterSalePostgres) Update(ctx context.Context, sale *domain.CounterSa
 		sale.TotalAmount,
 		sale.PaymentMethod,
 		sale.Cash,
+		sale.BankAmount,
+		sale.BankID,
+		sale.CollectedAmount,
 		sale.Account,
 		sale.TenantID,
 		sale.ID,
@@ -448,7 +465,7 @@ func (r *CounterSalePostgres) List(ctx context.Context, tenantID uuid.UUID, page
 	}
 
 	listQuery := fmt.Sprintf(`
-		SELECT id, tenant_id, item, price, total_amount, payment_method, cash, account, created_at, updated_at
+		SELECT id, tenant_id, item, price, total_amount, payment_method, cash, bank_amount, bank_id, collected_amount, account, created_at, updated_at
 		FROM counter_sale
 		%s
 		ORDER BY created_at DESC
@@ -473,6 +490,9 @@ func (r *CounterSalePostgres) List(ctx context.Context, tenantID uuid.UUID, page
 			&s.TotalAmount,
 			&s.PaymentMethod,
 			&s.Cash,
+			&s.BankAmount,
+			&s.BankID,
+			&s.CollectedAmount,
 			&s.Account,
 			&s.CreatedAt,
 			&s.UpdatedAt,

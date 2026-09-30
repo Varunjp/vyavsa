@@ -9,19 +9,21 @@ import (
 
 // LineSale represents field/route sales to a customer
 type LineSale struct {
-	ID           uuid.UUID         `json:"id"`
-	TenantID     uuid.UUID         `json:"tenant_id"`
-	CustomerID   uuid.UUID         `json:"customer_id"`
-	CustomerName string            `json:"customer_name"`
-	Route        string            `json:"route,omitempty"`
-	Salesman     string            `json:"salesman,omitempty"`
-	Note         string            `json:"note,omitempty"`
-	TotalAmount  decimal.Decimal   `json:"total_amount"`
-	TotalCashIn  decimal.Decimal   `json:"total_cash_in"`
-	Balance      decimal.Decimal   `json:"balance"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
-	Payments     []LineSalePayment `json:"payments,omitempty"`
+	ID              uuid.UUID         `json:"id"`
+	TenantID        uuid.UUID         `json:"tenant_id"`
+	CustomerID      uuid.UUID         `json:"customer_id"`
+	CustomerName    string            `json:"customer_name"`
+	Route           string            `json:"route,omitempty"`
+	Salesman        string            `json:"salesman,omitempty"`
+	Note            string            `json:"note,omitempty"`
+	TotalAmount     decimal.Decimal   `json:"total_amount"`
+	TotalCashIn     decimal.Decimal   `json:"total_cash_in"`
+	BankAmount      decimal.Decimal   `json:"bank_amount"`
+	CollectedAmount decimal.Decimal   `json:"collected_amount"`
+	Balance         decimal.Decimal   `json:"balance"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+	Payments        []LineSalePayment `json:"payments,omitempty"`
 }
 
 // LineSalePayment represents a payment towards a line sale
@@ -40,17 +42,20 @@ type LineSalePayment struct {
 
 // CounterSale represents point-of-sale store transactions
 type CounterSale struct {
-	ID            uuid.UUID            `json:"id"`
-	TenantID      uuid.UUID            `json:"tenant_id"`
-	Item          string               `json:"item"`
-	Price         decimal.Decimal      `json:"price"`
-	TotalAmount   decimal.Decimal      `json:"total_amount"`
-	PaymentMethod string               `json:"payment_method"`
-	Cash          decimal.Decimal      `json:"cash"`
-	Account       decimal.Decimal      `json:"account"`
-	CreatedAt     time.Time            `json:"created_at"`
-	UpdatedAt     time.Time            `json:"updated_at"`
-	Payments      []CounterSalePayment `json:"payments,omitempty"`
+	ID              uuid.UUID            `json:"id"`
+	TenantID        uuid.UUID            `json:"tenant_id"`
+	Item            string               `json:"item"`
+	Price           decimal.Decimal      `json:"price"`
+	TotalAmount     decimal.Decimal      `json:"total_amount"`
+	PaymentMethod   string               `json:"payment_method"`
+	Cash            decimal.Decimal      `json:"cash"`
+	BankAmount      decimal.Decimal      `json:"bank_amount"`
+	BankID          *uuid.UUID           `json:"bank_id,omitempty"`
+	CollectedAmount decimal.Decimal      `json:"collected_amount"`
+	Account         decimal.Decimal      `json:"account"`
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
+	Payments        []CounterSalePayment `json:"payments,omitempty"`
 }
 
 // CounterSalePayment represents a payment split on a counter sale
@@ -126,8 +131,9 @@ type Attendance struct {
 	TenantID     uuid.UUID       `json:"tenant_id"`
 	EmployeeID   uuid.UUID       `json:"employee_id"`
 	EmployeeName string          `json:"employee_name,omitempty"`
-	Date         string          `json:"date"`    // YYYY-MM-DD
-	Status       string          `json:"status"`  // present, absent, half_day, leave
+	Date         string          `json:"date"`   // YYYY-MM-DD
+	Status       string          `json:"status"` // present, absent, half_day, leave
+	DailySalary  decimal.Decimal `json:"daily_salary"`
 	OT           decimal.Decimal `json:"ot"`      // Overtime hours/units
 	Advance      decimal.Decimal `json:"advance"` // Cash advance paid
 	CreatedAt    time.Time       `json:"created_at"`
@@ -164,33 +170,70 @@ type EmployeeSalaryPayment struct {
 
 // TenantDailyStats represents business performance aggregates for a day
 type TenantDailyStats struct {
-	ID                uuid.UUID       `json:"id"`
-	TenantID          uuid.UUID       `json:"tenant_id"`
-	Date              string          `json:"date"` // YYYY-MM-DD
-	LineSaleAmount    decimal.Decimal `json:"line_sale_amount"`
-	CounterSaleAmount decimal.Decimal `json:"counter_sale_amount"`
-	TotalSales        decimal.Decimal `json:"total_sales"`
-	PurchaseAmount    decimal.Decimal `json:"purchase_amount"`
-	ExpenseAmount     decimal.Decimal `json:"expense_amount"`
-	WagesAmount       decimal.Decimal `json:"wages_amount"`
-	AdvanceAmount     decimal.Decimal `json:"advance_amount"`
-	AttendancePresent int             `json:"attendance_present"`
-	AttendanceAbsent  int             `json:"attendance_absent"`
-	AmountReceived    decimal.Decimal `json:"amount_received"`
-	AmountPaid        decimal.Decimal `json:"amount_paid"`
-	CreditSale        decimal.Decimal `json:"credit_sale"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
+	ID                  uuid.UUID       `json:"id"`
+	TenantID            uuid.UUID       `json:"tenant_id"`
+	Date                string          `json:"date"` // YYYY-MM-DD
+	LineSaleAmount      decimal.Decimal `json:"line_sale_amount"`
+	CounterSaleAmount   decimal.Decimal `json:"counter_sale_amount"`
+	TotalSales          decimal.Decimal `json:"total_sales"`
+	PurchaseAmount      decimal.Decimal `json:"purchase_amount"`
+	ExpenseAmount       decimal.Decimal `json:"expense_amount"`
+	WagesAmount         decimal.Decimal `json:"wages_amount"`
+	AdvanceAmount       decimal.Decimal `json:"advance_amount"`
+	AttendancePresent   int             `json:"attendance_present"`
+	AttendanceAbsent    int             `json:"attendance_absent"`
+	TodayEmployeeSalary decimal.Decimal `json:"today_employee_salary"`
+	AmountReceived      decimal.Decimal `json:"amount_received"`
+	AmountPaid          decimal.Decimal `json:"amount_paid"`
+	CreditSale          decimal.Decimal `json:"credit_sale"`
+	RequestedDate       string          `json:"requested_date,omitempty"`
+	DataDate            string          `json:"data_date,omitempty"`
+	IsCurrent           *bool           `json:"is_current,omitempty"`
+	DaysOld             int             `json:"days_old,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
 }
 
 // FinancialMetrics aggregates all live cash, bank, dues, receivables, and pending salaries
 type FinancialMetrics struct {
-	CashBalance     decimal.Decimal   `json:"cash_balance"`
-	BankBalance     decimal.Decimal   `json:"bank_balance"`
-	TotalReceivable decimal.Decimal   `json:"total_receivable"`
-	TotalPayable    decimal.Decimal   `json:"total_payable"`
-	NetDues         decimal.Decimal   `json:"net_dues"`
-	NetReceivables  decimal.Decimal   `json:"net_receivables"`
-	PendingSalary   decimal.Decimal   `json:"pending_salary"`
-	TodayStats      *TenantDailyStats `json:"today_stats,omitempty"`
+	CashBalance         decimal.Decimal   `json:"cash_balance"`
+	BankBalance         decimal.Decimal   `json:"bank_balance"`
+	TotalReceivable     decimal.Decimal   `json:"total_receivable"`
+	TotalPayable        decimal.Decimal   `json:"total_payable"`
+	NetDues             decimal.Decimal   `json:"net_dues"`
+	NetReceivables      decimal.Decimal   `json:"net_receivables"`
+	PendingSalary       decimal.Decimal   `json:"pending_salary"`
+	TodayEmployeeSalary decimal.Decimal   `json:"today_employee_salary"`
+	BankBalances        []TenantBank      `json:"bank_balances,omitempty"`
+	TodayStats          *TenantDailyStats `json:"today_stats,omitempty"`
+	RequestedDate       string            `json:"requested_date,omitempty"`
+	DataDate            string            `json:"data_date,omitempty"`
+	IsCurrent           bool              `json:"is_current"`
+	DaysOld             int               `json:"days_old"`
+}
+
+// BankTransaction represents individual ledger transactions on tenant bank accounts
+type BankTransaction struct {
+	ID              uuid.UUID       `json:"id"`
+	TenantID        uuid.UUID       `json:"tenant_id"`
+	BankID          uuid.UUID       `json:"bank_id"`
+	Amount          decimal.Decimal `json:"amount"`
+	TransactionType string          `json:"transaction_type"` // credit, debit
+	Reason          string          `json:"reason"`
+	SaleType        string          `json:"sale_type,omitempty"` // line_sale, counter_sale
+	SaleID          *uuid.UUID      `json:"sale_id,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+}
+
+// CustomerBalanceAdjustment tracks manual adjustments to customer balances
+type CustomerBalanceAdjustment struct {
+	ID               uuid.UUID       `json:"id"`
+	TenantID         uuid.UUID       `json:"tenant_id"`
+	CustomerID       uuid.UUID       `json:"customer_id"`
+	CustomerName     string          `json:"customer_name,omitempty"`
+	PreviousBalance  decimal.Decimal `json:"previous_balance"`
+	NewBalance       decimal.Decimal `json:"new_balance"`
+	AdjustmentAmount decimal.Decimal `json:"adjustment_amount"`
+	Reason           string          `json:"reason"`
+	CreatedAt        time.Time       `json:"created_at"`
 }

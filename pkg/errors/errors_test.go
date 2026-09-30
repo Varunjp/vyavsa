@@ -163,7 +163,9 @@ func TestParseBindingError(t *testing.T) {
 	})
 
 	t.Run("json.UnmarshalTypeError invalid field type", func(t *testing.T) {
-		var target struct{ Age int `json:"age"` }
+		var target struct {
+			Age int `json:"age"`
+		}
 		decodeErr := json.Unmarshal([]byte(`{"age": "twenty"}`), &target)
 		err := ParseBindingError(decodeErr)
 		require.NotNil(t, err)
