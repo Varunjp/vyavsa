@@ -1,3 +1,7 @@
+---
+description: Implement an authentication/security change safely
+---
+
 # Authentication Change
 
 Implement an authentication/security change safely.

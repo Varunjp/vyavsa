@@ -1,3 +1,7 @@
+---
+description: Prepare the current branch for a production-quality pull request
+---
+
 # Prepare PR
 
 Prepare the current branch for a production-quality pull request.
