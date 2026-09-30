@@ -140,6 +140,7 @@ func TestTenantOperations_RBACAndSecurity(t *testing.T) {
 		{http.MethodGet, "/api/v1/tenant/expenses"},
 		{http.MethodGet, "/api/v1/tenant/daily-stats"},
 		{http.MethodGet, "/api/v1/tenant/dashboard"},
+		{http.MethodGet, "/api/v1/tenant/dashboard/today"},
 	}
 
 	for _, ep := range sharedEndpoints {
@@ -165,4 +166,65 @@ func TestTenantOperations_RBACAndSecurity(t *testing.T) {
 			assert.NotEqual(t, http.StatusForbidden, w.Code)
 		})
 	}
+}
+
+func TestTenantOperations_TodayOverviewEndpoint(t *testing.T) {
+	cfg := &config.Config{
+		App: config.AppConfig{
+			Name:            "test-app",
+			Env:             "test",
+			Port:            "8080",
+			ShutdownTimeout: 2 * time.Second,
+		},
+		JWT: config.JWTConfig{
+			Secret:        "integration-test-secret-minimum-32-bytes",
+			AccessExpiry:  15 * time.Minute,
+			RefreshExpiry: 24 * time.Hour,
+		},
+		Metrics: config.MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+		CORS: config.CORSConfig{
+			AllowedOrigins: []string{"*"},
+		},
+	}
+
+	appLogger := logger.Default()
+	appMetrics := metrics.New()
+	srv := server.New(cfg, appLogger, nil, nil, appMetrics)
+	router := srv.Router()
+
+	jwtManager := auth.NewJWTManager(cfg.JWT)
+	tenantID := uuid.New()
+	tenantUserID := uuid.New()
+
+	userToken, err := jwtManager.GenerateTokenPair(tenantUserID, &tenantID, "staff@business.com", auth.RoleTenantUser, auth.UserTypeTenantUser)
+	require.NoError(t, err)
+
+	// 1. Unauthenticated request to /dashboard/today must fail with 401
+	unauthReq, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/dashboard/today", nil)
+	wUnauth := httptest.NewRecorder()
+	router.ServeHTTP(wUnauth, unauthReq)
+	assert.Equal(t, http.StatusUnauthorized, wUnauth.Code)
+
+	// 2. Authenticated Tenant User request to /dashboard/today
+	authReq, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/dashboard/today", nil)
+	authReq.Header.Set("Authorization", "Bearer "+userToken.AccessToken)
+	wAuth := httptest.NewRecorder()
+	router.ServeHTTP(wAuth, authReq)
+	assert.Equal(t, http.StatusOK, wAuth.Code)
+	assert.Contains(t, wAuth.Body.String(), `"attendance"`)
+	assert.Contains(t, wAuth.Body.String(), `"line_sale"`)
+	assert.Contains(t, wAuth.Body.String(), `"counter_sale"`)
+	assert.Contains(t, wAuth.Body.String(), `"employee_advance"`)
+	assert.Contains(t, wAuth.Body.String(), `"current_item"`)
+
+	// 3. Authenticated Tenant User request to /metrics must contain today_overview
+	metricsReq, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/metrics", nil)
+	metricsReq.Header.Set("Authorization", "Bearer "+userToken.AccessToken)
+	wMetrics := httptest.NewRecorder()
+	router.ServeHTTP(wMetrics, metricsReq)
+	assert.Equal(t, http.StatusOK, wMetrics.Code)
+	assert.Contains(t, wMetrics.Body.String(), `"today_overview"`)
 }

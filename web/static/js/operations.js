@@ -205,11 +205,36 @@ const Operations = (() => {
           </div>
         `;
       }
+      const attLoaded = document.getElementById('overview-att-loaded');
+      const attEmpty = document.getElementById('overview-att-empty');
+      if (attLoaded) attLoaded.style.display = 'none';
+      if (attEmpty) {
+        attEmpty.style.display = 'flex';
+        const emptyText = attEmpty.querySelector('.overview-empty-text span:last-child');
+        if (emptyText) emptyText.textContent = 'Unable to load attendance';
+      }
+      const itemLoaded = document.getElementById('overview-item-loaded');
+      const itemEmpty = document.getElementById('overview-item-empty');
+      if (itemLoaded) itemLoaded.style.display = 'none';
+      if (itemEmpty) itemEmpty.style.display = 'flex';
       return;
     }
 
     const m = res.data;
     if (!m) return;
+
+    // Render Enhanced Today's Overview
+    if (m.today_overview) {
+      renderTodayOverview(m.today_overview);
+    } else {
+      window.API.get('/tenant/dashboard/today').then(todayRes => {
+        if (todayRes.ok && todayRes.data) {
+          renderTodayOverview(todayRes.data);
+        }
+      }).catch(e => {
+        console.warn('Failed to load today overview:', e);
+      });
+    }
 
     // Financial Position & Cash/Bank Metrics
     const elNetCash = document.getElementById('kpi-net-cash');
@@ -337,6 +362,122 @@ const Operations = (() => {
         <div class="bank-card-balance">${formatCurrency(b.current_balance || 0)}</div>
       </div>
     `).join('');
+  }
+
+  // 1A-1. Render Enhanced Today's Overview
+  function renderTodayOverview(overview) {
+    if (!overview) return;
+
+    // 1. Staff Attendance
+    const att = overview.attendance || {};
+    const attLoaded = document.getElementById('overview-att-loaded');
+    const attEmpty = document.getElementById('overview-att-empty');
+    const attPresent = document.getElementById('overview-att-present');
+    const attTotal = document.getElementById('overview-att-total');
+    const attTrend = document.getElementById('overview-att-trend');
+    const attBadge = document.getElementById('overview-att-badge');
+
+    if (att.has_records) {
+      if (attLoaded) attLoaded.style.display = 'block';
+      if (attEmpty) attEmpty.style.display = 'none';
+      if (attPresent) attPresent.textContent = String(att.present !== undefined ? att.present : 0);
+      if (attTotal) attTotal.textContent = String(att.total !== undefined ? att.total : (att.present || 0));
+      if (attTrend) attTrend.textContent = `${att.present || 0} on duty · ${att.absent || 0} absent`;
+      if (attBadge) {
+        attBadge.className = 'status-badge cleared';
+        attBadge.textContent = 'Active';
+      }
+    } else {
+      if (attLoaded) attLoaded.style.display = 'none';
+      if (attEmpty) attEmpty.style.display = 'flex';
+      const emptyText = attEmpty ? attEmpty.querySelector('.overview-empty-text span:last-child') : null;
+      if (emptyText) {
+        if (att.total > 0) {
+          emptyText.textContent = `No attendance recorded today (${att.total} staff)`;
+        } else {
+          emptyText.textContent = 'No staff members registered';
+        }
+      }
+      if (attBadge) {
+        attBadge.className = 'status-badge pending';
+        attBadge.textContent = 'Not Marked';
+      }
+    }
+
+    // 2. Line Sale
+    const elLineSale = document.getElementById('overview-line-sale-val');
+    if (elLineSale) {
+      elLineSale.textContent = formatCurrency(overview.line_sale || 0);
+    }
+
+    // 3. Counter Sale
+    const elCounterSale = document.getElementById('overview-counter-sale-val');
+    if (elCounterSale) {
+      elCounterSale.textContent = formatCurrency(overview.counter_sale || 0);
+    }
+
+    // 4. Employee Total Advance
+    const elEmpAdvance = document.getElementById('overview-emp-advance-val');
+    const elEmpAdvanceTrend = document.getElementById('overview-emp-advance-trend');
+    if (elEmpAdvance) {
+      const advAmount = overview.employee_advance || 0;
+      elEmpAdvance.textContent = formatCurrency(advAmount);
+      if (elEmpAdvanceTrend) {
+        const advNum = parseFloat(advAmount) || 0;
+        elEmpAdvanceTrend.textContent = advNum > 0 ? 'Aggregated staff advances today' : 'No advances given today';
+      }
+    }
+
+    // 5. Current Item
+    const item = overview.current_item;
+    const itemLoaded = document.getElementById('overview-item-loaded');
+    const itemEmpty = document.getElementById('overview-item-empty');
+    const itemName = document.getElementById('overview-item-name');
+    const itemQty = document.getElementById('overview-item-qty');
+    const itemTotal = document.getElementById('overview-item-total');
+    const itemStatus = document.getElementById('overview-item-status');
+    const itemBadge = document.getElementById('overview-item-badge');
+    const itemTrend = document.getElementById('overview-item-trend');
+
+    if (item && item.name) {
+      if (itemLoaded) itemLoaded.style.display = 'block';
+      if (itemEmpty) itemEmpty.style.display = 'none';
+      if (itemName) itemName.textContent = item.name;
+      if (itemQty) {
+        if (item.quantity) {
+          itemQty.style.display = 'inline-flex';
+          itemQty.textContent = `Qty: ${item.quantity}`;
+        } else {
+          itemQty.style.display = 'none';
+        }
+      }
+      if (itemTotal) {
+        itemTotal.textContent = formatCurrency(item.total_amount || 0);
+      }
+      if (itemStatus) {
+        if (item.is_today) {
+          itemStatus.className = 'overview-pill highlight';
+          itemStatus.textContent = item.source === 'counter_sale' ? 'Counter Sale · Today' : 'Stock Intake · Today';
+        } else {
+          itemStatus.className = 'overview-pill';
+          itemStatus.textContent = item.date ? formatDate(item.date) : 'Recent Record';
+        }
+      }
+      if (itemBadge) {
+        itemBadge.className = 'status-badge cleared';
+        itemBadge.textContent = item.source === 'counter_sale' ? 'Counter Sale' : 'Inventory';
+      }
+      if (itemTrend) {
+        itemTrend.textContent = item.is_today ? 'Latest procurement recorded today' : 'Latest available inventory record';
+      }
+    } else {
+      if (itemLoaded) itemLoaded.style.display = 'none';
+      if (itemEmpty) itemEmpty.style.display = 'flex';
+      if (itemBadge) {
+        itemBadge.className = 'status-badge pending';
+        itemBadge.textContent = 'No Items';
+      }
+    }
   }
 
   // 1B. Dynamic Recent Activity Stream (fetches real backend records)

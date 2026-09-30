@@ -564,7 +564,101 @@
         <!-- Section 1: Today's Overview -->
         <div class="section-strip">
           <span class="section-strip-title">Today's Overview</span>
-          <span style="font-size: 0.75rem; color: var(--color-text-muted);" id="today-overview-sub">Key daily inflow & outflow</span>
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);" id="today-overview-sub">Key daily metrics for the current day</span>
+        </div>
+
+        <div class="today-overview-container">
+          <!-- Row 1: Attendance, Line Sale, Counter Sale -->
+          <div class="today-overview-grid-top">
+            <!-- Staff Attendance -->
+            <div class="kpi-card today-kpi-card" id="card-staff-attendance">
+              <div class="kpi-header">
+                <span class="kpi-label">Staff Attendance</span>
+                <span id="overview-att-badge" class="status-badge cleared">Active</span>
+              </div>
+              <div id="overview-att-loaded">
+                <div class="kpi-val" id="overview-att-val">
+                  <span id="overview-att-present">0</span>
+                  <span class="kpi-val-denom">/ <span id="overview-att-total">0</span> Present</span>
+                </div>
+                <span class="kpi-trend" id="overview-att-trend">Staff on duty today</span>
+              </div>
+              <div id="overview-att-empty" class="overview-empty-state" style="display: none;">
+                <div class="overview-empty-text">
+                  <span>📋</span>
+                  <span>No attendance recorded today</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.openModal('modal-mark-attendance')" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; width: fit-content;">
+                  Mark Attendance
+                </button>
+              </div>
+            </div>
+
+            <!-- Line Sale -->
+            <div class="kpi-card today-kpi-card" id="card-line-sale">
+              <div class="kpi-header">
+                <span class="kpi-label">Line Sale</span>
+                <span class="status-badge paid">Route</span>
+              </div>
+              <div class="kpi-val" id="overview-line-sale-val">₹0.00</div>
+              <span class="kpi-trend" id="overview-line-sale-trend">Route distribution deliveries today</span>
+            </div>
+
+            <!-- Counter Sale -->
+            <div class="kpi-card today-kpi-card" id="card-counter-sale">
+              <div class="kpi-header">
+                <span class="kpi-label">Counter Sale</span>
+                <span class="status-badge paid">Direct</span>
+              </div>
+              <div class="kpi-val" id="overview-counter-sale-val">₹0.00</div>
+              <span class="kpi-trend" id="overview-counter-sale-trend">Point-of-sale shop transactions today</span>
+            </div>
+          </div>
+
+          <!-- Row 2: Employee Total Advance, Current Item -->
+          <div class="today-overview-grid-bottom">
+            <!-- Employee Total Advance -->
+            <div class="kpi-card today-kpi-card" id="card-employee-advance">
+              <div class="kpi-header">
+                <span class="kpi-label">Employee Total Advance</span>
+                <span class="status-badge pending">Advance</span>
+              </div>
+              <div class="kpi-val" id="overview-emp-advance-val">₹0.00</div>
+              <span class="kpi-trend" id="overview-emp-advance-trend">Aggregated staff advances today</span>
+            </div>
+
+            <!-- Current Item -->
+            <div class="kpi-card today-kpi-card current-item-card" id="card-current-item">
+              <div class="kpi-header">
+                <span class="kpi-label">Current Item</span>
+                <span id="overview-item-badge" class="status-badge cleared">Inventory</span>
+              </div>
+              <div id="overview-item-loaded">
+                <div class="overview-item-title" id="overview-item-name">Loading current item...</div>
+                <div class="overview-item-meta" id="overview-item-meta">
+                  <span class="overview-pill" id="overview-item-qty">Qty: 0</span>
+                  <span class="overview-pill highlight" id="overview-item-total">₹0.00</span>
+                  <span class="overview-pill" id="overview-item-status">Stock Intake</span>
+                </div>
+                <span class="kpi-trend" id="overview-item-trend">Latest inventory procurement</span>
+              </div>
+              <div id="overview-item-empty" class="overview-empty-state" style="display: none;">
+                <div class="overview-empty-text">
+                  <span>📦</span>
+                  <span>No inventory items recorded yet</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.openModal('modal-add-purchase')" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; width: fit-content;">
+                  Record Purchase
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 1B: Daily Cash & Procurement Flow -->
+        <div class="section-strip" style="margin-top: 0.5rem;">
+          <span class="section-strip-title">Daily Cash & Procurement Flow</span>
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">Inflow, purchases & physical drawer liquidity</span>
         </div>
 
         <div class="kpi-grid-5">
