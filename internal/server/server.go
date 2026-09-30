@@ -234,9 +234,11 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 
 	var blacklistRepo repository.TokenBlacklistRepository
 	var passwordResetRepo repository.PasswordResetRepository
+	var planCache repository.TenantPlanCacheRepository
 	if s.redis != nil {
 		blacklistRepo = redisRepo.NewTokenBlacklistRedis(s.redis)
 		passwordResetRepo = redisRepo.NewPasswordResetRedis(s.redis)
+		planCache = redisRepo.NewTenantPlanCacheRedis(s.redis)
 	}
 
 	appMailer := mailer.NewMailer(s.cfg.Mailer, s.log.Logger)
@@ -260,6 +262,14 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		s.log.Logger,
 	)
 
+	tenantPlanService := service.NewTenantPlanService(
+		subRepo,
+		tenantRepo,
+		planCache,
+		s.metrics,
+		s.log.Logger,
+	)
+
 	tenantService := service.NewTenantService(
 		tenantRepo,
 		tenantUserRepo,
@@ -273,6 +283,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		s.metrics,
 		s.log.Logger,
 	)
+	tenantService.SetPlanService(tenantPlanService)
 
 	opsService := service.NewTenantOperationsService(
 		tenantUserRepo,
@@ -376,6 +387,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		// ----------------------------------------------------
 		tenant := protected.Group("/tenant")
 		tenant.Use(middleware.RequireTenantUser())
+		tenant.Use(middleware.RequireActivePlan(tenantPlanService))
 		{
 			tenant.GET("/ping", func(c *gin.Context) {
 				claims, _ := auth.GetClaims(c)

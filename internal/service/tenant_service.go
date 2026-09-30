@@ -40,6 +40,7 @@ type TenantService interface {
 	ListPlatformSubscriptions(ctx context.Context, page, pageSize int, status string) ([]dto.PlatformSubscriptionItemResponse, int64, error)
 	ListPlatformTransactions(ctx context.Context, page, pageSize int, status string) ([]dto.PlatformTransactionItemResponse, int64, error)
 	UpdateTenant(ctx context.Context, id uuid.UUID, req dto.UpdatePlatformTenantRequest) (*dto.TenantDetailResponse, error)
+	SetPlanService(planService TenantPlanService)
 }
 
 type tenantService struct {
@@ -54,6 +55,7 @@ type tenantService struct {
 	jwtManager       auth.JWTManager
 	metrics          *metrics.Metrics
 	log              *slog.Logger
+	planService      TenantPlanService
 }
 
 // NewTenantService creates a new TenantService instance
@@ -83,6 +85,11 @@ func NewTenantService(
 		metrics:          m,
 		log:              log,
 	}
+}
+
+// SetPlanService injects TenantPlanService for cache invalidation upon subscription updates
+func (s *tenantService) SetPlanService(planService TenantPlanService) {
+	s.planService = planService
 }
 
 // RegisterTenant performs self-service registration for a new tenant organization with a default admin user using the same email
@@ -214,6 +221,10 @@ func (s *tenantService) RegisterTenant(ctx context.Context, req dto.TenantRegist
 	if err != nil {
 		s.log.ErrorContext(ctx, "tenant self-registration transaction aborted", slog.String("error", err.Error()))
 		return nil, err
+	}
+
+	if s.planService != nil {
+		_ = s.planService.InvalidateTenantPlanCache(ctx, tenant.ID)
 	}
 
 	// 5. Increment Metrics
@@ -377,6 +388,10 @@ func (s *tenantService) OnboardTenant(ctx context.Context, req dto.OnboardTenant
 		return nil, err
 	}
 
+	if s.planService != nil {
+		_ = s.planService.InvalidateTenantPlanCache(ctx, tenant.ID)
+	}
+
 	// 6. Record Prometheus Metric
 	if s.metrics != nil {
 		s.metrics.IncTenantsCreated()
@@ -451,6 +466,10 @@ func (s *tenantService) UpdateTenantStatus(ctx context.Context, id uuid.UUID, st
 		return err
 	}
 
+	if s.planService != nil {
+		_ = s.planService.InvalidateTenantPlanCache(ctx, id)
+	}
+
 	s.log.InfoContext(ctx, "tenant status updated",
 		slog.String("tenant_id", id.String()),
 		slog.String("status", status),
@@ -492,6 +511,10 @@ func (s *tenantService) ChangeSubscription(ctx context.Context, tenantID, planID
 			slog.String("error", err.Error()),
 		)
 		return nil, err
+	}
+
+	if s.planService != nil {
+		_ = s.planService.InvalidateTenantPlanCache(ctx, tenantID)
 	}
 
 	s.log.InfoContext(ctx, "tenant subscription changed",
@@ -716,6 +739,10 @@ func (s *tenantService) PurchasePlan(ctx context.Context, tenantID uuid.UUID, re
 	if err != nil {
 		s.log.ErrorContext(ctx, "failed to purchase plan", slog.String("tenant_id", tenantID.String()), slog.String("error", err.Error()))
 		return nil, nil, err
+	}
+
+	if s.planService != nil {
+		_ = s.planService.InvalidateTenantPlanCache(ctx, tenantID)
 	}
 
 	s.log.InfoContext(ctx, "subscription plan purchased successfully",
