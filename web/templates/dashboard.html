@@ -18,6 +18,8 @@
       var t2 = localStorage.getItem('vyavsa_platform_access_token');
       if (!t1 && !t2) {
         window.location.replace('/login');
+      } else if (!t1 && t2) {
+        window.location.replace('/platform/dashboard');
       }
     })();
 
@@ -29,6 +31,8 @@
           document.body.style.display = 'none';
         }
         window.location.replace('/login');
+      } else if (!t1 && t2) {
+        window.location.replace('/platform/dashboard');
       }
     });
   </script>

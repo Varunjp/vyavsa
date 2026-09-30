@@ -75,3 +75,9 @@ func (h *Handler) ShowDashboard(c *gin.Context) {
 	setNoCacheHeaders(c)
 	c.HTML(http.StatusOK, "dashboard.html", h.defaultData())
 }
+
+// ShowPlatformDashboard renders the platform administrator dashboard portal view
+func (h *Handler) ShowPlatformDashboard(c *gin.Context) {
+	setNoCacheHeaders(c)
+	c.HTML(http.StatusOK, "platform_dashboard.html", h.defaultData())
+}

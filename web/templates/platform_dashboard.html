@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Platform Administration — Vyavsa</title>
+  <meta name="description" content="Superadministrator management console for Vyavsa SaaS multi-tenant oversight, billing plans, and telemetry.">
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+
+  <!-- Immediate Authentication & Authorization Guard -->
+  <script>
+    (function() {
+      var token = localStorage.getItem('vyavsa_platform_access_token');
+      if (!token) {
+        window.location.replace('/platform/login');
+        return;
+      }
+      try {
+        var user = JSON.parse(localStorage.getItem('vyavsa_platform_user') || '{}');
+        if (user.role && user.role !== 'platform_admin' && user.role !== 'superadmin' && user.user_type !== 'platform_admin') {
+          localStorage.removeItem('vyavsa_platform_access_token');
+          window.location.replace('/platform/login');
+        }
+      } catch (e) {
+        // fallback
+      }
+    })();
+
+    window.addEventListener('pageshow', function(event) {
+      var token = localStorage.getItem('vyavsa_platform_access_token');
+      if (event.persisted || !token) {
+        if (document.body) document.body.style.display = 'none';
+        window.location.replace('/platform/login');
+      }
+    });
+  </script>
+
+  <style>
+    /* Platform Admin Specific Layout & Modern Accents */
+    .platform-badge {
+      background: rgba(79, 70, 229, 0.12);
+      color: var(--color-primary);
+      border: 1px solid var(--color-primary-border);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.2rem 0.6rem;
+      border-radius: var(--radius-full);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .kpi-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .kpi-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-xs);
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-card:hover {
+      box-shadow: var(--shadow-md);
+      border-color: #cbd5e1;
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--color-primary), #818cf8);
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+    .kpi-card:hover::before {
+      opacity: 1;
+    }
+    .kpi-label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .kpi-val {
+      font-size: 2.15rem;
+      font-weight: 800;
+      color: var(--color-text-main);
+      line-height: 1.15;
+      font-family: var(--font-sans);
+      letter-spacing: -0.02em;
+    }
+    .kpi-subtext {
+      font-size: 0.8125rem;
+      color: var(--color-text-muted);
+      margin-top: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    /* Revenue Chart Section */
+    .chart-container-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 1.75rem;
+      box-shadow: var(--shadow-xs);
+      margin-bottom: 2rem;
+    }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .chart-title {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: var(--color-text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .chart-wrapper {
+      width: 100%;
+      height: 280px;
+      position: relative;
+    }
+    .chart-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    /* Quick Actions Grid */
+    .quick-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+    .quick-action-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 1.25rem;
+      text-decoration: none;
+      color: var(--color-text-main);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      transition: all var(--transition-fast);
+      cursor: pointer;
+    }
+    .quick-action-card:hover {
+      background: var(--color-surface-hover);
+      border-color: var(--color-primary-border);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+    }
+    .quick-action-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-sm);
+      background: var(--color-primary-subtle);
+      color: var(--color-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .quick-action-title {
+      font-weight: 700;
+      font-size: 0.95rem;
+    }
+    .quick-action-desc {
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+      line-height: 1.4;
+    }
+
+    /* Views visibility */
+    .platform-view {
+      display: none;
+    }
+    .platform-view.active {
+      display: block;
+      animation: fadeInView 150ms ease-out forwards;
+    }
+    @keyframes fadeInView {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Modal improvements */
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .detail-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .detail-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .detail-val {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--color-text-main);
+    }
+
+    /* Toast container */
+    #platform-toast-container {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-width: 380px;
+      pointer-events: none;
+    }
+    .platform-toast {
+      pointer-events: auto;
+      background: #0f172a;
+      color: #ffffff;
+      padding: 0.875rem 1.125rem;
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-lg);
+      font-size: 0.875rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      transition: all 200ms ease-out;
+      transform: translateY(10px);
+      opacity: 0;
+    }
+    .platform-toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    .platform-toast.toast-success {
+      border-left: 4px solid var(--color-success);
+    }
+    .platform-toast.toast-error {
+      border-left: 4px solid var(--color-error);
+    }
+    .platform-toast.toast-info {
+      border-left: 4px solid var(--color-primary);
+    }
+
+    /* Status Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.625rem;
+      border-radius: var(--radius-full);
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: capitalize;
+    }
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .badge-active, .badge-completed {
+      background: #ecfdf5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+    }
+    .badge-active .badge-dot, .badge-completed .badge-dot {
+      background: #10b981;
+    }
+    .badge-inactive, .badge-archived, .badge-expired {
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #cbd5e1;
+    }
+    .badge-inactive .badge-dot, .badge-archived .badge-dot, .badge-expired .badge-dot {
+      background: #94a3b8;
+    }
+    .badge-suspended, .badge-failed {
+      background: #fef2f2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+    .badge-suspended .badge-dot, .badge-failed .badge-dot {
+      background: #ef4444;
+    }
+    .badge-pending, .badge-past_due {
+      background: #fffbeb;
+      color: #92400e;
+      border: 1px solid #fde68a;
+    }
+    .badge-pending .badge-dot, .badge-past_due .badge-dot {
+      background: #f59e0b;
+    }
+
+    /* Empty state styling */
+    .table-empty-box {
+      padding: 3rem 1.5rem;
+      text-align: center;
+      color: var(--color-text-muted);
+    }
+    .table-empty-icon {
+      margin: 0 auto 1rem;
+      color: var(--color-text-subtle);
+    }
+
+    /* Monospace copy text */
+    .mono-code {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      background: var(--color-surface-hover);
+      padding: 0.15rem 0.4rem;
+      border-radius: var(--radius-xs);
+      border: 1px solid var(--color-border);
+    }
+  </style>
+</head>
+<body class="app-shell">
+
+  <!-- ========================================================================= -->
+  <!-- Topbar: Platform Superadmin Branding & Session                            -->
+  <!-- ========================================================================= -->
+  <header class="app-topbar">
+    <div class="topbar-left">
+      <!-- Mobile hamburger toggle -->
+      <button type="button" class="sidebar-toggle-btn" id="platform-sidebar-toggle" aria-label="Toggle navigation menu">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+
+      <!-- Brand -->
+      <a href="/platform/dashboard" class="topbar-brand" data-nav="/platform/dashboard">
+        <img src="/static/images/logo.svg" alt="Vyavsa" width="28" height="28">
+        <span>Vyavsa</span>
+      </a>
+
+      <!-- Superadmin Tag -->
+      <span class="platform-badge">Superadmin Portal</span>
+    </div>
+
+    <!-- Right Controls -->
+    <div class="topbar-right">
+      <div class="system-status-chip">
+        <span class="status-dot"></span>
+        <span>Operational</span>
+      </div>
+
+      <div class="user-chip" id="admin-profile-chip" title="Superadmin account">
+        <div class="user-chip-avatar" style="background: var(--color-primary); color: #fff;">A</div>
+        <span id="admin-display-name">Superadmin</span>
+      </div>
+
+      <button type="button" id="topbar-logout-btn" class="btn btn-secondary btn-sm" style="font-weight: 600;">
+        Sign Out
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- App Shell Container: Sidebar + Content                                    -->
+  <!-- ========================================================================= -->
+  <div class="app-container">
+
+    <!-- Mobile Drawer Backdrop -->
+    <div class="sidebar-backdrop" id="platform-sidebar-backdrop"></div>
+
+    <!-- Persistent Sidebar Navigation -->
+    <aside class="app-sidebar" id="platform-sidebar">
+
+      <div class="sidebar-group">
+        <span class="sidebar-group-title">Telemetry</span>
+        <a class="sidebar-link active" data-view="dashboard" href="/platform/dashboard" id="nav-dashboard">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+          </svg>
+          <span>Dashboard</span>
+        </a>
+      </div>
+
+      <div class="sidebar-group">
+        <span class="sidebar-group-title">Tenant Management</span>
+        <a class="sidebar-link" data-view="tenants" href="/platform/tenants" id="nav-tenants">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+          </svg>
+          <span>Tenants</span>
+        </a>
+        <a class="sidebar-link" data-view="plans" href="/platform/plans" id="nav-plans">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+          </svg>
+          <span>Plans</span>
+        </a>
+        <a class="sidebar-link" data-view="subscriptions" href="/platform/subscriptions" id="nav-subscriptions">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+          </svg>
+          <span>Subscribed Tenants</span>
+        </a>
+      </div>
+
+      <div class="sidebar-group">
+        <span class="sidebar-group-title">Finance & Systems</span>
+        <a class="sidebar-link" data-view="transactions" href="/platform/transactions" id="nav-transactions">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span>Transactions</span>
+        </a>
+        <a class="sidebar-link" data-view="metrics" href="/platform/metrics" id="nav-metrics">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          <span>Application Metrics</span>
+        </a>
+      </div>
+
+      <div class="sidebar-group" style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--color-border);">
+        <a href="/" class="sidebar-link" title="Visit Public Landing Page">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+          <span>Public Portal</span>
+        </a>
+        <a class="sidebar-link" id="sidebar-logout-btn" style="color: var(--color-error); cursor: pointer;">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+          <span>Sign Out</span>
+        </a>
+      </div>
+    </aside>
+
+    <!-- Main Content Fluid Area -->
+    <main class="app-main" id="platform-main">
+
+      <!-- ===================================================================== -->
+      <!-- VIEW 1: DASHBOARD                                                     -->
+      <!-- ===================================================================== -->
+      <section class="platform-view active" id="view-dashboard">
+        <div class="content-header">
+          <div>
+            <h1 class="page-title">Platform Dashboard</h1>
+            <p class="page-subtitle">Real-time system health, tenant overview, and SaaS revenue telemetry</p>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="dashboard-refresh-btn">
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3 KPI Cards -->
+        <div class="kpi-grid-3">
+          <!-- Active Tenants -->
+          <div class="kpi-card" id="card-active-tenants">
+            <div class="kpi-label">
+              <span>Active Tenants</span>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+              </svg>
+            </div>
+            <div class="kpi-val" id="metric-active-tenants">—</div>
+            <div class="kpi-subtext" id="metric-total-tenants-sub">
+              <span>Loading tenants...</span>
+            </div>
+          </div>
+
+          <!-- Monthly Received Income -->
+          <div class="kpi-card" id="card-monthly-income">
+            <div class="kpi-label">
+              <span>Monthly Received Income</span>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-success);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div class="kpi-val" id="metric-monthly-income">—</div>
+            <div class="kpi-subtext">
+              <span class="badge badge-active" style="padding: 0.1rem 0.4rem; font-size: 0.7rem;">Completed</span>
+              <span>Current month receipts</span>
+            </div>
+          </div>
+
+          <!-- New Registrations (7 Days) -->
+          <div class="kpi-card" id="card-new-tenants">
+            <div class="kpi-label">
+              <span>New Registrations</span>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-warning);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/>
+              </svg>
+            </div>
+            <div class="kpi-val" id="metric-recent-registrations">—</div>
+            <div class="kpi-subtext">
+              <span>Last 7 days onboarding</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Monthly Income Trend Chart -->
+        <div class="chart-container-card">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-primary);">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                </svg>
+                <span>Monthly Income & Revenue Trend</span>
+              </div>
+              <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+                Completed subscription plan receipts over the trailing 6 months
+              </p>
+            </div>
+            <div style="font-size: 0.8125rem; color: var(--color-text-muted);" id="chart-total-range">
+              Trailing 6 Months
+            </div>
+          </div>
+          <div class="chart-wrapper" id="revenue-chart-wrapper">
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--color-text-muted);">
+              Loading revenue telemetry...
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions Grid -->
+        <h2 style="font-size: 1.125rem; font-weight: 700; margin-bottom: 1rem; color: var(--color-text-main);">
+          Platform Quick Actions
+        </h2>
+        <div class="quick-actions-grid">
+          <div class="quick-action-card" data-nav="/platform/tenants">
+            <div class="quick-action-icon">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+              </svg>
+            </div>
+            <div class="quick-action-title">Tenants</div>
+            <div class="quick-action-desc">Onboard, inspect, configure, and manage small business accounts.</div>
+          </div>
+
+          <div class="quick-action-card" data-nav="/platform/plans">
+            <div class="quick-action-icon">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+              </svg>
+            </div>
+            <div class="quick-action-title">Plans</div>
+            <div class="quick-action-desc">Create pricing tiers, modify features, and update subscription catalog.</div>
+          </div>
+
+          <div class="quick-action-card" data-nav="/platform/subscriptions">
+            <div class="quick-action-icon">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+              </svg>
+            </div>
+            <div class="quick-action-title">Subscriptions</div>
+            <div class="quick-action-desc">Monitor subscribed businesses, renewal dates, and plan statuses.</div>
+          </div>
+
+          <div class="quick-action-card" data-nav="/platform/transactions">
+            <div class="quick-action-icon">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div class="quick-action-title">Transactions</div>
+            <div class="quick-action-desc">Inspect immutable SaaS payment ledger, gateways, and statuses.</div>
+          </div>
+
+          <div class="quick-action-card" data-nav="/platform/metrics">
+            <div class="quick-action-icon">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+              </svg>
+            </div>
+            <div class="quick-action-title">Metrics / Grafana</div>
+            <div class="quick-action-desc">Open Grafana observability dashboards and view Prometheus telemetry.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- VIEW 2: TENANTS                                                       -->
+      <!-- ===================================================================== -->
+      <section class="platform-view" id="view-tenants">
+        <div class="content-header">
+          <div>
+            <h1 class="page-title">Tenant Organizations</h1>
+            <p class="page-subtitle">Onboard, inspect, configure, and maintain tenant business entities</p>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-primary" id="open-onboard-tenant-modal">
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+              </svg>
+              <span>Onboard Tenant</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter / Search Toolbar -->
+        <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
+          <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+            <div style="display: flex; gap: 0.75rem; flex: 1; max-width: 480px;">
+              <input type="text" id="tenants-search-input" class="form-control" placeholder="Search by organization name, email, or phone...">
+            </div>
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+              <label for="tenants-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status:</label>
+              <select id="tenants-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
+                <option value="all">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="suspended">Suspended</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tenants Table Card -->
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <div class="table-responsive">
+            <table class="table" id="tenants-table">
+              <thead>
+                <tr>
+                  <th>Business Organization</th>
+                  <th>Contact Email</th>
+                  <th>Phone</th>
+                  <th>Status</th>
+                  <th>Onboarded</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tenants-table-body">
+                <tr>
+                  <td colspan="6" class="table-empty-box">Loading tenants...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Pagination Toolbar -->
+          <div class="card-footer" id="tenants-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
+            <span style="font-size: 0.8125rem; color: var(--color-text-muted);" id="tenants-page-info">—</span>
+            <div style="display: flex; gap: 0.5rem;">
+              <button type="button" class="btn btn-secondary btn-sm" id="tenants-prev-btn" disabled>Previous</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="tenants-next-btn" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- VIEW 3: PLANS                                                         -->
+      <!-- ===================================================================== -->
+      <section class="platform-view" id="view-plans">
+        <div class="content-header">
+          <div>
+            <h1 class="page-title">Subscription Plans</h1>
+            <p class="page-subtitle">Configure SaaS pricing tiers, feature notes, and lifecycle states</p>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-primary" id="open-create-plan-modal">
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+              </svg>
+              <span>Create Plan</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Toolbar -->
+        <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
+          <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <label for="plans-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status Filter:</label>
+            <select id="plans-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
+              <option value="all">All Plans</option>
+              <option value="active" selected>Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Plans Table Card -->
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <div class="table-responsive">
+            <table class="table" id="plans-table">
+              <thead>
+                <tr>
+                  <th>Plan Name</th>
+                  <th>Price / Month</th>
+                  <th>Description / Entitlements</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="plans-table-body">
+                <tr>
+                  <td colspan="6" class="table-empty-box">Loading subscription plans...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- VIEW 4: SUBSCRIBED TENANTS                                            -->
+      <!-- ===================================================================== -->
+      <section class="platform-view" id="view-subscriptions">
+        <div class="content-header">
+          <div>
+            <h1 class="page-title">Subscribed Tenants</h1>
+            <p class="page-subtitle">Oversight of active, past due, and expired tenant subscriptions</p>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="subscriptions-refresh-btn">
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Toolbar -->
+        <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
+          <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <label for="subs-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Subscription Status:</label>
+            <select id="subs-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
+              <option value="all">All Subscriptions</option>
+              <option value="active">Active</option>
+              <option value="past_due">Past Due</option>
+              <option value="expired">Expired</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Subscriptions Table Card -->
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <div class="table-responsive">
+            <table class="table" id="subs-table">
+              <thead>
+                <tr>
+                  <th>Tenant Business</th>
+                  <th>Current Plan</th>
+                  <th>Status</th>
+                  <th>Start Date</th>
+                  <th>End Date</th>
+                  <th>Created</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="subs-table-body">
+                <tr>
+                  <td colspan="7" class="table-empty-box">Loading subscribed tenants...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Pagination Toolbar -->
+          <div class="card-footer" id="subs-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
+            <span style="font-size: 0.8125rem; color: var(--color-text-muted);" id="subs-page-info">—</span>
+            <div style="display: flex; gap: 0.5rem;">
+              <button type="button" class="btn btn-secondary btn-sm" id="subs-prev-btn" disabled>Previous</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="subs-next-btn" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- VIEW 5: TRANSACTIONS                                                  -->
+      <!-- ===================================================================== -->
+      <section class="platform-view" id="view-transactions">
+        <div class="content-header">
+          <div>
+            <h1 class="page-title">Platform Transactions</h1>
+            <p class="page-subtitle">Immutable billing ledger across all tenant SaaS plan purchases</p>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="transactions-refresh-btn">
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Toolbar -->
+        <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
+          <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <label for="txns-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Transaction Status:</label>
+            <select id="txns-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
+              <option value="all">All Transactions</option>
+              <option value="completed">Completed</option>
+              <option value="pending">Pending</option>
+              <option value="failed">Failed</option>
+              <option value="refunded">Refunded</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Transactions Table Card -->
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <div class="table-responsive">
+            <table class="table" id="txns-table">
+              <thead>
+                <tr>
+                  <th>Transaction ID</th>
+                  <th>Tenant Business</th>
+                  <th>Plan</th>
+                  <th>Amount</th>
+                  <th>Method</th>
+                  <th>Status</th>
+                  <th>Timestamp</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="txns-table-body">
+                <tr>
+                  <td colspan="8" class="table-empty-box">Loading transactions ledger...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Pagination Toolbar -->
+          <div class="card-footer" id="txns-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
+            <span style="font-size: 0.8125rem; color: var(--color-text-muted);" id="txns-page-info">—</span>
+            <div style="display: flex; gap: 0.5rem;">
+              <button type="button" class="btn btn-secondary btn-sm" id="txns-prev-btn" disabled>Previous</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="txns-next-btn" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- VIEW 6: APPLICATION METRICS                                           -->
+      <!-- ===================================================================== -->
+      <section class="platform-view" id="view-metrics">
+        <div class="content-header">
+          <div>
+            <h1 class="page-title">Application Metrics & Observability</h1>
+            <p class="page-subtitle">Production telemetry, Prometheus scraping endpoints, and Grafana monitoring</p>
+          </div>
+        </div>
+
+        <!-- Grafana Launch Card -->
+        <div class="card" style="margin-bottom: 2rem; border-left: 4px solid #f97316; padding: 2rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--color-text-main); margin: 0;">
+                  Grafana Observability Suite
+                </h2>
+              </div>
+              <p style="color: var(--color-text-muted); max-width: 650px; line-height: 1.5; font-size: 0.925rem;">
+                Vyavsa has pre-provisioned dashboards configured for real-time API latency percentiles, HTTP throughput, database connection pool statistics, and Redis cache health.
+              </p>
+            </div>
+            <div>
+              <a id="open-grafana-btn" href="http://localhost:3000" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background: #f97316; border-color: #ea580c; font-size: 0.95rem; padding: 0.75rem 1.5rem;">
+                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                </svg>
+                <span>Launch Grafana Dashboard</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telemetry Breakdown Cards -->
+        <div class="kpi-grid-3">
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <span>Prometheus Telemetry</span>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+              </svg>
+            </div>
+            <div style="font-weight: 700; margin-bottom: 0.5rem;">Native Metric Exporter</div>
+            <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+              Direct standard Prometheus scrape target format at <code class="mono-code">/metrics</code>.
+            </p>
+            <a href="/metrics" target="_blank" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+              Open /metrics Feed
+            </a>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <span>Health Diagnostics</span>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div style="font-weight: 700; margin-bottom: 0.5rem;">Readiness & Liveness</div>
+            <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+              Database pool ping and Redis heartbeat verification endpoints.
+            </p>
+            <a href="/healthz" target="_blank" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+              Check /healthz Status
+            </a>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <span>Default Credentials</span>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+              </svg>
+            </div>
+            <div style="font-weight: 700; margin-bottom: 0.5rem;">Local Observability Login</div>
+            <div style="font-size: 0.8125rem; color: var(--color-text-muted); line-height: 1.6;">
+              <div>User: <code class="mono-code">admin</code></div>
+              <div>Password: <code class="mono-code">admin</code></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODALS                                                                    -->
+  <!-- ========================================================================= -->
+
+  <!-- 1. View Tenant Detail Modal -->
+  <div class="modal" id="tenant-detail-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 680px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title" id="tenant-detail-title">Tenant Organization Details</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="tenant-detail-modal" aria-label="Close modal">×</button>
+        </div>
+        <div class="modal-body" id="tenant-detail-body">
+          <div style="padding: 2rem; text-align: center; color: var(--color-text-muted);">
+            Loading details...
+          </div>
+        </div>
+        <div class="modal-footer" id="tenant-detail-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="tenant-detail-modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Onboard Tenant Modal -->
+  <div class="modal" id="onboard-tenant-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 560px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Onboard New Tenant Organization</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="onboard-tenant-modal" aria-label="Close modal">×</button>
+        </div>
+        <form id="onboard-tenant-form">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="onboard-name" class="form-label">Business / Organization Name *</label>
+              <input type="text" id="onboard-name" class="form-control" placeholder="e.g. Apex Traders Ltd" required>
+            </div>
+            <div class="form-group">
+              <label for="onboard-email" class="form-label">Organization Contact Email *</label>
+              <input type="email" id="onboard-email" class="form-control" placeholder="admin@organization.com" required>
+            </div>
+            <div class="form-group">
+              <label for="onboard-phone" class="form-label">Business Phone Number</label>
+              <input type="tel" id="onboard-phone" class="form-control" placeholder="+91 9876543210">
+            </div>
+            <div class="form-group">
+              <label for="onboard-password" class="form-label">Initial Tenant Administrator Password *</label>
+              <input type="password" id="onboard-password" class="form-control" placeholder="Minimum 6 characters" minlength="6" required>
+            </div>
+            <div class="form-group">
+              <label for="onboard-plan" class="form-label">Initial Subscription Plan *</label>
+              <select id="onboard-plan" class="form-control" required>
+                <option value="">Select Plan...</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="onboard-tenant-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="onboard-submit-btn">Complete Onboarding</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Edit Tenant Modal -->
+  <div class="modal" id="edit-tenant-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 520px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Update Tenant Organization</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="edit-tenant-modal" aria-label="Close modal">×</button>
+        </div>
+        <form id="edit-tenant-form">
+          <input type="hidden" id="edit-tenant-id">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="edit-tenant-name" class="form-label">Business Name *</label>
+              <input type="text" id="edit-tenant-name" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label for="edit-tenant-email" class="form-label">Business Email *</label>
+              <input type="email" id="edit-tenant-email" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label for="edit-tenant-phone" class="form-label">Phone Number</label>
+              <input type="tel" id="edit-tenant-phone" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="edit-tenant-status" class="form-label">Status</label>
+              <select id="edit-tenant-status" class="form-control">
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="suspended">Suspended</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="edit-tenant-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="edit-tenant-submit-btn">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Change Tenant Status Modal -->
+  <div class="modal" id="tenant-status-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 440px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Change Tenant Status</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="tenant-status-modal" aria-label="Close modal">×</button>
+        </div>
+        <form id="tenant-status-form">
+          <input type="hidden" id="status-tenant-id">
+          <div class="modal-body">
+            <p style="font-size: 0.875rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+              Updating the status will immediately alter access privileges for this tenant organization and all its users.
+            </p>
+            <div class="form-group">
+              <label class="form-label">Lifecycle Status</label>
+              <select id="status-tenant-select" class="form-control">
+                <option value="active">Active — full platform operations</option>
+                <option value="inactive">Inactive — suspended billing and access</option>
+                <option value="suspended">Suspended — administrative freeze</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="tenant-status-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="status-submit-btn">Apply Status</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Change Tenant Subscription Modal -->
+  <div class="modal" id="tenant-plan-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 480px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Change Subscription Plan</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="tenant-plan-modal" aria-label="Close modal">×</button>
+        </div>
+        <form id="tenant-plan-form">
+          <input type="hidden" id="plan-tenant-id">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="change-plan-select" class="form-label">Select Target Subscription Plan *</label>
+              <select id="change-plan-select" class="form-control" required>
+                <option value="">Select Plan...</option>
+              </select>
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--color-text-muted);">
+              Changing the plan will immediately adjust the tenant's entitlements and extend the subscription term.
+            </p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="tenant-plan-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="plan-change-submit-btn">Update Plan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Create Plan Modal -->
+  <div class="modal" id="create-plan-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 520px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Create Subscription Plan</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="create-plan-modal" aria-label="Close modal">×</button>
+        </div>
+        <form id="create-plan-form">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="plan-name" class="form-label">Plan Name *</label>
+              <input type="text" id="plan-name" class="form-control" placeholder="e.g. Enterprise Tier" required minlength="2">
+            </div>
+            <div class="form-group">
+              <label for="plan-price" class="form-label">Monthly Price *</label>
+              <input type="number" id="plan-price" class="form-control" placeholder="e.g. 2999.00" step="0.01" min="0" required>
+            </div>
+            <div class="form-group">
+              <label for="plan-note" class="form-label">Plan Notes / Entitlements</label>
+              <textarea id="plan-note" class="form-control" rows="3" placeholder="Included features, user limits, or entitlements..."></textarea>
+            </div>
+            <div class="form-group">
+              <label for="plan-status" class="form-label">Status</label>
+              <select id="plan-status" class="form-control">
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="create-plan-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="create-plan-submit-btn">Create Plan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. Edit Plan Modal -->
+  <div class="modal" id="edit-plan-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 520px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Update Subscription Plan</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="edit-plan-modal" aria-label="Close modal">×</button>
+        </div>
+        <form id="edit-plan-form">
+          <input type="hidden" id="edit-plan-id">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="edit-plan-name" class="form-label">Plan Name *</label>
+              <input type="text" id="edit-plan-name" class="form-control" required minlength="2">
+            </div>
+            <div class="form-group">
+              <label for="edit-plan-price" class="form-label">Monthly Price *</label>
+              <input type="number" id="edit-plan-price" class="form-control" step="0.01" min="0" required>
+            </div>
+            <div class="form-group">
+              <label for="edit-plan-note" class="form-label">Description / Notes</label>
+              <textarea id="edit-plan-note" class="form-control" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="edit-plan-status" class="form-label">Status *</label>
+              <select id="edit-plan-status" class="form-control" required>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="edit-plan-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="edit-plan-submit-btn">Save Plan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Confirmation Dialog Modal -->
+  <div class="modal" id="confirm-action-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 440px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title" id="confirm-modal-title">Confirm Action</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="confirm-action-modal" aria-label="Close modal">×</button>
+        </div>
+        <div class="modal-body" id="confirm-modal-message">
+          Are you sure you want to proceed?
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="confirm-action-modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="confirm-action-btn">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="platform-toast-container"></div>
+
+  <!-- Core Scripts -->
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/platform_admin.js"></script>
+</body>
+</html>

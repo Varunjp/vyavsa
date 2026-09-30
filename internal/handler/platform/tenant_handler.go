@@ -129,3 +129,90 @@ func (h *TenantHandler) ChangeSubscription(c *gin.Context) {
 
 	response.Success(c, sub, "tenant subscription updated successfully")
 }
+
+// UpdateTenant handles modifying tenant business details (name, email, phone, status)
+func (h *TenantHandler) UpdateTenant(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := uuid.Parse(idParam)
+	if err != nil {
+		response.Error(c, appErrors.NewBadRequest("invalid tenant ID format"))
+		return
+	}
+
+	var req dto.UpdatePlatformTenantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, appErrors.ParseBindingError(err))
+		return
+	}
+
+	tenant, err := h.tenantService.UpdateTenant(c.Request.Context(), id, req)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, tenant, "tenant details updated successfully")
+}
+
+// GetDashboardMetrics returns KPI cards data and monthly revenue trend for the platform admin
+func (h *TenantHandler) GetDashboardMetrics(c *gin.Context) {
+	metrics, err := h.tenantService.GetPlatformDashboardMetrics(c.Request.Context())
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, metrics, "platform dashboard metrics retrieved")
+}
+
+// ListSubscriptions handles listing subscriptions across tenants with pagination and status filter
+func (h *TenantHandler) ListSubscriptions(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	status := c.Query("status")
+	if status == "all" {
+		status = ""
+	}
+
+	subs, total, err := h.tenantService.ListPlatformSubscriptions(c.Request.Context(), page, pageSize, status)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+	pagination := response.Pagination{
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: total,
+		TotalPages: totalPages,
+	}
+
+	response.Paginated(c, subs, pagination, "platform subscriptions retrieved")
+}
+
+// ListTransactions handles listing all plan billing transactions across tenants
+func (h *TenantHandler) ListTransactions(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	status := c.Query("status")
+	if status == "all" {
+		status = ""
+	}
+
+	txns, total, err := h.tenantService.ListPlatformTransactions(c.Request.Context(), page, pageSize, status)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+	pagination := response.Pagination{
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: total,
+		TotalPages: totalPages,
+	}
+
+	response.Paginated(c, txns, pagination, "platform transactions retrieved")
+}

@@ -12,4 +12,5 @@ type PlatformSubscriptionRepository interface {
 	Create(ctx context.Context, sub *domain.PlatformSubscription) error
 	GetByTenantID(ctx context.Context, tenantID uuid.UUID) (*domain.PlatformSubscription, error)
 	Update(ctx context.Context, sub *domain.PlatformSubscription) error
+	List(ctx context.Context, page, pageSize int, status string) ([]domain.PlatformSubscriptionWithTenant, int64, error)
 }

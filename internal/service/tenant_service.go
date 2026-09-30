@@ -34,6 +34,12 @@ type TenantService interface {
 	ListAvailablePlans(ctx context.Context) ([]dto.PlanResponse, error)
 	PurchasePlan(ctx context.Context, tenantID uuid.UUID, req dto.PurchasePlanRequest) (*dto.TenantSubscriptionResponse, *dto.PlanTransactionResponse, error)
 	ListTenantTransactions(ctx context.Context, tenantID uuid.UUID, page, pageSize int) ([]dto.PlanTransactionResponse, int64, error)
+
+	// Platform Administrator Operations
+	GetPlatformDashboardMetrics(ctx context.Context) (*dto.PlatformDashboardMetricsResponse, error)
+	ListPlatformSubscriptions(ctx context.Context, page, pageSize int, status string) ([]dto.PlatformSubscriptionItemResponse, int64, error)
+	ListPlatformTransactions(ctx context.Context, page, pageSize int, status string) ([]dto.PlatformTransactionItemResponse, int64, error)
+	UpdateTenant(ctx context.Context, id uuid.UUID, req dto.UpdatePlatformTenantRequest) (*dto.TenantDetailResponse, error)
 }
 
 type tenantService struct {
@@ -731,4 +737,184 @@ func (s *tenantService) ListTenantTransactions(ctx context.Context, tenantID uui
 		return nil, 0, err
 	}
 	return dto.ToPlanTransactionListResponse(txns), total, nil
+}
+
+func (s *tenantService) GetPlatformDashboardMetrics(ctx context.Context) (*dto.PlatformDashboardMetricsResponse, error) {
+	now := time.Now().UTC()
+	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	sevenDaysAgo := now.AddDate(0, 0, -7)
+	sixMonthsAgo := time.Date(now.Year(), now.Month()-5, 1, 0, 0, 0, 0, time.UTC)
+
+	activeCount, err := s.tenantRepo.CountByStatus(ctx, "active")
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get active tenants count", slog.String("error", err.Error()))
+		return nil, err
+	}
+
+	totalCount, err := s.tenantRepo.CountByStatus(ctx, "")
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get total tenants count", slog.String("error", err.Error()))
+		return nil, err
+	}
+
+	recentRegs, err := s.tenantRepo.CountSince(ctx, sevenDaysAgo)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get recent registrations count", slog.String("error", err.Error()))
+		return nil, err
+	}
+
+	monthlyIncome, err := s.txnRepo.GetMonthlyReceivedIncome(ctx, startOfMonth)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get monthly received income", slog.String("error", err.Error()))
+		return nil, err
+	}
+
+	rawTrend, err := s.txnRepo.GetMonthlyRevenueTrend(ctx, sixMonthsAgo)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get monthly revenue trend", slog.String("error", err.Error()))
+		return nil, err
+	}
+
+	trendMap := make(map[string]repository.MonthlyRevenueAggregate, len(rawTrend))
+	for _, item := range rawTrend {
+		trendMap[item.MonthKey] = item
+	}
+
+	revenueTrend := make([]dto.MonthlyRevenueItem, 6)
+	for i := 0; i < 6; i++ {
+		m := time.Date(now.Year(), now.Month()-time.Month(5-i), 1, 0, 0, 0, 0, time.UTC)
+		key := m.Format("2006-01")
+		label := m.Format("Jan 2006")
+		if item, exists := trendMap[key]; exists {
+			revenueTrend[i] = dto.MonthlyRevenueItem{
+				Month:   label,
+				Revenue: item.Revenue,
+				Count:   item.Count,
+			}
+		} else {
+			revenueTrend[i] = dto.MonthlyRevenueItem{
+				Month:   label,
+				Revenue: decimal.Zero,
+				Count:   0,
+			}
+		}
+	}
+
+	return &dto.PlatformDashboardMetricsResponse{
+		ActiveTenants:         activeCount,
+		TotalTenants:          totalCount,
+		MonthlyReceivedIncome: monthlyIncome,
+		RecentRegistrations7d: recentRegs,
+		RevenueTrend:          revenueTrend,
+	}, nil
+}
+
+func (s *tenantService) ListPlatformSubscriptions(ctx context.Context, page, pageSize int, status string) ([]dto.PlatformSubscriptionItemResponse, int64, error) {
+	if s.subscriptionRepo == nil {
+		return []dto.PlatformSubscriptionItemResponse{}, 0, nil
+	}
+	subs, total, err := s.subscriptionRepo.List(ctx, page, pageSize, status)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]dto.PlatformSubscriptionItemResponse, len(subs))
+	for i, sub := range subs {
+		items[i] = dto.PlatformSubscriptionItemResponse{
+			ID:              sub.ID,
+			TenantID:        sub.TenantID,
+			TenantName:      sub.TenantName,
+			TenantEmail:     sub.TenantEmail,
+			CurrentPlanID:   sub.CurrentPlanID,
+			CurrentPlanName: sub.CurrentPlanName,
+			Status:          sub.Status,
+			StartDate:       sub.StartDate,
+			EndDate:         sub.EndDate,
+			CreatedAt:       sub.CreatedAt,
+			UpdatedAt:       sub.UpdatedAt,
+		}
+	}
+	return items, total, nil
+}
+
+func (s *tenantService) ListPlatformTransactions(ctx context.Context, page, pageSize int, status string) ([]dto.PlatformTransactionItemResponse, int64, error) {
+	if s.txnRepo == nil {
+		return []dto.PlatformTransactionItemResponse{}, 0, nil
+	}
+	txns, total, err := s.txnRepo.ListAll(ctx, page, pageSize, status)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]dto.PlatformTransactionItemResponse, len(txns))
+	for i, tx := range txns {
+		items[i] = dto.PlatformTransactionItemResponse{
+			ID:            tx.ID,
+			TenantID:      tx.TenantID,
+			TenantName:    tx.TenantName,
+			TenantEmail:   tx.TenantEmail,
+			TransactionID: tx.TransactionID,
+			PaymentMethod: tx.PaymentMethod,
+			PlanID:        tx.PlanID,
+			PlanName:      tx.PlanName,
+			Amount:        tx.Amount,
+			Status:        tx.Status,
+			FailureReason: tx.FailureReason,
+			CreatedAt:     tx.CreatedAt,
+			UpdatedAt:     tx.UpdatedAt,
+		}
+	}
+	return items, total, nil
+}
+
+func (s *tenantService) UpdateTenant(ctx context.Context, id uuid.UUID, req dto.UpdatePlatformTenantRequest) (*dto.TenantDetailResponse, error) {
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, appErrors.NewValidation("tenant name is required", map[string]string{"name": "cannot be empty"})
+	}
+	if strings.TrimSpace(req.Email) == "" {
+		return nil, appErrors.NewValidation("tenant email is required", map[string]string{"email": "cannot be empty"})
+	}
+
+	tenant, err := s.tenantRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Email != tenant.Email {
+		existing, err := s.tenantRepo.GetByEmail(ctx, req.Email)
+		if err == nil && existing != nil && existing.ID != id {
+			return nil, appErrors.NewConflict(fmt.Sprintf("a business organization with email '%s' already exists", req.Email))
+		}
+	}
+
+	tenant.Name = strings.TrimSpace(req.Name)
+	tenant.Email = strings.TrimSpace(req.Email)
+	tenant.Phone = strings.TrimSpace(req.Phone)
+
+	if req.Status != "" {
+		validStatuses := map[string]bool{"active": true, "inactive": true, "suspended": true}
+		if !validStatuses[req.Status] {
+			return nil, appErrors.NewValidation("invalid tenant status", map[string]string{"status": "must be active, inactive, or suspended"})
+		}
+		tenant.Status = req.Status
+	}
+
+	if err := s.tenantRepo.Update(ctx, tenant); err != nil {
+		return nil, err
+	}
+
+	if req.Status != "" {
+		if err := s.tenantRepo.UpdateStatus(ctx, id, req.Status); err != nil {
+			return nil, err
+		}
+	}
+
+	s.log.InfoContext(ctx, "platform admin updated tenant",
+		slog.String("tenant_id", id.String()),
+		slog.String("name", tenant.Name),
+		slog.String("email", tenant.Email),
+		slog.String("status", tenant.Status),
+	)
+
+	return s.GetTenantByID(ctx, id)
 }

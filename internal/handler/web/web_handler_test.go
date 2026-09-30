@@ -31,6 +31,13 @@ func setupTestWebRouter(t *testing.T) (*gin.Engine, *web.Handler) {
 	router.GET("/reset-password", handler.ShowResetPassword)
 	router.GET("/platform/login", handler.ShowPlatformLogin)
 	router.GET("/dashboard", handler.ShowDashboard)
+	router.GET("/platform/dashboard", handler.ShowPlatformDashboard)
+	router.GET("/platform/tenants", handler.ShowPlatformDashboard)
+	router.GET("/platform/tenants/:id", handler.ShowPlatformDashboard)
+	router.GET("/platform/plans", handler.ShowPlatformDashboard)
+	router.GET("/platform/subscriptions", handler.ShowPlatformDashboard)
+	router.GET("/platform/transactions", handler.ShowPlatformDashboard)
+	router.GET("/platform/metrics", handler.ShowPlatformDashboard)
 
 	return router, handler
 }
@@ -181,4 +188,38 @@ func TestWebHandler_ShowDashboard(t *testing.T) {
 	assert.Contains(t, body, "Dashboard")
 	assert.Contains(t, body, "Recent Transactions")
 	assert.Contains(t, body, "logout-btn")
+}
+
+func TestWebHandler_ShowPlatformDashboard(t *testing.T) {
+	router, _ := setupTestWebRouter(t)
+
+	paths := []string{
+		"/platform/dashboard",
+		"/platform/tenants",
+		"/platform/tenants/00000000-0000-0000-0000-000000000001",
+		"/platform/plans",
+		"/platform/subscriptions",
+		"/platform/transactions",
+		"/platform/metrics",
+	}
+
+	for _, p := range paths {
+		t.Run("GET "+p, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, err := http.NewRequest(http.MethodGet, p, nil)
+			require.NoError(t, err)
+
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			assert.Contains(t, body, "Platform Dashboard")
+			assert.Contains(t, body, "Superadmin Portal")
+			assert.Contains(t, body, "Active Tenants")
+			assert.Contains(t, body, "Monthly Received Income")
+			assert.Contains(t, body, "New Registrations")
+			assert.Contains(t, body, "Monthly Income & Revenue Trend")
+			assert.Contains(t, body, "platform-sidebar")
+		})
+	}
 }

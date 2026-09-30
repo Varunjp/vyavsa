@@ -138,7 +138,78 @@ func TestWebRoutesIntegration(t *testing.T) {
 			},
 		},
 		{
-			name:           "Static CSS main.css",
+			name:           "Platform Dashboard GET /platform/dashboard",
+			path:           "/platform/dashboard",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"Platform Dashboard",
+				"Superadmin Portal",
+				"Active Tenants",
+				"Monthly Received Income",
+				"New Registrations",
+				"platform-sidebar",
+			},
+		},
+		{
+			name:           "Platform Tenants GET /platform/tenants",
+			path:           "/platform/tenants",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"Tenant Organizations",
+				"Onboard Tenant",
+				"tenants-table",
+			},
+		},
+		{
+			name:           "Platform Plans GET /platform/plans",
+			path:           "/platform/plans",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"Subscription Plans",
+				"Create Plan",
+				"plans-table",
+			},
+		},
+		{
+			name:           "Platform Subscriptions GET /platform/subscriptions",
+			path:           "/platform/subscriptions",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"Subscribed Tenants",
+				"subs-table",
+			},
+		},
+		{
+			name:           "Platform Transactions GET /platform/transactions",
+			path:           "/platform/transactions",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"Platform Transactions",
+				"txns-table",
+			},
+		},
+		{
+			name:           "Platform Metrics GET /platform/metrics",
+			path:           "/platform/metrics",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"Application Metrics",
+				"Grafana Observability Suite",
+				"Launch Grafana Dashboard",
+			},
+		},
+		{
+			name:           "Static JS platform_admin.js",
+			path:           "/static/js/platform_admin.js",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"initializePlatformPortal",
+				"loadDashboardMetrics",
+			},
+		},
+		{
+			name: "Static CSS main.css",
+
 			path:           "/static/css/main.css",
 			expectedStatus: http.StatusOK,
 			expectInBody: []string{
@@ -229,6 +300,31 @@ func TestWebRoutesIntegration(t *testing.T) {
 
 	t.Run("GET /dashboard enforces strict no-cache headers to prevent bfcache leaks", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/dashboard", nil)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Header().Get("Cache-Control"), "no-store")
+		assert.Contains(t, w.Header().Get("Cache-Control"), "no-cache")
+		assert.Equal(t, "no-cache", w.Header().Get("Pragma"))
+		assert.Equal(t, "0", w.Header().Get("Expires"))
+	})
+
+	t.Run("GET /platform redirects to /platform/dashboard", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/platform", nil)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, "/platform/dashboard", w.Header().Get("Location"))
+	})
+
+	t.Run("GET /platform/dashboard enforces strict no-cache headers to prevent bfcache leaks", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/platform/dashboard", nil)
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
