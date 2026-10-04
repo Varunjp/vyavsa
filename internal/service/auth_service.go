@@ -29,6 +29,7 @@ type AuthService interface {
 	LoginTenantUser(ctx context.Context, req dto.TenantLoginRequest) (*dto.TokenResponse, error)
 	RefreshToken(ctx context.Context, refreshTokenStr string) (*dto.TokenResponse, error)
 	Logout(ctx context.Context, tokenID string, remainingTTL time.Duration) error
+	RevokeRefreshToken(ctx context.Context, refreshTokenStr string) error
 	GetProfile(ctx context.Context, claims *auth.CustomClaims) (*dto.UserProfile, error)
 	ForgotPassword(ctx context.Context, req dto.ForgotPasswordRequest, clientIP string) error
 	VerifyResetOTP(ctx context.Context, req dto.VerifyResetOTPRequest, clientIP string) (*dto.VerifyResetOTPResponse, error)
@@ -320,6 +321,37 @@ func (s *authService) Logout(ctx context.Context, tokenID string, remainingTTL t
 	}
 
 	s.log.InfoContext(ctx, "user logged out and token invalidated", slog.String("token_id", tokenID))
+	return nil
+}
+
+// RevokeRefreshToken validates and invalidates an existing refresh token in the Redis blacklist
+func (s *authService) RevokeRefreshToken(ctx context.Context, refreshTokenStr string) error {
+	if s.blacklistRepo == nil || refreshTokenStr == "" {
+		return nil
+	}
+
+	claims, err := s.jwtManager.ValidateToken(refreshTokenStr)
+	if err != nil || claims.TokenID == "" {
+		return nil // Ignore invalid tokens during cleanup
+	}
+
+	var remaining time.Duration
+	if claims.ExpiresAt != nil {
+		remaining = time.Until(claims.ExpiresAt.Time)
+	}
+	if remaining <= 0 {
+		remaining = 15 * time.Minute
+	}
+
+	if err := s.blacklistRepo.RevokeToken(ctx, claims.TokenID, remaining); err != nil {
+		s.log.WarnContext(ctx, "failed to revoke refresh token in redis",
+			slog.String("token_id", claims.TokenID),
+			slog.String("error", err.Error()),
+		)
+		return appErrors.NewInternal(fmt.Errorf("failed to revoke refresh token: %w", err))
+	}
+
+	s.log.InfoContext(ctx, "refresh token revoked", slog.String("token_id", claims.TokenID))
 	return nil
 }
 

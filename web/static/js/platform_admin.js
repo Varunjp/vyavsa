@@ -137,6 +137,11 @@
     }
   }
 
+  function closeAllModals() {
+    document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active'));
+    document.body.style.overflow = '';
+  }
+
   function confirmDialog(title, message, onConfirm, confirmBtnText = 'Confirm', isDestructive = false) {
     const modal = document.getElementById('confirm-action-modal');
     const titleEl = document.getElementById('confirm-modal-title');
@@ -162,6 +167,10 @@
 
   // View Navigation Router
   function navigateTo(path, updateHistory = true) {
+    // Close any open modals on route transition
+    closeAllModals();
+    window.scrollTo(0, 0);
+
     // Determine view and potential parameters
     let view = 'dashboard';
     let tenantIdParam = null;
@@ -228,18 +237,39 @@
     }
   }
 
+  function openMobileSidebar() {
+    const sidebar = document.getElementById('platform-sidebar');
+    const backdrop = document.getElementById('platform-sidebar-backdrop');
+    if (sidebar) {
+      sidebar.classList.add('open', 'active');
+    }
+    if (backdrop) {
+      backdrop.classList.add('active', 'open');
+    }
+    document.body.style.overflow = 'hidden';
+  }
+
   function closeMobileSidebar() {
     const sidebar = document.getElementById('platform-sidebar');
     const backdrop = document.getElementById('platform-sidebar-backdrop');
-    if (sidebar) sidebar.classList.remove('active');
-    if (backdrop) backdrop.classList.remove('active');
+    if (sidebar) {
+      sidebar.classList.remove('open', 'active');
+    }
+    if (backdrop) {
+      backdrop.classList.remove('active', 'open');
+    }
+    if (!document.querySelector('.modal.active')) {
+      document.body.style.overflow = '';
+    }
   }
 
   function toggleMobileSidebar() {
     const sidebar = document.getElementById('platform-sidebar');
-    const backdrop = document.getElementById('platform-sidebar-backdrop');
-    if (sidebar) sidebar.classList.toggle('active');
-    if (backdrop) backdrop.classList.toggle('active');
+    if (sidebar && (sidebar.classList.contains('open') || sidebar.classList.contains('active'))) {
+      closeMobileSidebar();
+    } else {
+      openMobileSidebar();
+    }
   }
 
   // =========================================================================
@@ -258,11 +288,23 @@
       const res = await window.API.get('/platform/dashboard/metrics');
       if (!res.ok) {
         showToast(res.error || 'Failed to load telemetry metrics', 'error');
-        if (activeEl) activeEl.textContent = 'Error';
+        if (activeEl) activeEl.textContent = '—';
+        if (incomeEl) incomeEl.textContent = '—';
+        if (regEl) regEl.textContent = '—';
+        if (chartWrapper) {
+          chartWrapper.innerHTML = `
+            <div class="table-empty-box" style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+              <div style="color: var(--color-error); font-weight: 600; margin-bottom: 0.75rem;">${escapeHTML(res.error || 'Failed to load telemetry metrics')}</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="retry-metrics-btn">Retry Telemetry</button>
+            </div>
+          `;
+          const rBtn = document.getElementById('retry-metrics-btn');
+          if (rBtn) rBtn.addEventListener('click', () => loadDashboardMetrics());
+        }
         return;
       }
 
-      const data = res.data;
+      const data = res.data || {};
       if (activeEl) activeEl.textContent = data.active_tenants || '0';
       if (totalEl) {
         totalEl.innerHTML = `<span>of <strong>${data.total_tenants || '0'}</strong> total onboarded organizations</span>`;
@@ -275,6 +317,18 @@
 
     } catch (err) {
       if (activeEl) activeEl.textContent = '—';
+      if (incomeEl) incomeEl.textContent = '—';
+      if (regEl) regEl.textContent = '—';
+      if (chartWrapper) {
+        chartWrapper.innerHTML = `
+          <div class="table-empty-box" style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <div style="color: var(--color-error); font-weight: 600; margin-bottom: 0.75rem;">Connection error while fetching telemetry metrics.</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="retry-metrics-btn">Retry Telemetry</button>
+          </div>
+        `;
+        const rBtn = document.getElementById('retry-metrics-btn');
+        if (rBtn) rBtn.addEventListener('click', () => loadDashboardMetrics());
+      }
       showToast('Connection error while fetching telemetry metrics.', 'error');
     }
   }
@@ -427,7 +481,16 @@
 
       const res = await window.API.get(`/platform/tenants?${q.toString()}`);
       if (!res.ok) {
-        tbody.innerHTML = `<tr><td colspan="6" class="table-empty-box" style="color: var(--color-error);">${escapeHTML(res.error || 'Failed to retrieve tenants.')}</td></tr>`;
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="table-empty-box" style="color: var(--color-error);">
+              <div style="margin-bottom: 0.5rem;">${escapeHTML(res.error || 'Failed to retrieve tenants.')}</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="retry-tenants-btn">Retry</button>
+            </td>
+          </tr>
+        `;
+        const rBtn = document.getElementById('retry-tenants-btn');
+        if (rBtn) rBtn.addEventListener('click', () => loadTenants());
         return;
       }
 
@@ -473,18 +536,20 @@
             ${formatDate(t.created_at)}
           </td>
           <td style="text-align: right; white-space: nowrap;">
-            <button type="button" class="btn btn-secondary btn-sm action-view-tenant" data-id="${t.id}" title="View complete details">
-              Inspect
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm action-edit-tenant" data-tenant='${escapeHTML(JSON.stringify(t))}' title="Edit tenant details">
-              Edit
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm action-status-tenant" data-id="${t.id}" data-status="${t.status}" title="Update status">
-              Status
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm action-plan-tenant" data-id="${t.id}" data-name="${escapeHTML(t.name)}" title="Change subscription plan">
-              Plan
-            </button>
+            <div class="table-actions" style="justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary btn-sm action-view-tenant" data-id="${t.id}" title="View complete details">
+                Inspect
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm action-edit-tenant" data-tenant='${escapeHTML(JSON.stringify(t))}' title="Edit tenant details">
+                Edit
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm action-status-tenant" data-id="${t.id}" data-status="${t.status}" title="Update status">
+                Status
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm action-plan-tenant" data-id="${t.id}" data-name="${escapeHTML(t.name)}" title="Change subscription plan">
+                Plan
+              </button>
+            </div>
           </td>
         </tr>
       `).join('');
@@ -498,7 +563,16 @@
       if (nextBtn) nextBtn.disabled = state.tenants.page >= totalPages;
 
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="6" class="table-empty-box" style="color: var(--color-error);">An error occurred while communicating with the server.</td></tr>`;
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" class="table-empty-box" style="color: var(--color-error);">
+            <div style="margin-bottom: 0.5rem;">An error occurred while communicating with the server.</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="retry-tenants-btn">Retry</button>
+          </td>
+        </tr>
+      `;
+      const rBtn = document.getElementById('retry-tenants-btn');
+      if (rBtn) rBtn.addEventListener('click', () => loadTenants());
     }
   }
 
@@ -685,7 +759,16 @@
 
       const res = await window.API.get(`/platform/plans?${q.toString()}`);
       if (!res.ok) {
-        tbody.innerHTML = `<tr><td colspan="6" class="table-empty-box" style="color: var(--color-error);">${escapeHTML(res.error || 'Failed to load plans.')}</td></tr>`;
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="table-empty-box" style="color: var(--color-error);">
+              <div style="margin-bottom: 0.5rem;">${escapeHTML(res.error || 'Failed to load plans.')}</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="retry-plans-btn">Retry</button>
+            </td>
+          </tr>
+        `;
+        const rBtn = document.getElementById('retry-plans-btn');
+        if (rBtn) rBtn.addEventListener('click', () => loadPlans());
         return;
       }
 
@@ -729,20 +812,31 @@
             ${formatDate(p.created_at)}
           </td>
           <td style="text-align: right; white-space: nowrap;">
-            <button type="button" class="btn btn-secondary btn-sm action-edit-plan" data-plan='${escapeHTML(JSON.stringify(p))}'>
-              Edit Plan
-            </button>
-            ${p.status !== 'archived' ? `
-              <button type="button" class="btn btn-secondary btn-sm action-archive-plan" data-id="${p.id}" data-name="${escapeHTML(p.plan_name)}" style="color: var(--color-error);">
-                Archive
+            <div class="table-actions" style="justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary btn-sm action-edit-plan" data-plan='${escapeHTML(JSON.stringify(p))}'>
+                Edit Plan
               </button>
-            ` : ''}
+              ${p.status !== 'archived' ? `
+                <button type="button" class="btn btn-secondary btn-sm action-archive-plan" data-id="${p.id}" data-name="${escapeHTML(p.plan_name)}" style="color: var(--color-error);">
+                  Archive
+                </button>
+              ` : ''}
+            </div>
           </td>
         </tr>
       `).join('');
 
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="6" class="table-empty-box" style="color: var(--color-error);">Failed to connect to plans service.</td></tr>`;
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" class="table-empty-box" style="color: var(--color-error);">
+            <div style="margin-bottom: 0.5rem;">Failed to connect to plans service.</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="retry-plans-btn">Retry</button>
+          </td>
+        </tr>
+      `;
+      const rBtn = document.getElementById('retry-plans-btn');
+      if (rBtn) rBtn.addEventListener('click', () => loadPlans());
     }
   }
 
@@ -798,7 +892,16 @@
 
       const res = await window.API.get(`/platform/subscriptions?${q.toString()}`);
       if (!res.ok) {
-        tbody.innerHTML = `<tr><td colspan="7" class="table-empty-box" style="color: var(--color-error);">${escapeHTML(res.error || 'Failed to load subscriptions.')}</td></tr>`;
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" class="table-empty-box" style="color: var(--color-error);">
+              <div style="margin-bottom: 0.5rem;">${escapeHTML(res.error || 'Failed to load subscriptions.')}</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="retry-subs-btn">Retry</button>
+            </td>
+          </tr>
+        `;
+        const rBtn = document.getElementById('retry-subs-btn');
+        if (rBtn) rBtn.addEventListener('click', () => loadSubscriptions());
         return;
       }
 
@@ -842,12 +945,17 @@
           <td style="font-size: 0.8125rem;">${s.end_date ? formatDate(s.end_date) : '<span style="color: var(--color-text-subtle);">Perpetual</span>'}</td>
           <td style="font-size: 0.8125rem; color: var(--color-text-muted);">${formatDate(s.created_at)}</td>
           <td style="text-align: right; white-space: nowrap;">
-            <button type="button" class="btn btn-secondary btn-sm action-plan-tenant" data-id="${s.tenant_id}" data-name="${escapeHTML(s.tenant_name)}">
-              Change Plan
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm action-view-tenant" data-id="${s.tenant_id}">
-              Tenant Details
-            </button>
+            <div class="table-actions" style="justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary btn-sm action-view-tenant" data-id="${s.tenant_id}" title="Inspect tenant details">
+                Details
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm action-plan-tenant" data-id="${s.tenant_id}" data-name="${escapeHTML(s.tenant_name)}" title="Change subscription plan">
+                Plan
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm action-status-sub" data-tenant-id="${s.tenant_id}" data-status="${s.status}" title="Update subscription lifecycle status">
+                Status
+              </button>
+            </div>
           </td>
         </tr>
       `).join('');
@@ -860,7 +968,16 @@
       if (nextBtn) nextBtn.disabled = state.subscriptions.page >= totalPages;
 
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="7" class="table-empty-box" style="color: var(--color-error);">An error occurred while loading subscriptions.</td></tr>`;
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" class="table-empty-box" style="color: var(--color-error);">
+            <div style="margin-bottom: 0.5rem;">An error occurred while loading subscriptions.</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="retry-subs-btn">Retry</button>
+          </td>
+        </tr>
+      `;
+      const rBtn = document.getElementById('retry-subs-btn');
+      if (rBtn) rBtn.addEventListener('click', () => loadSubscriptions());
     }
   }
 
@@ -885,7 +1002,16 @@
 
       const res = await window.API.get(`/platform/transactions?${q.toString()}`);
       if (!res.ok) {
-        tbody.innerHTML = `<tr><td colspan="8" class="table-empty-box" style="color: var(--color-error);">${escapeHTML(res.error || 'Failed to load transactions.')}</td></tr>`;
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="table-empty-box" style="color: var(--color-error);">
+              <div style="margin-bottom: 0.5rem;">${escapeHTML(res.error || 'Failed to load transactions.')}</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="retry-txns-btn">Retry</button>
+            </td>
+          </tr>
+        `;
+        const rBtn = document.getElementById('retry-txns-btn');
+        if (rBtn) rBtn.addEventListener('click', () => loadTransactions());
         return;
       }
 
@@ -940,10 +1066,12 @@
           <td style="font-size: 0.8125rem; color: var(--color-text-muted); white-space: nowrap;">
             ${formatDateTime(tx.created_at)}
           </td>
-          <td style="text-align: right;">
-            <button type="button" class="btn btn-secondary btn-sm action-view-tenant" data-id="${tx.tenant_id}" title="Inspect tenant details">
-              Tenant
-            </button>
+          <td style="text-align: right; white-space: nowrap;">
+            <div class="table-actions" style="justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary btn-sm action-view-tenant" data-id="${tx.tenant_id}" title="Inspect tenant details">
+                Tenant
+              </button>
+            </div>
           </td>
         </tr>
       `).join('');
@@ -956,7 +1084,16 @@
       if (nextBtn) nextBtn.disabled = state.transactions.page >= totalPages;
 
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="8" class="table-empty-box" style="color: var(--color-error);">An error occurred while loading transactions.</td></tr>`;
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" class="table-empty-box" style="color: var(--color-error);">
+            <div style="margin-bottom: 0.5rem;">An error occurred while loading transactions.</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="retry-txns-btn">Retry</button>
+          </td>
+        </tr>
+      `;
+      const rBtn = document.getElementById('retry-txns-btn');
+      if (rBtn) rBtn.addEventListener('click', () => loadTransactions());
     }
   }
 
@@ -995,6 +1132,12 @@
         return;
       }
 
+      // Backdrop click on modal overlay closes it
+      if (e.target.classList && e.target.classList.contains('modal') && e.target.classList.contains('active')) {
+        closeModal(e.target.id);
+        return;
+      }
+
       // Close modal buttons
       const closeBtn = e.target.closest('[data-close-modal]');
       if (closeBtn) {
@@ -1017,6 +1160,7 @@
         const raw = editTenantBtn.getAttribute('data-tenant');
         try {
           const tenant = JSON.parse(raw);
+          closeModal('tenant-detail-modal');
           document.getElementById('edit-tenant-id').value = tenant.id || '';
           document.getElementById('edit-tenant-name').value = tenant.name || '';
           document.getElementById('edit-tenant-email').value = tenant.email || '';
@@ -1042,10 +1186,24 @@
       const planTenantBtn = e.target.closest('.action-plan-tenant');
       if (planTenantBtn) {
         const id = planTenantBtn.getAttribute('data-id');
+        closeModal('tenant-detail-modal');
         document.getElementById('plan-tenant-id').value = id;
         const planSelect = document.getElementById('change-plan-select');
         populatePlanSelect(planSelect);
         openModal('tenant-plan-modal');
+        return;
+      }
+
+      // Change Subscription Status action buttons
+      const statusSubBtn = e.target.closest('.action-status-sub');
+      if (statusSubBtn) {
+        const tenantId = statusSubBtn.getAttribute('data-tenant-id');
+        const currStatus = statusSubBtn.getAttribute('data-status') || 'active';
+        const hiddenId = document.getElementById('status-sub-tenant-id');
+        const selectEl = document.getElementById('status-sub-select');
+        if (hiddenId) hiddenId.value = tenantId;
+        if (selectEl) selectEl.value = currStatus;
+        openModal('sub-status-modal');
         return;
       }
 
@@ -1093,37 +1251,59 @@
       }
     });
 
-    // 2. Browser History Back/Forward Popstate Event
+    // 2. Escape Key Listener to Close Modals & Mobile Sidebar
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeMobileSidebar();
+        closeAllModals();
+      }
+    });
+
+    // 3. Browser History Back/Forward Popstate Event
     window.addEventListener('popstate', (e) => {
       const path = (e.state && e.state.path) ? e.state.path : window.location.pathname;
       navigateTo(path, false);
     });
 
-    // 3. Mobile Hamburger & Backdrop
+    // 4. Window Resize Cleanup
+    window.addEventListener('resize', () => {
+      if (window.innerWidth > 992) {
+        closeMobileSidebar();
+      }
+      if (!document.querySelector('.modal.active') && (!document.getElementById('platform-sidebar') || !document.getElementById('platform-sidebar').classList.contains('open'))) {
+        document.body.style.overflow = '';
+      }
+    });
+
+    // 5. Mobile Hamburger, Close Button & Backdrop
     const toggleBtn = document.getElementById('platform-sidebar-toggle');
+    const closeBtn = document.getElementById('platform-sidebar-close');
     const backdrop = document.getElementById('platform-sidebar-backdrop');
     if (toggleBtn) toggleBtn.addEventListener('click', toggleMobileSidebar);
+    if (closeBtn) closeBtn.addEventListener('click', closeMobileSidebar);
     if (backdrop) backdrop.addEventListener('click', closeMobileSidebar);
 
-    // 4. Sign Out Buttons (Topbar and Sidebar)
+    // 6. Sign Out Buttons (Topbar and Sidebar)
     const handleLogout = () => {
       confirmDialog(
         'Platform Sign Out',
         'Are you sure you want to end your administrative superadmin session?',
         async () => {
           try {
-            if (window.API) {
+            if (window.Auth && typeof window.Auth.platformLogout === 'function') {
+              await window.Auth.platformLogout();
+            } else if (window.API) {
               await window.API.post('/auth/logout', {});
+              if (window.Auth) window.Auth.clearPlatformAuth();
             }
           } catch (e) {
+            if (window.Auth) window.Auth.clearPlatformAuth();
           } finally {
-            if (window.Auth) {
-              window.Auth.clearPlatformAuth();
-            }
             window.location.replace('/platform/login');
           }
         },
-        'Sign Out'
+        'Sign Out',
+        true
       );
     };
 
@@ -1132,7 +1312,7 @@
     if (topbarLogout) topbarLogout.addEventListener('click', handleLogout);
     if (sidebarLogout) sidebarLogout.addEventListener('click', handleLogout);
 
-    // 5. Dashboard Refresh
+    // 7. Dashboard Refresh
     const dashRefresh = document.getElementById('dashboard-refresh-btn');
     if (dashRefresh) dashRefresh.addEventListener('click', () => {
       loadDashboardMetrics();
@@ -1532,6 +1712,44 @@
       txnsNext.addEventListener('click', () => {
         state.transactions.page++;
         loadTransactions();
+      });
+    }
+
+    // 14. Subscription Lifecycle Status Form Submission
+    const subStatusForm = document.getElementById('sub-status-form');
+    const subStatusSubmitBtn = document.getElementById('sub-status-submit-btn');
+
+    if (subStatusForm) {
+      subStatusForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const tenantId = document.getElementById('status-sub-tenant-id').value;
+        const status = document.getElementById('status-sub-select').value;
+
+        if (!tenantId || !status) {
+          showToast('Please select a valid subscription status.', 'error');
+          return;
+        }
+
+        if (window.Auth) window.Auth.setButtonLoading(subStatusSubmitBtn, true, 'Applying status...');
+
+        try {
+          const res = await window.API.patch(`/platform/tenants/${tenantId}/subscription/status`, { status });
+          if (window.Auth) window.Auth.setButtonLoading(subStatusSubmitBtn, false);
+
+          if (!res.ok) {
+            showToast(res.error || 'Failed to update subscription status', 'error');
+            return;
+          }
+
+          showToast(`Subscription status updated to "${status}".`, 'success');
+          closeModal('sub-status-modal');
+          loadSubscriptions();
+          loadDashboardMetrics();
+
+        } catch (err) {
+          if (window.Auth) window.Auth.setButtonLoading(subStatusSubmitBtn, false);
+          showToast('Connection error while updating subscription status.', 'error');
+        }
       });
     }
   }

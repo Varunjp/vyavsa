@@ -88,6 +88,10 @@ const Auth = (() => {
     return !!getPlatformToken();
   }
 
+  function getPlatformRefreshToken() {
+    return safeStorageGet(STORAGE_KEYS.PLATFORM_REFRESH_TOKEN);
+  }
+
   function clearPlatformAuth() {
     safeStorageRemove(STORAGE_KEYS.PLATFORM_ACCESS_TOKEN);
     safeStorageRemove(STORAGE_KEYS.PLATFORM_REFRESH_TOKEN);
@@ -99,7 +103,8 @@ const Auth = (() => {
   async function logout() {
     try {
       if (window.API && isAuthenticated()) {
-        await window.API.post('/auth/logout', {});
+        const rf = getRefreshToken();
+        await window.API.post('/auth/logout', { refresh_token: rf });
       }
     } catch (e) {
       // Proceed with local cleanup regardless
@@ -107,6 +112,20 @@ const Auth = (() => {
       clearTenantAuth();
       clearPlatformAuth();
       window.location.replace('/login');
+    }
+  }
+
+  async function platformLogout() {
+    try {
+      if (window.API && isPlatformAuthenticated()) {
+        const rf = getPlatformRefreshToken();
+        await window.API.post('/auth/logout', { refresh_token: rf }, { isPlatform: true });
+      }
+    } catch (e) {
+      // Proceed with local cleanup regardless
+    } finally {
+      clearPlatformAuth();
+      window.location.replace('/platform/login');
     }
   }
 
@@ -192,7 +211,9 @@ const Auth = (() => {
     getPlatformToken,
     isPlatformAuthenticated,
     clearPlatformAuth,
+    getPlatformRefreshToken,
     logout,
+    platformLogout,
     showAlert,
     clearAlert,
     setButtonLoading,

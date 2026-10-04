@@ -2746,22 +2746,32 @@ const Operations = (() => {
   function openMobileSidebar() {
     const sidebar = document.getElementById('app-sidebar');
     const backdrop = document.getElementById('sidebar-backdrop');
-    if (sidebar) sidebar.classList.add('open');
-    if (backdrop) backdrop.classList.add('active');
+    if (sidebar) {
+      sidebar.classList.add('open', 'active');
+    }
+    if (backdrop) {
+      backdrop.classList.add('active', 'open');
+    }
     document.body.style.overflow = 'hidden';
   }
 
   function closeMobileSidebar() {
     const sidebar = document.getElementById('app-sidebar');
     const backdrop = document.getElementById('sidebar-backdrop');
-    if (sidebar) sidebar.classList.remove('open');
-    if (backdrop) backdrop.classList.remove('active');
-    document.body.style.overflow = 'auto';
+    if (sidebar) {
+      sidebar.classList.remove('open', 'active');
+    }
+    if (backdrop) {
+      backdrop.classList.remove('active', 'open');
+    }
+    if (!document.querySelector('.modal.active')) {
+      document.body.style.overflow = '';
+    }
   }
 
   function toggleMobileSidebar() {
     const sidebar = document.getElementById('app-sidebar');
-    if (sidebar && sidebar.classList.contains('open')) {
+    if (sidebar && (sidebar.classList.contains('open') || sidebar.classList.contains('active'))) {
       closeMobileSidebar();
     } else {
       openMobileSidebar();
@@ -2791,15 +2801,32 @@ const Operations = (() => {
       roleBadge.className = 'status-badge ' + (isAdmin ? 'paid' : 'cleared');
     }
 
-    // Wire Mobile Sidebar Toggle & Backdrop
+    // Wire Mobile Sidebar Toggle, Close Button & Backdrop
     const mobileToggle = document.getElementById('mobile-sidebar-toggle');
+    const mobileClose = document.getElementById('mobile-sidebar-close');
+    const backdrop = document.getElementById('sidebar-backdrop');
     if (mobileToggle) {
       mobileToggle.addEventListener('click', toggleMobileSidebar);
     }
-    const backdrop = document.getElementById('sidebar-backdrop');
+    if (mobileClose) {
+      mobileClose.addEventListener('click', closeMobileSidebar);
+    }
     if (backdrop) {
       backdrop.addEventListener('click', closeMobileSidebar);
     }
+
+    // Keyboard & Resize listeners
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeMobileSidebar();
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (window.innerWidth > 992) {
+        closeMobileSidebar();
+      }
+    });
 
     // Wire Sidebar Tab Navigation
     document.querySelectorAll('.sidebar-link[data-tab]').forEach(link => {
