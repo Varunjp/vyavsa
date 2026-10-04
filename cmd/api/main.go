@@ -60,10 +60,13 @@ func run() error {
 		defer redisClient.Close()
 	}
 
-	// 5. Initialize Prometheus metrics & register DB pool collector
+	// 5. Initialize Prometheus metrics & register DB/Redis pool collectors
 	appMetrics := metrics.New()
 	if pg.Pool != nil {
 		appMetrics.RegisterDBPoolMetrics(pg.Pool)
+	}
+	if redisClient != nil && redisClient.Client != nil {
+		appMetrics.RegisterRedisPoolMetrics(redisClient.Client)
 	}
 
 	// 6. Run database migrations if enabled

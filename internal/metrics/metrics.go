@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 )
 
 // Metrics holds all application Prometheus metrics
@@ -68,7 +69,7 @@ func New() *Metrics {
 				Subsystem: "http",
 				Name:      "request_duration_seconds",
 				Help:      "HTTP request latency distributions in seconds",
-				Buckets:   []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+				Buckets:   []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 			},
 			[]string{"method", "route", "status_code"},
 		),
@@ -401,4 +402,74 @@ func (c *dbPoolCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(descDBIdleConns, prometheus.GaugeValue, float64(stat.IdleConns()))
 	ch <- prometheus.MustNewConstMetric(descDBMaxConns, prometheus.GaugeValue, float64(stat.MaxConns()))
 	ch <- prometheus.MustNewConstMetric(descDBEmptyAcquires, prometheus.CounterValue, float64(stat.EmptyAcquireCount()))
+}
+
+// RegisterRedisPoolMetrics registers dynamic Redis pool metrics collectors
+func (m *Metrics) RegisterRedisPoolMetrics(client *redis.Client) {
+	if client == nil {
+		return
+	}
+	collector := &redisPoolCollector{client: client}
+	m.Registry.MustRegister(collector)
+}
+
+// redisPoolCollector is a custom Prometheus collector for redis.PoolStats
+type redisPoolCollector struct {
+	client *redis.Client
+}
+
+var (
+	descRedisHits = prometheus.NewDesc(
+		"billbook_redis_pool_hits_total",
+		"Total times a free connection was found in the Redis pool",
+		nil, nil,
+	)
+	descRedisMisses = prometheus.NewDesc(
+		"billbook_redis_pool_misses_total",
+		"Total times a free connection was not found in the Redis pool",
+		nil, nil,
+	)
+	descRedisTimeouts = prometheus.NewDesc(
+		"billbook_redis_pool_timeouts_total",
+		"Total times a timeout occurred looking for a connection in the Redis pool",
+		nil, nil,
+	)
+	descRedisTotalConns = prometheus.NewDesc(
+		"billbook_redis_pool_total_connections",
+		"Current number of connections in the Redis pool",
+		nil, nil,
+	)
+	descRedisIdleConns = prometheus.NewDesc(
+		"billbook_redis_pool_idle_connections",
+		"Current number of idle connections in the Redis pool",
+		nil, nil,
+	)
+	descRedisStaleConns = prometheus.NewDesc(
+		"billbook_redis_pool_stale_connections_total",
+		"Total number of stale connections removed from the Redis pool",
+		nil, nil,
+	)
+)
+
+func (c *redisPoolCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- descRedisHits
+	ch <- descRedisMisses
+	ch <- descRedisTimeouts
+	ch <- descRedisTotalConns
+	ch <- descRedisIdleConns
+	ch <- descRedisStaleConns
+}
+
+func (c *redisPoolCollector) Collect(ch chan<- prometheus.Metric) {
+	if c.client == nil {
+		return
+	}
+	stat := c.client.PoolStats()
+
+	ch <- prometheus.MustNewConstMetric(descRedisHits, prometheus.CounterValue, float64(stat.Hits))
+	ch <- prometheus.MustNewConstMetric(descRedisMisses, prometheus.CounterValue, float64(stat.Misses))
+	ch <- prometheus.MustNewConstMetric(descRedisTimeouts, prometheus.CounterValue, float64(stat.Timeouts))
+	ch <- prometheus.MustNewConstMetric(descRedisTotalConns, prometheus.GaugeValue, float64(stat.TotalConns))
+	ch <- prometheus.MustNewConstMetric(descRedisIdleConns, prometheus.GaugeValue, float64(stat.IdleConns))
+	ch <- prometheus.MustNewConstMetric(descRedisStaleConns, prometheus.CounterValue, float64(stat.StaleConns))
 }
