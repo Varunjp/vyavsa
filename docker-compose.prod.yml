@@ -25,3 +25,10 @@ services:
 
   grafana:
     restart: always
+
+  node-exporter:
+    restart: always
+
+  cadvisor:
+    restart: always
+
