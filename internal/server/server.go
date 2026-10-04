@@ -375,6 +375,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			platform.PUT("/tenants/:id", platformTenantHandler.UpdateTenant)
 			platform.PATCH("/tenants/:id/status", platformTenantHandler.UpdateStatus)
 			platform.POST("/tenants/:id/subscription", platformTenantHandler.ChangeSubscription)
+			platform.PATCH("/tenants/:id/subscription/status", platformTenantHandler.UpdateSubscriptionStatus)
+			platform.PATCH("/subscriptions/:id/status", platformTenantHandler.UpdateSubscriptionStatus)
 
 			// Platform Dashboard, Subscriptions & Transactions
 			platform.GET("/dashboard/metrics", platformTenantHandler.GetDashboardMetrics)

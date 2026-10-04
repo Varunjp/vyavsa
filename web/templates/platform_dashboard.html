@@ -32,7 +32,7 @@
 
     window.addEventListener('pageshow', function(event) {
       var token = localStorage.getItem('vyavsa_platform_access_token');
-      if (event.persisted || !token) {
+      if (!token) {
         if (document.body) document.body.style.display = 'none';
         window.location.replace('/platform/login');
       }
@@ -344,6 +344,72 @@
       border-radius: var(--radius-xs);
       border: 1px solid var(--color-border);
     }
+
+    /* Table Action Cell & Buttons Alignment */
+    .table-actions {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.375rem;
+      white-space: nowrap;
+    }
+    .table-actions .btn {
+      padding: 0.3rem 0.65rem;
+      font-size: 0.8125rem;
+      font-weight: 600;
+    }
+
+    /* Modal Form Alerts */
+    .modal-alert {
+      margin-bottom: 1.25rem;
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.84375rem;
+      display: none;
+    }
+    .modal-alert.show-error {
+      background: var(--color-error-bg);
+      border: 1px solid var(--color-error-border);
+      color: var(--color-error-text);
+      display: block;
+    }
+    .modal-alert.show-success {
+      background: var(--color-success-bg);
+      border: 1px solid var(--color-success-border);
+      color: var(--color-success-text);
+      display: block;
+    }
+
+    /* Form layout refinements */
+    .modal-body .form-group {
+      margin-bottom: 1.125rem;
+    }
+    .modal-body .form-group:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Responsive filter toolbar */
+    .filter-toolbar {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+    }
+    @media (max-width: 640px) {
+      .filter-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .filter-toolbar > div {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      .filter-toolbar input,
+      .filter-toolbar select {
+        width: 100% !important;
+      }
+    }
   </style>
 </head>
 <body class="app-shell">
@@ -362,7 +428,7 @@
 
       <!-- Brand -->
       <a href="/platform/dashboard" class="topbar-brand" data-nav="/platform/dashboard">
-        <img src="/static/images/logo.svg" alt="Vyavsa" width="28" height="28">
+        <img src="/static/images/favicon.svg" alt="Vyavsa" width="28" height="28">
         <span>Vyavsa</span>
       </a>
 
@@ -398,6 +464,20 @@
 
     <!-- Persistent Sidebar Navigation -->
     <aside class="app-sidebar" id="platform-sidebar">
+
+      <!-- Mobile Drawer Header -->
+      <div class="sidebar-mobile-header">
+        <div class="sidebar-brand-mobile">
+          <img src="/static/images/favicon.svg" alt="Vyavsa" width="24" height="24">
+          <span style="font-weight: 800; font-size: 1.15rem; color: var(--color-text-main);">Vyavsa</span>
+          <span class="platform-badge" style="display: inline-block !important; font-size: 0.65rem; padding: 0.15rem 0.5rem;">Superadmin</span>
+        </div>
+        <button type="button" class="sidebar-close-btn" id="platform-sidebar-close" aria-label="Close navigation menu">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
 
       <div class="sidebar-group">
         <span class="sidebar-group-title">Telemetry</span>
@@ -634,7 +714,7 @@
 
         <!-- Filter / Search Toolbar -->
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
-          <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+          <div class="filter-toolbar">
             <div style="display: flex; gap: 0.75rem; flex: 1; max-width: 480px;">
               <input type="text" id="tenants-search-input" class="form-control" placeholder="Search by organization name, email, or phone...">
             </div>
@@ -703,14 +783,16 @@
 
         <!-- Filter Toolbar -->
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
-          <div style="display: flex; gap: 0.75rem; align-items: center;">
-            <label for="plans-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status Filter:</label>
-            <select id="plans-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
-              <option value="all">All Plans</option>
-              <option value="active" selected>Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="archived">Archived</option>
-            </select>
+          <div class="filter-toolbar">
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+              <label for="plans-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status Filter:</label>
+              <select id="plans-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
+                <option value="all">All Plans</option>
+                <option value="active" selected>Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -759,15 +841,17 @@
 
         <!-- Filter Toolbar -->
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
-          <div style="display: flex; gap: 0.75rem; align-items: center;">
-            <label for="subs-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Subscription Status:</label>
-            <select id="subs-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
-              <option value="all">All Subscriptions</option>
-              <option value="active">Active</option>
-              <option value="past_due">Past Due</option>
-              <option value="expired">Expired</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
+          <div class="filter-toolbar">
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+              <label for="subs-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Subscription Status:</label>
+              <select id="subs-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
+                <option value="all">All Subscriptions</option>
+                <option value="active">Active</option>
+                <option value="past_due">Past Due</option>
+                <option value="expired">Expired</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -825,15 +909,17 @@
 
         <!-- Filter Toolbar -->
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
-          <div style="display: flex; gap: 0.75rem; align-items: center;">
-            <label for="txns-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Transaction Status:</label>
-            <select id="txns-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
-              <option value="all">All Transactions</option>
-              <option value="completed">Completed</option>
-              <option value="pending">Pending</option>
-              <option value="failed">Failed</option>
-              <option value="refunded">Refunded</option>
-            </select>
+          <div class="filter-toolbar">
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+              <label for="txns-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Transaction Status:</label>
+              <select id="txns-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
+                <option value="all">All Transactions</option>
+                <option value="completed">Completed</option>
+                <option value="pending">Pending</option>
+                <option value="failed">Failed</option>
+                <option value="refunded">Refunded</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1226,6 +1312,39 @@
           <button type="button" class="btn btn-secondary" data-close-modal="confirm-action-modal">Cancel</button>
           <button type="button" class="btn btn-primary" id="confirm-action-btn">Confirm</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Change Subscription Status Modal -->
+  <div class="modal" id="sub-status-modal" tabindex="-1">
+    <div class="modal-dialog" style="max-width: 460px;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Change Subscription Status</h2>
+          <button type="button" class="modal-close-btn" data-close-modal="sub-status-modal" aria-label="Close modal">×</button>
+        </div>
+        <form id="sub-status-form">
+          <input type="hidden" id="status-sub-tenant-id">
+          <div class="modal-body">
+            <p style="font-size: 0.875rem; color: var(--color-text-muted); margin-bottom: 1.25rem;">
+              Updating the subscription status alters feature access and tenant entitlement enforcement in real time.
+            </p>
+            <div class="form-group">
+              <label for="status-sub-select" class="form-label">Lifecycle Status *</label>
+              <select id="status-sub-select" class="form-control" required>
+                <option value="active">Active — full platform operations enabled</option>
+                <option value="past_due">Past Due — payment grace period warning</option>
+                <option value="expired">Expired — access suspended after term</option>
+                <option value="cancelled">Cancelled — administrative termination</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal="sub-status-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="sub-status-submit-btn">Apply Status</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

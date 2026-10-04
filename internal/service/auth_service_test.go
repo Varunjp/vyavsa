@@ -689,4 +689,42 @@ func TestAuthService(t *testing.T) {
 		}, "127.0.0.1")
 		require.Error(t, err)
 	})
+
+	t.Run("RevokeRefreshToken revokes active refresh token", func(t *testing.T) {
+		blacklist := &mockBlacklistRepo{revoked: make(map[string]bool), userRevoked: make(map[uuid.UUID]time.Time)}
+		user := &domain.TenantUser{
+			ID:           uuid.New(),
+			TenantID:     uuid.New(),
+			Email:        "user@store.com",
+			PasswordHash: "$2a$10$xyz",
+			Role:         "owner",
+			Status:       "active",
+		}
+		tenantRepo := &mockTenantUserRepo{user: user}
+		svc := NewAuthService(
+			&mockPlatformAdminRepo{},
+			tenantRepo,
+			blacklist,
+			newMockPasswordResetRepo(),
+			&mockMailer{},
+			hasher,
+			jwtManager,
+			pwCfg,
+			appMetrics,
+			log,
+		)
+
+		tokens, err := jwtManager.GenerateTokenPair(user.ID, &user.TenantID, user.Email, user.Role, auth.UserTypeTenantUser)
+		require.NoError(t, err)
+
+		// Revoke refresh token
+		err = svc.RevokeRefreshToken(context.Background(), tokens.RefreshToken)
+		require.NoError(t, err)
+
+		// Verify refresh token is rejected now
+		_, err = svc.RefreshToken(context.Background(), tokens.RefreshToken)
+		require.Error(t, err)
+		appErr := appErrors.FromError(err)
+		assert.Equal(t, appErrors.CodeUnauthorized, appErr.Code)
+	})
 }

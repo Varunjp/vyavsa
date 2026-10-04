@@ -25,6 +25,7 @@ type TenantService interface {
 	ListTenants(ctx context.Context, page, pageSize int, status, search string) ([]dto.TenantResponse, int64, error)
 	UpdateTenantStatus(ctx context.Context, id uuid.UUID, status string) error
 	ChangeSubscription(ctx context.Context, tenantID, planID uuid.UUID) (*dto.TenantSubscriptionResponse, error)
+	UpdateSubscriptionStatus(ctx context.Context, tenantID uuid.UUID, status string) (*dto.TenantSubscriptionResponse, error)
 
 	// Tenant Member & Admin Operations
 	GetTenantProfile(ctx context.Context, tenantID uuid.UUID) (*dto.TenantResponse, error)
@@ -520,6 +521,43 @@ func (s *tenantService) ChangeSubscription(ctx context.Context, tenantID, planID
 	s.log.InfoContext(ctx, "tenant subscription changed",
 		slog.String("tenant_id", tenantID.String()),
 		slog.String("new_plan", plan.PlanName),
+	)
+
+	resp := dto.ToSubscriptionResponse(sub)
+	return &resp, nil
+}
+
+func (s *tenantService) UpdateSubscriptionStatus(ctx context.Context, tenantID uuid.UUID, status string) (*dto.TenantSubscriptionResponse, error) {
+	switch status {
+	case "active", "past_due", "expired", "cancelled":
+	default:
+		return nil, appErrors.NewValidation("invalid subscription status", map[string]string{
+			"status": "must be one of: active, past_due, expired, cancelled",
+		})
+	}
+
+	sub, err := s.subscriptionRepo.GetByTenantID(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	sub.Status = status
+	if err := s.subscriptionRepo.Update(ctx, sub); err != nil {
+		s.log.ErrorContext(ctx, "failed to update tenant subscription status",
+			slog.String("tenant_id", tenantID.String()),
+			slog.String("status", status),
+			slog.String("error", err.Error()),
+		)
+		return nil, err
+	}
+
+	if s.planService != nil {
+		_ = s.planService.InvalidateTenantPlanCache(ctx, tenantID)
+	}
+
+	s.log.InfoContext(ctx, "tenant subscription status updated",
+		slog.String("tenant_id", tenantID.String()),
+		slog.String("status", status),
 	)
 
 	resp := dto.ToSubscriptionResponse(sub)

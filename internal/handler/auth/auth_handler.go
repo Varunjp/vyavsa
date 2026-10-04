@@ -100,6 +100,14 @@ func (h *Handler) Logout(c *gin.Context) {
 		return
 	}
 
+	// Revoke optional refresh token if provided in body
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err == nil && req.RefreshToken != "" {
+		_ = h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken)
+	}
+
 	response.Success(c, gin.H{"logged_out": true}, "logged out successfully")
 }
 

@@ -886,5 +886,15 @@ func TestTenantService_RegistrationAndOnboarding(t *testing.T) {
 		assert.Equal(t, "updated-org@vyavsa.com", updateResp.Tenant.Email)
 		assert.Equal(t, "+91 8888888888", updateResp.Tenant.Phone)
 		assert.Equal(t, "inactive", updateResp.Tenant.Status)
+
+		// 5. Test UpdateSubscriptionStatus
+		subStatusResp, err := svc.UpdateSubscriptionStatus(ctx, tenantID, "past_due")
+		require.NoError(t, err)
+		require.NotNil(t, subStatusResp)
+		assert.Equal(t, "past_due", subStatusResp.Status)
+
+		// Test invalid status
+		_, err = svc.UpdateSubscriptionStatus(ctx, tenantID, "invalid_status")
+		require.Error(t, err)
 	})
 }

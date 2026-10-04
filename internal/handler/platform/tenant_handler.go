@@ -130,6 +130,32 @@ func (h *TenantHandler) ChangeSubscription(c *gin.Context) {
 	response.Success(c, sub, "tenant subscription updated successfully")
 }
 
+// UpdateSubscriptionStatus handles changing the subscription status of a tenant
+func (h *TenantHandler) UpdateSubscriptionStatus(c *gin.Context) {
+	idParam := c.Param("id")
+	tenantID, err := uuid.Parse(idParam)
+	if err != nil {
+		response.Error(c, appErrors.NewBadRequest("invalid tenant ID format"))
+		return
+	}
+
+	var req struct {
+		Status string `json:"status" binding:"required,oneof=active past_due expired cancelled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, appErrors.ParseBindingError(err))
+		return
+	}
+
+	sub, err := h.tenantService.UpdateSubscriptionStatus(c.Request.Context(), tenantID, req.Status)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, sub, "subscription status updated successfully")
+}
+
 // UpdateTenant handles modifying tenant business details (name, email, phone, status)
 func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	idParam := c.Param("id")
