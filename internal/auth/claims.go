@@ -23,15 +23,22 @@ const (
 	PurposePasswordReset = "password_reset"
 )
 
+// Token type constants for access and refresh segregation
+const (
+	TokenTypeAccess  = "access"
+	TokenTypeRefresh = "refresh"
+)
+
 // CustomClaims represents the JWT payload structure
 type CustomClaims struct {
-	UserID   uuid.UUID  `json:"user_id"`
-	TenantID *uuid.UUID `json:"tenant_id,omitempty"` // Null for platform administrators
-	Email    string     `json:"email"`
-	Role     string     `json:"role"`
-	UserType string     `json:"user_type"`
-	TokenID  string     `json:"jti,omitempty"` // Unique token identifier for revocation
-	Purpose  string     `json:"purpose,omitempty"`
+	UserID    uuid.UUID  `json:"user_id"`
+	TenantID  *uuid.UUID `json:"tenant_id,omitempty"` // Null for platform administrators
+	Email     string     `json:"email"`
+	Role      string     `json:"role"`
+	UserType  string     `json:"user_type"`
+	TokenType string     `json:"token_type,omitempty"`
+	TokenID   string     `json:"jti,omitempty"` // Unique token identifier for revocation
+	Purpose   string     `json:"purpose,omitempty"`
 	jwt.RegisteredClaims
 }
 

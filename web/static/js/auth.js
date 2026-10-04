@@ -61,8 +61,42 @@ const Auth = (() => {
     }
   }
 
+  /**
+   * Parse JWT payload and check expiration
+   * @param {string} token
+   * @param {number} thresholdSeconds - Safety buffer in seconds (default 5)
+   * @returns {boolean} true if missing, malformed, or expired
+   */
+  function isTokenExpired(token, thresholdSeconds = 5) {
+    if (!token || typeof token !== 'string') return true;
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return true;
+      const base64Url = parts[1];
+      let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4 !== 0) {
+        base64 += '=';
+      }
+      const jsonPayload = decodeURIComponent(
+        Array.prototype.map.call(atob(base64), function(c) {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join('')
+      );
+      const payload = JSON.parse(jsonPayload);
+      if (!payload || typeof payload.exp !== 'number') return false;
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      return payload.exp <= (nowSeconds + thresholdSeconds);
+    } catch (e) {
+      return true;
+    }
+  }
+
   function isAuthenticated() {
-    return !!getAccessToken();
+    const at = getAccessToken();
+    if (at && !isTokenExpired(at)) return true;
+    const rt = getRefreshToken();
+    if (rt && !isTokenExpired(rt)) return true;
+    return false;
   }
 
   function clearTenantAuth() {
@@ -85,7 +119,11 @@ const Auth = (() => {
   }
 
   function isPlatformAuthenticated() {
-    return !!getPlatformToken();
+    const at = getPlatformToken();
+    if (at && !isTokenExpired(at)) return true;
+    const rt = getPlatformRefreshToken();
+    if (rt && !isTokenExpired(rt)) return true;
+    return false;
   }
 
   function getPlatformRefreshToken() {
@@ -99,15 +137,100 @@ const Auth = (() => {
     try { sessionStorage.clear(); } catch(e) {}
   }
 
+  /**
+   * Request a fresh access token from backend using refresh token
+   * @param {boolean} isPlatform
+   * @returns {Promise<string>} new access token
+   */
+  async function refreshToken(isPlatform = false) {
+    const rf = isPlatform ? getPlatformRefreshToken() : getRefreshToken();
+    if (!rf) {
+      throw new Error('No refresh token available');
+    }
+
+    const response = await fetch('/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ refresh_token: rf })
+    });
+
+    const isJson = (response.headers.get('content-type') || '').includes('application/json');
+    const data = isJson ? await response.json() : await response.text();
+
+    if (!response.ok) {
+      let errorMsg = 'Failed to refresh token';
+      if (data && typeof data === 'object') {
+        if (data.error) {
+          errorMsg = typeof data.error === 'string' ? data.error : (data.error.message || errorMsg);
+        } else if (data.message) {
+          errorMsg = data.message;
+        }
+      }
+      throw new Error(errorMsg);
+    }
+
+    const tokenResp = (data && typeof data === 'object' && data.data) ? data.data : data;
+    if (!tokenResp || !tokenResp.access_token) {
+      throw new Error('Malformed token response from server');
+    }
+
+    if (isPlatform) {
+      setPlatformAuth(tokenResp);
+    } else {
+      setTenantAuth(tokenResp);
+    }
+
+    return tokenResp.access_token;
+  }
+
+  /**
+   * Ensure an active, unexpired access token is available.
+   * If access token is expired or missing but refresh token is valid, refreshes session.
+   * @param {boolean} isPlatform
+   * @returns {Promise<string>} active access token
+   */
+  async function ensureSession(isPlatform = false) {
+    const at = isPlatform ? getPlatformToken() : getAccessToken();
+    if (at && !isTokenExpired(at)) {
+      return at;
+    }
+    const rf = isPlatform ? getPlatformRefreshToken() : getRefreshToken();
+    if (rf && !isTokenExpired(rf)) {
+      return await refreshToken(isPlatform);
+    }
+    throw new Error('No valid session credentials available');
+  }
+
+  /**
+   * Centralized authentication failure handler
+   * Clears stored credentials and redirects to appropriate login
+   */
+  function handleAuthFailure(isPlatform = false) {
+    if (isPlatform) {
+      clearPlatformAuth();
+      if (typeof window !== 'undefined' && window.location && !window.location.pathname.startsWith('/platform/login')) {
+        window.location.replace('/platform/login');
+      }
+    } else {
+      clearTenantAuth();
+      if (typeof window !== 'undefined' && window.location && !window.location.pathname.startsWith('/login')) {
+        window.location.replace('/login');
+      }
+    }
+  }
+
   // Session Invalidation
   async function logout() {
     try {
-      if (window.API && isAuthenticated()) {
-        const rf = getRefreshToken();
-        await window.API.post('/auth/logout', { refresh_token: rf });
+      const rf = getRefreshToken();
+      if (rf && window.API) {
+        await window.API.post('/auth/revoke', { refresh_token: rf }, { skipRefresh: true, skipAuth: true });
       }
     } catch (e) {
-      // Proceed with local cleanup regardless
+      // Proceed with local cleanup regardless of network error
     } finally {
       clearTenantAuth();
       clearPlatformAuth();
@@ -117,12 +240,12 @@ const Auth = (() => {
 
   async function platformLogout() {
     try {
-      if (window.API && isPlatformAuthenticated()) {
-        const rf = getPlatformRefreshToken();
-        await window.API.post('/auth/logout', { refresh_token: rf }, { isPlatform: true });
+      const rf = getPlatformRefreshToken();
+      if (rf && window.API) {
+        await window.API.post('/auth/revoke', { refresh_token: rf }, { skipRefresh: true, skipAuth: true, isPlatform: true });
       }
     } catch (e) {
-      // Proceed with local cleanup regardless
+      // Proceed with local cleanup regardless of network error
     } finally {
       clearPlatformAuth();
       window.location.replace('/platform/login');
@@ -217,7 +340,11 @@ const Auth = (() => {
     showAlert,
     clearAlert,
     setButtonLoading,
-    setupPasswordToggles
+    setupPasswordToggles,
+    isTokenExpired,
+    refreshToken,
+    ensureSession,
+    handleAuthFailure
   };
 })();
 

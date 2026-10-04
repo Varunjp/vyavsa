@@ -320,6 +320,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		authGroup.POST("/tenant/login", authHandler.TenantLogin)
 		authGroup.POST("/tenant/register", tenantHandler.Register)
 		authGroup.POST("/refresh", authHandler.RefreshToken)
+		authGroup.POST("/revoke", authHandler.Revoke)
 		authGroup.POST("/forgot-password", authHandler.ForgotPassword)
 		authGroup.POST("/verify-reset-otp", authHandler.VerifyResetOTP)
 		authGroup.POST("/reset-password", authHandler.ResetPassword)
@@ -328,6 +329,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	// Also support root /auth paths directly
 	rootAuth := s.router.Group("/auth")
 	{
+		rootAuth.POST("/refresh", authHandler.RefreshToken)
+		rootAuth.POST("/revoke", authHandler.Revoke)
 		rootAuth.POST("/forgot-password", authHandler.ForgotPassword)
 		rootAuth.POST("/verify-reset-otp", authHandler.VerifyResetOTP)
 		rootAuth.POST("/reset-password", authHandler.ResetPassword)

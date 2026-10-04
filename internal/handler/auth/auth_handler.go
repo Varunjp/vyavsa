@@ -68,8 +68,19 @@ func (h *Handler) TenantLogin(c *gin.Context) {
 // RefreshToken handles refresh token rotation
 func (h *Handler) RefreshToken(c *gin.Context) {
 	var req dto.RefreshTokenRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, appErrors.ParseBindingError(err))
+	// Support JSON body or cookie fallback
+	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+		if cookieToken, err := c.Cookie("refresh_token"); err == nil && cookieToken != "" {
+			req.RefreshToken = cookieToken
+		} else if cookieToken, err := c.Cookie("vyavsa_refresh_token"); err == nil && cookieToken != "" {
+			req.RefreshToken = cookieToken
+		}
+	}
+
+	if req.RefreshToken == "" {
+		response.Error(c, appErrors.NewValidation("invalid request payload", map[string]string{
+			"refresh_token": "refresh token is required",
+		}))
 		return
 	}
 
@@ -80,6 +91,24 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 	}
 
 	response.Success(c, resp, "token pair refreshed successfully")
+}
+
+// Revoke invalidates an explicit refresh token without requiring a valid access token
+func (h *Handler) Revoke(c *gin.Context) {
+	var req dto.RefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+		if cookieToken, err := c.Cookie("refresh_token"); err == nil && cookieToken != "" {
+			req.RefreshToken = cookieToken
+		} else if cookieToken, err := c.Cookie("vyavsa_refresh_token"); err == nil && cookieToken != "" {
+			req.RefreshToken = cookieToken
+		}
+	}
+
+	if req.RefreshToken != "" {
+		_ = h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken)
+	}
+
+	response.Success(c, gin.H{"revoked": true}, "refresh token revoked successfully")
 }
 
 // Logout invalidates the authenticated token

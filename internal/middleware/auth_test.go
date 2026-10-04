@@ -172,4 +172,17 @@ func TestAuthAndRBACMiddleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
+
+	t.Run("Rejects refresh token used as authorization bearer on protected endpoint", func(t *testing.T) {
+		tokens, err := jwtManager.GenerateTokenPair(userID, &tenantID, "user@tenant.com", auth.RoleTenantUser, auth.UserTypeTenantUser)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/test/protected", nil)
+		req.Header.Set("Authorization", "Bearer "+tokens.RefreshToken)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "provided token is not an access token")
+	})
 }

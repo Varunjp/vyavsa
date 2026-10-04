@@ -247,6 +247,11 @@ func (s *authService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 		return nil, appErrors.NewUnauthorized("invalid or expired refresh token")
 	}
 
+	// Validate token type if present to prevent using access tokens as refresh tokens
+	if claims.TokenType != "" && claims.TokenType != auth.TokenTypeRefresh {
+		return nil, appErrors.NewUnauthorized("provided token is not a refresh token")
+	}
+
 	// Check if token was blacklisted
 	if s.blacklistRepo != nil {
 		revoked, err := s.blacklistRepo.IsTokenRevoked(ctx, claims.TokenID)
@@ -268,29 +273,34 @@ func (s *authService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 				return nil, appErrors.NewUnauthorized("refresh token has been revoked")
 			}
 		}
+	}
 
-		// Rotate: blacklist the used refresh token
-		remaining := time.Until(claims.ExpiresAt.Time)
-		if remaining > 0 {
-			_ = s.blacklistRepo.RevokeToken(ctx, claims.TokenID, remaining)
-		}
+	// Validate that the user exists and remains active BEFORE rotating/issuing new tokens
+	profile, err := s.GetProfile(ctx, claims)
+	if err != nil {
+		return nil, err
 	}
 
 	// Issue new token pair
 	tokens, err := s.jwtManager.GenerateTokenPair(
-		claims.UserID,
-		claims.TenantID,
-		claims.Email,
-		claims.Role,
-		claims.UserType,
+		profile.ID,
+		profile.TenantID,
+		profile.Email,
+		profile.Role,
+		profile.UserType,
 	)
 	if err != nil {
 		return nil, appErrors.NewInternal(fmt.Errorf("failed to refresh tokens: %w", err))
 	}
 
-	profile, err := s.GetProfile(ctx, claims)
-	if err != nil {
-		return nil, err
+	// Rotate: blacklist the used refresh token only after new tokens are safely generated
+	if s.blacklistRepo != nil && claims.TokenID != "" && claims.ExpiresAt != nil {
+		remaining := time.Until(claims.ExpiresAt.Time)
+		if remaining > 0 {
+			if err := s.blacklistRepo.RevokeToken(ctx, claims.TokenID, remaining); err != nil {
+				s.log.WarnContext(ctx, "failed to blacklist rotated refresh token", slog.String("error", err.Error()))
+			}
+		}
 	}
 
 	return &dto.TokenResponse{
@@ -358,9 +368,23 @@ func (s *authService) RevokeRefreshToken(ctx context.Context, refreshTokenStr st
 // GetProfile retrieves the profile for an authenticated identity
 func (s *authService) GetProfile(ctx context.Context, claims *auth.CustomClaims) (*dto.UserProfile, error) {
 	if claims.UserType == auth.UserTypePlatformAdmin {
+		if s.platformAdminRepo == nil {
+			return &dto.UserProfile{
+				ID:       claims.UserID,
+				Name:     claims.Email,
+				Email:    claims.Email,
+				Role:     auth.RolePlatformAdmin,
+				UserType: auth.UserTypePlatformAdmin,
+				TenantID: nil,
+			}, nil
+		}
+
 		admin, err := s.platformAdminRepo.GetByID(ctx, claims.UserID)
 		if err != nil {
-			return nil, err
+			return nil, appErrors.NewUnauthorized("platform administrator not found")
+		}
+		if admin.Status != "active" {
+			return nil, appErrors.NewForbidden("account is inactive or suspended")
 		}
 		return &dto.UserProfile{
 			ID:       admin.ID,
@@ -376,9 +400,23 @@ func (s *authService) GetProfile(ctx context.Context, claims *auth.CustomClaims)
 		return nil, appErrors.NewUnauthorized("missing tenant context")
 	}
 
+	if s.tenantUserRepo == nil {
+		return &dto.UserProfile{
+			ID:       claims.UserID,
+			Name:     claims.Email,
+			Email:    claims.Email,
+			Role:     claims.Role,
+			UserType: auth.UserTypeTenantUser,
+			TenantID: claims.TenantID,
+		}, nil
+	}
+
 	user, err := s.tenantUserRepo.GetByID(ctx, *claims.TenantID, claims.UserID)
 	if err != nil {
-		return nil, err
+		return nil, appErrors.NewUnauthorized("user not found within tenant")
+	}
+	if user.Status != "active" {
+		return nil, appErrors.NewForbidden("account is inactive or suspended")
 	}
 
 	return &dto.UserProfile{
