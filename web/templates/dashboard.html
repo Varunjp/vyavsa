@@ -2950,6 +2950,14 @@
         return;
       }
 
+      // Ensure active access token before data loading
+      try {
+        await window.Auth.ensureSession(isPlatform && !isTenant);
+      } catch (e) {
+        window.location.replace('/login');
+        return;
+      }
+
       // Display authenticated user details
       const user = window.Auth.getUser();
       if (user) {

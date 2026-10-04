@@ -387,6 +387,73 @@ func TestAuthService(t *testing.T) {
 		require.Error(t, err)
 		appErr := appErrors.FromError(err)
 		assert.Equal(t, appErrors.CodeUnauthorized, appErr.Code)
+
+		// Cannot use access token as refresh token
+		_, err = svc.RefreshToken(context.Background(), refreshResp.AccessToken)
+		require.Error(t, err)
+		appErr = appErrors.FromError(err)
+		assert.Equal(t, appErrors.CodeUnauthorized, appErr.Code)
+	})
+
+	t.Run("Platform admin refresh token rotation success", func(t *testing.T) {
+		blacklist := &mockBlacklistRepo{revoked: make(map[string]bool), userRevoked: make(map[uuid.UUID]time.Time)}
+		svc := NewAuthService(
+			&mockPlatformAdminRepo{admin: admin},
+			&mockTenantUserRepo{user: user},
+			blacklist,
+			newMockPasswordResetRepo(),
+			&mockMailer{},
+			hasher,
+			jwtManager,
+			pwCfg,
+			appMetrics,
+			log,
+		)
+
+		loginResp, err := svc.LoginPlatformAdmin(context.Background(), dto.PlatformLoginRequest{
+			Identifier: "superadmin",
+			Password:   password,
+		})
+		require.NoError(t, err)
+
+		refreshResp, err := svc.RefreshToken(context.Background(), loginResp.RefreshToken)
+		require.NoError(t, err)
+		assert.NotEmpty(t, refreshResp.AccessToken)
+		assert.NotEmpty(t, refreshResp.RefreshToken)
+		assert.Equal(t, auth.RolePlatformAdmin, refreshResp.User.Role)
+	})
+
+	t.Run("Refresh token rejected when user account becomes inactive", func(t *testing.T) {
+		inactiveUser := &domain.TenantUser{
+			ID:           uuid.New(),
+			TenantID:     tenantID,
+			Name:         "Inactive Store User",
+			Role:         auth.RoleTenantUser,
+			Email:        "inactive@store.com",
+			Status:       "inactive",
+			PasswordHash: passHash,
+		}
+		blacklist := &mockBlacklistRepo{revoked: make(map[string]bool), userRevoked: make(map[uuid.UUID]time.Time)}
+		svc := NewAuthService(
+			&mockPlatformAdminRepo{admin: admin},
+			&mockTenantUserRepo{user: inactiveUser},
+			blacklist,
+			newMockPasswordResetRepo(),
+			&mockMailer{},
+			hasher,
+			jwtManager,
+			pwCfg,
+			appMetrics,
+			log,
+		)
+
+		tokens, err := jwtManager.GenerateTokenPair(inactiveUser.ID, &inactiveUser.TenantID, inactiveUser.Email, inactiveUser.Role, auth.UserTypeTenantUser)
+		require.NoError(t, err)
+
+		_, err = svc.RefreshToken(context.Background(), tokens.RefreshToken)
+		require.Error(t, err)
+		appErr := appErrors.FromError(err)
+		assert.Equal(t, appErrors.CodeForbidden, appErr.Code)
 	})
 
 	// ========================================================

@@ -46,6 +46,13 @@ func Authenticate(jwtManager auth.JWTManager, blacklist repository.TokenBlacklis
 			return
 		}
 
+		// Ensure that only access tokens can be used for authenticated endpoints
+		if claims.TokenType != "" && claims.TokenType != auth.TokenTypeAccess {
+			response.Error(c, appErrors.NewUnauthorized("provided token is not an access token"))
+			c.Abort()
+			return
+		}
+
 		// Check if token has been revoked individually or via user-wide revocation (password reset)
 		if blacklist != nil {
 			if claims.TokenID != "" {

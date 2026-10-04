@@ -36,6 +36,18 @@ func TestJWTManager(t *testing.T) {
 		assert.Equal(t, "user@example.com", claims.Email)
 		assert.Equal(t, RoleTenantAdmin, claims.Role)
 		assert.Equal(t, UserTypeTenantUser, claims.UserType)
+		assert.Equal(t, TokenTypeAccess, claims.TokenType)
+		assert.Equal(t, tokens.TokenID, claims.TokenID)
+
+		refClaims, err := mgr.ValidateToken(tokens.RefreshToken)
+		require.NoError(t, err)
+		assert.Equal(t, userID, refClaims.UserID)
+		assert.Equal(t, &tenantID, refClaims.TenantID)
+		assert.Equal(t, "user@example.com", refClaims.Email)
+		assert.Equal(t, TokenTypeRefresh, refClaims.TokenType)
+		assert.NotEmpty(t, refClaims.TokenID)
+		assert.NotEqual(t, tokens.TokenID, refClaims.TokenID)
+		assert.True(t, refClaims.ExpiresAt.Time.After(claims.ExpiresAt.Time))
 	})
 
 	t.Run("Rejects expired token", func(t *testing.T) {

@@ -64,12 +64,13 @@ func (m *HMACJWTManager) GenerateTokenPair(
 
 	// Access Token Claims
 	accessClaims := CustomClaims{
-		UserID:   userID,
-		TenantID: tenantID,
-		Email:    email,
-		Role:     role,
-		UserType: userType,
-		TokenID:  tokenID,
+		UserID:    userID,
+		TenantID:  tenantID,
+		Email:     email,
+		Role:      role,
+		UserType:  userType,
+		TokenType: TokenTypeAccess,
+		TokenID:   tokenID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			Issuer:    m.issuer,
@@ -87,12 +88,13 @@ func (m *HMACJWTManager) GenerateTokenPair(
 	// Refresh Token Claims (longer expiry, distinct ID)
 	refreshTokenID := uuid.NewString()
 	refreshClaims := CustomClaims{
-		UserID:   userID,
-		TenantID: tenantID,
-		Email:    email,
-		Role:     role,
-		UserType: userType,
-		TokenID:  refreshTokenID,
+		UserID:    userID,
+		TenantID:  tenantID,
+		Email:     email,
+		Role:      role,
+		UserType:  userType,
+		TokenType: TokenTypeRefresh,
+		TokenID:   refreshTokenID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			Issuer:    m.issuer,
@@ -172,6 +174,14 @@ func (m *HMACJWTManager) ValidateToken(tokenString string) (*CustomClaims, error
 	claims, ok := token.Claims.(*CustomClaims)
 	if !ok || !token.Valid {
 		return nil, ErrInvalidToken
+	}
+
+	// Ensure TokenID is populated consistently
+	if claims.TokenID == "" && claims.ID != "" {
+		claims.TokenID = claims.ID
+	}
+	if claims.ID == "" && claims.TokenID != "" {
+		claims.ID = claims.TokenID
 	}
 
 	// Password reset tokens or other single-purpose tokens must not grant API access
