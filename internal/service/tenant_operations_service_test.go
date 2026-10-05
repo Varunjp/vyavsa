@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -156,6 +157,7 @@ func (m *mockOpCustomerRepo) List(ctx context.Context, tenantID uuid.UUID, page,
 type mockOpBankRepo struct {
 	banks        map[uuid.UUID]*domain.TenantBank
 	transactions []domain.BankTransaction
+	failOnTx     bool
 }
 
 func newMockOpBankRepo() *mockOpBankRepo {
@@ -196,6 +198,9 @@ func (m *mockOpBankRepo) AdjustBalance(ctx context.Context, tenantID, id uuid.UU
 }
 
 func (m *mockOpBankRepo) CreateTransaction(ctx context.Context, tx *domain.BankTransaction) error {
+	if m.failOnTx {
+		return errors.New("simulated bank transaction persistence failure")
+	}
 	tx.ID = uuid.New()
 	tx.CreatedAt = time.Now().UTC()
 	m.transactions = append(m.transactions, *tx)
@@ -625,7 +630,7 @@ func (m *mockOpDailyStatsRepo) ComputeAndSyncDailyStats(ctx context.Context, ten
 	return s, nil
 }
 
-func setupTestOperationsService() (*TenantOperationsService, uuid.UUID) {
+func setupTestOperationsServiceWithRepos() (*TenantOperationsService, uuid.UUID, *mockOpCustomerRepo, *mockOpBankRepo, *mockOpPurchaseRepo, *mockOpLineSaleRepo, *mockOpCounterSaleRepo, *mockFinancialSummaryRepo) {
 	tenantID := uuid.New()
 
 	userRepo := newMockTenantUserRepoFull()
@@ -671,6 +676,11 @@ func setupTestOperationsService() (*TenantOperationsService, uuid.UUID) {
 		log,
 	)
 
+	return svc, tenantID, custRepo, bankRepo, purchRepo, lineSaleRepo, countSaleRepo, summaryRepo
+}
+
+func setupTestOperationsService() (*TenantOperationsService, uuid.UUID) {
+	svc, tenantID, _, _, _, _, _, _ := setupTestOperationsServiceWithRepos()
 	return svc, tenantID
 }
 
@@ -1595,5 +1605,618 @@ func TestOperationsService_FinancialConsistencyOnMutationsAndDeletions(t *testin
 		require.NoError(t, err)
 		assert.Equal(t, 50000.0, metricsAfterDelete.CashBalance.InexactFloat64())
 		assert.Equal(t, 100000.0, metricsAfterDelete.BankBalance.InexactFloat64())
+	})
+}
+
+// ----------------------------------------------------
+// Customer Association & Live Balance Tests
+// ----------------------------------------------------
+
+func TestOperationsService_PurchaseCustomerAssociation(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, custRepo, _, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	// 1. Create a customer for tenantID
+	cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName:   "Alpha Materials Supplier",
+		OpeningBalance: decimal.NewFromFloat(5000),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// Another tenant and customer for isolation check
+	otherTenantID := uuid.New()
+	otherCust := &domain.TenantCustomer{
+		ID:             uuid.New(),
+		TenantID:       otherTenantID,
+		CustomerName:   "Beta Other Tenant Supplier",
+		CurrentBalance: decimal.Zero,
+		Status:         "active",
+	}
+	_ = custRepo.Create(ctx, otherCust)
+
+	// Inactive customer in same tenant
+	inactiveCust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName:   "Inactive Supplier",
+		OpeningBalance: decimal.Zero,
+		Status:         "inactive",
+	})
+	require.NoError(t, err)
+
+	t.Run("Successfully associate customer with purchase", func(t *testing.T) {
+		purch, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			CustomerID:  &cust.ID,
+			Item:        "Packaging Raw Materials",
+			Quantity:    10,
+			TotalAmount: decimal.NewFromFloat(15000),
+			TotalPaid:   decimal.NewFromFloat(10000),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, purch.CustomerID)
+		assert.Equal(t, cust.ID, *purch.CustomerID)
+		assert.Equal(t, "Alpha Materials Supplier", purch.CustomerName)
+
+		// Fetch purchase by ID
+		fetched, err := svc.GetPurchaseByID(ctx, tenantID, purch.ID)
+		require.NoError(t, err)
+		require.NotNil(t, fetched.CustomerID)
+		assert.Equal(t, cust.ID, *fetched.CustomerID)
+		assert.Equal(t, "Alpha Materials Supplier", fetched.CustomerName)
+	})
+
+	t.Run("Purchase without customer succeeds (backward compatibility)", func(t *testing.T) {
+		purch, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			Item:        "Office Stationery",
+			Quantity:    2,
+			TotalAmount: decimal.NewFromFloat(500),
+			TotalPaid:   decimal.NewFromFloat(500),
+		})
+		require.NoError(t, err)
+		assert.Nil(t, purch.CustomerID)
+		assert.Empty(t, purch.CustomerName)
+	})
+
+	t.Run("Customer from another tenant is rejected", func(t *testing.T) {
+		_, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			CustomerID:  &otherCust.ID,
+			Item:        "Unauthorized Purchase",
+			Quantity:    1,
+			TotalAmount: decimal.NewFromFloat(1000),
+			TotalPaid:   decimal.Zero,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid customer for tenant")
+	})
+
+	t.Run("Inactive customer is rejected", func(t *testing.T) {
+		_, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			CustomerID:  &inactiveCust.ID,
+			Item:        "Inactive Purchase",
+			Quantity:    1,
+			TotalAmount: decimal.NewFromFloat(1000),
+			TotalPaid:   decimal.Zero,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "customer is not active")
+	})
+
+	t.Run("Non-existent customer ID is rejected", func(t *testing.T) {
+		randomID := uuid.New()
+		_, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			CustomerID:  &randomID,
+			Item:        "Fake Customer Purchase",
+			Quantity:    1,
+			TotalAmount: decimal.NewFromFloat(1000),
+			TotalPaid:   decimal.Zero,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid customer for tenant")
+	})
+
+	t.Run("Update purchase modifies customer association", func(t *testing.T) {
+		purch, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			Item:        "Test Item",
+			Quantity:    1,
+			TotalAmount: decimal.NewFromFloat(1000),
+			TotalPaid:   decimal.Zero,
+		})
+		require.NoError(t, err)
+		assert.Nil(t, purch.CustomerID)
+
+		newQty := 2
+		newTotal := decimal.NewFromFloat(2000)
+		newPaid := decimal.NewFromFloat(500)
+		updated, err := svc.UpdatePurchase(ctx, tenantID, purch.ID, auth.RoleTenantAdmin, &dto.UpdatePurchaseRequest{
+			CustomerID:  &cust.ID,
+			Item:        "Test Item Updated",
+			Quantity:    &newQty,
+			TotalAmount: &newTotal,
+			TotalPaid:   &newPaid,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, updated.CustomerID)
+		assert.Equal(t, cust.ID, *updated.CustomerID)
+		assert.Equal(t, "Alpha Materials Supplier", updated.CustomerName)
+	})
+}
+
+func TestOperationsService_CustomerBalance(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, custRepo, _, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	// 1. Customer with positive balance (outstanding)
+	cPositive, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName:   "Outstanding Customer",
+		OpeningBalance: decimal.NewFromFloat(12500.50),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// 2. Customer with zero balance
+	cZero, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName:   "Zero Balance Customer",
+		OpeningBalance: decimal.Zero,
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// 3. Customer with negative balance (credit/advance)
+	cNegative, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName:   "Credit Advance Customer",
+		OpeningBalance: decimal.NewFromFloat(-3400.00),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// 4. Other tenant customer
+	otherTenantID := uuid.New()
+	cOther := &domain.TenantCustomer{
+		ID:             uuid.New(),
+		TenantID:       otherTenantID,
+		CustomerName:   "Other Tenant Cust",
+		CurrentBalance: decimal.NewFromFloat(5000),
+		Status:         "active",
+	}
+	_ = custRepo.Create(ctx, cOther)
+
+	t.Run("Positive outstanding balance returned correctly", func(t *testing.T) {
+		bal, err := svc.GetCustomerBalance(ctx, tenantID, cPositive.ID)
+		require.NoError(t, err)
+		assert.Equal(t, cPositive.ID, bal.CustomerID)
+		assert.Equal(t, "Outstanding Customer", bal.CustomerName)
+		assert.True(t, bal.CurrentBalance.Equal(decimal.NewFromFloat(12500.50)))
+		assert.Equal(t, "active", bal.Status)
+	})
+
+	t.Run("Zero balance returned correctly", func(t *testing.T) {
+		bal, err := svc.GetCustomerBalance(ctx, tenantID, cZero.ID)
+		require.NoError(t, err)
+		assert.True(t, bal.CurrentBalance.IsZero())
+	})
+
+	t.Run("Negative credit/advance balance returned correctly", func(t *testing.T) {
+		bal, err := svc.GetCustomerBalance(ctx, tenantID, cNegative.ID)
+		require.NoError(t, err)
+		assert.True(t, bal.CurrentBalance.Equal(decimal.NewFromFloat(-3400.00)))
+		assert.True(t, bal.CurrentBalance.IsNegative())
+	})
+
+	t.Run("Customer from another tenant is rejected", func(t *testing.T) {
+		_, err := svc.GetCustomerBalance(ctx, tenantID, cOther.ID)
+		require.Error(t, err)
+	})
+}
+
+// ----------------------------------------------------
+// Multi-Bank & Split Payment Tests for Sales
+// ----------------------------------------------------
+
+func TestOperationsService_LineSale_MultiBankAndSplitPayments(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, custRepo, bankRepo, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	// Seed customer
+	cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName:   "Retail Wholesale Mart",
+		OpeningBalance: decimal.Zero,
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// Seed multiple banks
+	bankHDFC, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "HDFC Bank",
+		AccountNumber:  "HDFC1001",
+		OpeningBalance: decimal.NewFromFloat(50000),
+	})
+	require.NoError(t, err)
+
+	bankSBI, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "SBI Bank",
+		AccountNumber:  "SBI2002",
+		OpeningBalance: decimal.NewFromFloat(30000),
+	})
+	require.NoError(t, err)
+
+	bankICICI, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "ICICI Bank",
+		AccountNumber:  "ICICI3003",
+		OpeningBalance: decimal.NewFromFloat(20000),
+	})
+	require.NoError(t, err)
+
+	// Inactive bank in same tenant
+	bankInactive, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:      "Inactive Bank",
+		AccountNumber: "INACT000",
+		Status:        "inactive",
+	})
+	require.NoError(t, err)
+
+	// Bank belonging to another tenant
+	otherTenantID := uuid.New()
+	bankOther := &domain.TenantBank{
+		ID:             uuid.New(),
+		TenantID:       otherTenantID,
+		BankName:       "Other Tenant Bank",
+		AccountNumber:  "OTHER999",
+		CurrentBalance: decimal.NewFromFloat(10000),
+		Status:         "active",
+	}
+	_ = bankRepo.Create(ctx, bankOther)
+
+	t.Run("Cash-only payment", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(5000)
+		sale, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			CashAmount:  &cashAmt,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 5000.0, sale.TotalCashIn.InexactFloat64())
+		assert.Equal(t, 0.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 5000.0, sale.Balance.InexactFloat64())
+	})
+
+	t.Run("Bank-only single bank payment", func(t *testing.T) {
+		sale, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(6000)},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, sale.TotalCashIn.InexactFloat64())
+		assert.Equal(t, 6000.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 4000.0, sale.Balance.InexactFloat64())
+
+		// Verify HDFC bank balance was credited
+		hdfc, err := svc.GetBankByID(ctx, tenantID, bankHDFC.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 56000.0, hdfc.CurrentBalance.InexactFloat64())
+	})
+
+	t.Run("Cash + single Bank payment", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(3000)
+		sale, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			CashAmount:  &cashAmt,
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankSBI.ID, Amount: decimal.NewFromFloat(4000)},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 3000.0, sale.TotalCashIn.InexactFloat64())
+		assert.Equal(t, 4000.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 3000.0, sale.Balance.InexactFloat64())
+	})
+
+	t.Run("Cash + Multiple Banks payment (Cash + HDFC + SBI)", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(2000)
+		sale, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			CashAmount:  &cashAmt,
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(4000)},
+				{BankID: bankSBI.ID, Amount: decimal.NewFromFloat(4000)},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 2000.0, sale.TotalCashIn.InexactFloat64())
+		assert.Equal(t, 8000.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 0.0, sale.Balance.InexactFloat64()) // Full payment collected!
+
+		// HDFC balance was 56000 + 4000 = 60000
+		hdfc, _ := svc.GetBankByID(ctx, tenantID, bankHDFC.ID)
+		assert.Equal(t, 60000.0, hdfc.CurrentBalance.InexactFloat64())
+
+		// SBI balance was 30000 + 4000 (prev) + 4000 = 38000
+		sbi, _ := svc.GetBankByID(ctx, tenantID, bankSBI.ID)
+		assert.Equal(t, 38000.0, sbi.CurrentBalance.InexactFloat64())
+	})
+
+	t.Run("Multiple Banks only (HDFC + SBI + ICICI)", func(t *testing.T) {
+		sale, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(5000)},
+				{BankID: bankSBI.ID, Amount: decimal.NewFromFloat(3000)},
+				{BankID: bankICICI.ID, Amount: decimal.NewFromFloat(2000)},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, sale.TotalCashIn.InexactFloat64())
+		assert.Equal(t, 10000.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 0.0, sale.Balance.InexactFloat64())
+	})
+
+	t.Run("Duplicate bank in bank payments is rejected", func(t *testing.T) {
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(3000)},
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(2000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate bank")
+	})
+
+	t.Run("Bank from another tenant is rejected", func(t *testing.T) {
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(5000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankOther.ID, Amount: decimal.NewFromFloat(2000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid bank account")
+	})
+
+	t.Run("Inactive bank is rejected", func(t *testing.T) {
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(5000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankInactive.ID, Amount: decimal.NewFromFloat(2000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bank account is inactive")
+	})
+
+	t.Run("Negative cash amount is rejected", func(t *testing.T) {
+		negCash := decimal.NewFromFloat(-100)
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(5000),
+			CashAmount:  &negCash,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cash amount cannot be negative")
+	})
+
+	t.Run("Zero or negative bank amount is rejected", func(t *testing.T) {
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(5000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(-500)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bank payment amount must be greater than zero")
+	})
+
+	t.Run("Payment exceeding total invoice amount is rejected", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(6000)
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(10000),
+			CashAmount:  &cashAmt,
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(5000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot exceed sale total")
+	})
+
+	t.Run("Customer from another tenant is rejected", func(t *testing.T) {
+		otherCust := &domain.TenantCustomer{
+			ID:           uuid.New(),
+			TenantID:     otherTenantID,
+			CustomerName: "Beta Other Customer",
+			Status:       "active",
+		}
+		_ = custRepo.Create(ctx, otherCust)
+
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  otherCust.ID,
+			TotalAmount: decimal.NewFromFloat(5000),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid customer for tenant")
+	})
+}
+
+func TestOperationsService_CounterSale_MultiBankAndSplitPayments(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, bankRepo, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	bankHDFC, _ := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "HDFC Bank",
+		AccountNumber:  "HDFC101",
+		OpeningBalance: decimal.NewFromFloat(10000),
+	})
+	bankSBI, _ := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "SBI Bank",
+		AccountNumber:  "SBI202",
+		OpeningBalance: decimal.NewFromFloat(10000),
+	})
+
+	// Bank belonging to another tenant
+	otherTenantID := uuid.New()
+	bankOther := &domain.TenantBank{
+		ID:             uuid.New(),
+		TenantID:       otherTenantID,
+		BankName:       "Other Tenant Bank",
+		AccountNumber:  "OTHER888",
+		CurrentBalance: decimal.NewFromFloat(10000),
+		Status:         "active",
+	}
+	_ = bankRepo.Create(ctx, bankOther)
+
+	t.Run("Cash-only counter sale", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(1500)
+		sale, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Retail item",
+			TotalAmount: decimal.NewFromFloat(1500),
+			CashAmount:  &cashAmt,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1500.0, sale.Cash.InexactFloat64())
+		assert.Equal(t, 0.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 0.0, sale.Account.InexactFloat64())
+	})
+
+	t.Run("Bank-only counter sale with single bank", func(t *testing.T) {
+		sale, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Wholesale Box",
+			TotalAmount: decimal.NewFromFloat(2000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(2000)},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, sale.Cash.InexactFloat64())
+		assert.Equal(t, 2000.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 0.0, sale.Account.InexactFloat64())
+	})
+
+	t.Run("Cash + Multiple Banks counter sale (Cash + HDFC + SBI)", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(500)
+		sale, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Mixed Sale",
+			TotalAmount: decimal.NewFromFloat(3000),
+			CashAmount:  &cashAmt,
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(1000)},
+				{BankID: bankSBI.ID, Amount: decimal.NewFromFloat(1500)},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 500.0, sale.Cash.InexactFloat64())
+		assert.Equal(t, 2500.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 0.0, sale.Account.InexactFloat64())
+	})
+
+	t.Run("Multiple Banks only counter sale (HDFC + SBI)", func(t *testing.T) {
+		sale, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Digital Payment Only",
+			TotalAmount: decimal.NewFromFloat(2500),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(1500)},
+				{BankID: bankSBI.ID, Amount: decimal.NewFromFloat(1000)},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, sale.Cash.InexactFloat64())
+		assert.Equal(t, 2500.0, sale.BankAmount.InexactFloat64())
+		assert.Equal(t, 0.0, sale.Account.InexactFloat64())
+	})
+
+	t.Run("Duplicate bank in counter sale is rejected", func(t *testing.T) {
+		_, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Item",
+			TotalAmount: decimal.NewFromFloat(2000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(1000)},
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(1000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate bank")
+	})
+
+	t.Run("Bank from another tenant is rejected in counter sale", func(t *testing.T) {
+		_, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Item",
+			TotalAmount: decimal.NewFromFloat(2000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankOther.ID, Amount: decimal.NewFromFloat(1000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid bank account")
+	})
+
+	t.Run("Payment exceeding total allowed in counter sale is rejected", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(1500)
+		_, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Item",
+			TotalAmount: decimal.NewFromFloat(2000),
+			CashAmount:  &cashAmt,
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bankHDFC.ID, Amount: decimal.NewFromFloat(1000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot exceed sale total")
+	})
+}
+
+func TestOperationsService_TransactionRollbackScenarios(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, bankRepo, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "Rollback Customer",
+		Status:       "active",
+	})
+	require.NoError(t, err)
+
+	bank, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "HDFC Test Bank",
+		AccountNumber:  "HDFC9999",
+		OpeningBalance: decimal.NewFromFloat(10000),
+	})
+	require.NoError(t, err)
+
+	t.Run("Line sale with bank payment fails when bank transaction persistence fails", func(t *testing.T) {
+		// Set failOnTx to trigger failure during transaction
+		bankRepo.failOnTx = true
+		defer func() { bankRepo.failOnTx = false }()
+
+		_, err := svc.CreateLineSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateLineSaleRequest{
+			CustomerID:  cust.ID,
+			TotalAmount: decimal.NewFromFloat(5000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bank.ID, Amount: decimal.NewFromFloat(2000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "simulated bank transaction persistence failure")
+	})
+
+	t.Run("Counter sale with bank payment fails when bank transaction persistence fails", func(t *testing.T) {
+		bankRepo.failOnTx = true
+		defer func() { bankRepo.failOnTx = false }()
+
+		_, err := svc.CreateCounterSale(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateCounterSaleRequest{
+			Item:        "Counter Rollback Item",
+			TotalAmount: decimal.NewFromFloat(5000),
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: bank.ID, Amount: decimal.NewFromFloat(2000)},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "simulated bank transaction persistence failure")
 	})
 }

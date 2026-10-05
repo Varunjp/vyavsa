@@ -76,6 +76,8 @@ type CounterSalePayment struct {
 type TenantPurchase struct {
 	ID           uuid.UUID               `json:"id"`
 	TenantID     uuid.UUID               `json:"tenant_id"`
+	CustomerID   *uuid.UUID              `json:"customer_id,omitempty"`
+	CustomerName string                  `json:"customer_name,omitempty"`
 	Item         string                  `json:"item"`
 	Quantity     int                     `json:"quantity"`
 	TotalAmount  decimal.Decimal         `json:"total_amount"`
