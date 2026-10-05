@@ -189,6 +189,20 @@ func ToBankResponse(b *domain.TenantBank) BankResponse {
 // 5. Line Sale DTOs
 // ==========================================
 
+type BankPaymentSplitRequest struct {
+	BankID   uuid.UUID       `json:"bank_id" binding:"required"`
+	BankName string          `json:"bank_name,omitempty"`
+	Amount   decimal.Decimal `json:"amount" binding:"required"`
+	Note     string          `json:"note,omitempty"`
+}
+
+type CustomerBalanceResponse struct {
+	CustomerID     uuid.UUID       `json:"customer_id"`
+	CustomerName   string          `json:"customer_name"`
+	CurrentBalance decimal.Decimal `json:"current_balance"`
+	Status         string          `json:"status"`
+}
+
 type LineSalePaymentRequest struct {
 	PaymentMethod string          `json:"payment_method" binding:"required,oneof=cash bank cheque upi other"`
 	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
@@ -198,15 +212,17 @@ type LineSalePaymentRequest struct {
 }
 
 type CreateLineSaleRequest struct {
-	CustomerID  uuid.UUID                `json:"customer_id" binding:"required"`
-	Route       string                   `json:"route" binding:"omitempty,max=255"`
-	Salesman    string                   `json:"salesman" binding:"omitempty,max=255"`
-	Note        string                   `json:"note" binding:"omitempty"`
-	TotalAmount decimal.Decimal          `json:"total_amount" binding:"required"`
-	TotalCashIn decimal.Decimal          `json:"total_cash_in" binding:"omitempty"`
-	BankAmount  decimal.Decimal          `json:"bank_amount" binding:"omitempty"`
-	BankID      *uuid.UUID               `json:"bank_id,omitempty"`
-	Payments    []LineSalePaymentRequest `json:"payments,omitempty"`
+	CustomerID   uuid.UUID                 `json:"customer_id" binding:"required"`
+	Route        string                    `json:"route" binding:"omitempty,max=255"`
+	Salesman     string                    `json:"salesman" binding:"omitempty,max=255"`
+	Note         string                    `json:"note" binding:"omitempty"`
+	TotalAmount  decimal.Decimal           `json:"total_amount" binding:"required"`
+	TotalCashIn  decimal.Decimal           `json:"total_cash_in" binding:"omitempty"`
+	CashAmount   *decimal.Decimal          `json:"cash_amount,omitempty"`
+	BankAmount   decimal.Decimal           `json:"bank_amount" binding:"omitempty"`
+	BankID       *uuid.UUID                `json:"bank_id,omitempty"`
+	Payments     []LineSalePaymentRequest  `json:"payments,omitempty"`
+	BankPayments []BankPaymentSplitRequest `json:"bank_payments,omitempty"`
 }
 
 type UpdateLineSaleRequest struct {
@@ -233,12 +249,14 @@ type CreateCounterSaleRequest struct {
 	Item          string                      `json:"item" binding:"required,min=1,max=255"`
 	Price         decimal.Decimal             `json:"price" binding:"required"`
 	TotalAmount   decimal.Decimal             `json:"total_amount" binding:"required"`
-	PaymentMethod string                      `json:"payment_method" binding:"required"`
+	PaymentMethod string                      `json:"payment_method" binding:"omitempty"`
 	Cash          decimal.Decimal             `json:"cash" binding:"omitempty"`
+	CashAmount    *decimal.Decimal            `json:"cash_amount,omitempty"`
 	BankAmount    decimal.Decimal             `json:"bank_amount" binding:"omitempty"`
 	BankID        *uuid.UUID                  `json:"bank_id,omitempty"`
 	Account       decimal.Decimal             `json:"account" binding:"omitempty"`
 	Payments      []CounterSalePaymentRequest `json:"payments,omitempty"`
+	BankPayments  []BankPaymentSplitRequest   `json:"bank_payments,omitempty"`
 }
 
 type UpdateCounterSaleRequest struct {
@@ -264,6 +282,7 @@ type PurchasePaymentRequest struct {
 }
 
 type CreatePurchaseRequest struct {
+	CustomerID  *uuid.UUID               `json:"customer_id,omitempty"`
 	Item        string                   `json:"item" binding:"required,min=1,max=255"`
 	Quantity    int                      `json:"quantity" binding:"required,min=1"`
 	TotalAmount decimal.Decimal          `json:"total_amount" binding:"required"`
@@ -272,6 +291,7 @@ type CreatePurchaseRequest struct {
 }
 
 type UpdatePurchaseRequest struct {
+	CustomerID  *uuid.UUID       `json:"customer_id,omitempty"`
 	Item        string           `json:"item" binding:"omitempty"`
 	Quantity    *int             `json:"quantity" binding:"omitempty,min=1"`
 	TotalAmount *decimal.Decimal `json:"total_amount" binding:"omitempty"`

@@ -26,13 +26,15 @@ func NewTenantPurchasePostgres(pool *pgxpool.Pool) *TenantPurchasePostgres {
 
 func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.TenantPurchase, payments []domain.TenantPurchasePayment) error {
 	pQuery := `
-		INSERT INTO tenant_purchase (tenant_id, item, quantity, total_amount, total_paid, total_pending)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO tenant_purchase (tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, pQuery,
 		purchase.TenantID,
+		purchase.CustomerID,
+		purchase.CustomerName,
 		purchase.Item,
 		purchase.Quantity,
 		purchase.TotalAmount,
@@ -71,7 +73,7 @@ func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.Te
 
 func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantPurchase, error) {
 	pQuery := `
-		SELECT id, tenant_id, item, quantity, total_amount, total_paid, total_pending, created_at, updated_at
+		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, created_at, updated_at
 		FROM tenant_purchase
 		WHERE tenant_id = $1 AND id = $2
 	`
@@ -80,6 +82,8 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 	err := exec.QueryRow(ctx, pQuery, tenantID, id).Scan(
 		&p.ID,
 		&p.TenantID,
+		&p.CustomerID,
+		&p.CustomerName,
 		&p.Item,
 		&p.Quantity,
 		&p.TotalAmount,
@@ -133,12 +137,14 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 func (r *TenantPurchasePostgres) Update(ctx context.Context, purchase *domain.TenantPurchase) error {
 	query := `
 		UPDATE tenant_purchase
-		SET item = $1, quantity = $2, total_amount = $3, total_paid = $4, total_pending = $5, updated_at = NOW()
-		WHERE tenant_id = $6 AND id = $7
+		SET customer_id = $1, customer_name = $2, item = $3, quantity = $4, total_amount = $5, total_paid = $6, total_pending = $7, updated_at = NOW()
+		WHERE tenant_id = $8 AND id = $9
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, query,
+		purchase.CustomerID,
+		purchase.CustomerName,
 		purchase.Item,
 		purchase.Quantity,
 		purchase.TotalAmount,
@@ -189,7 +195,7 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 	}
 
 	if search != "" {
-		baseWhere += fmt.Sprintf(" AND item ILIKE $%d", argIdx)
+		baseWhere += fmt.Sprintf(" AND (item ILIKE $%d OR customer_name ILIKE $%d)", argIdx, argIdx)
 		args = append(args, "%"+search+"%")
 		argIdx++
 	}
@@ -202,7 +208,7 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 	}
 
 	listQuery := fmt.Sprintf(`
-		SELECT id, tenant_id, item, quantity, total_amount, total_paid, total_pending, created_at, updated_at
+		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, created_at, updated_at
 		FROM tenant_purchase
 		%s
 		ORDER BY created_at DESC
@@ -222,6 +228,8 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 		if err := rows.Scan(
 			&p.ID,
 			&p.TenantID,
+			&p.CustomerID,
+			&p.CustomerName,
 			&p.Item,
 			&p.Quantity,
 			&p.TotalAmount,

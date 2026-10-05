@@ -409,6 +409,28 @@ func (h *OperationsHandler) GetCustomerByID(c *gin.Context) {
 	response.Success(c, dto.ToCustomerResponse(cust), "customer retrieved")
 }
 
+func (h *OperationsHandler) GetCustomerBalance(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	id, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	balanceResp, err := h.svc.GetCustomerBalance(c.Request.Context(), tenantID, id)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, balanceResp, "customer balance retrieved")
+}
+
 func (h *OperationsHandler) ListCustomers(c *gin.Context) {
 	tenantID, _, _, err := getTenantContext(c)
 	if err != nil {

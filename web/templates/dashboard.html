@@ -64,6 +64,34 @@
       padding: 0.875rem 1rem;
       margin: 1rem 0;
     }
+    .bank-payment-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    .bank-payment-row .select-bank {
+      flex: 1.5;
+    }
+    .bank-payment-row .bank-amount-input {
+      flex: 1;
+    }
+    .bank-payment-row .btn-remove-bank {
+      flex: 0 0 auto;
+      padding: 0.4rem 0.65rem;
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--color-error);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 0.8125rem;
+      line-height: 1;
+      transition: all var(--transition-fast);
+    }
+    .bank-payment-row .btn-remove-bank:hover {
+      background: var(--color-error);
+      color: #fff;
+    }
     .bank-cards-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -1234,6 +1262,7 @@
               <thead>
                 <tr>
                   <th>Item / Materials</th>
+                  <th>Customer / Vendor</th>
                   <th>Quantity</th>
                   <th>Date</th>
                   <th>Total Amount</th>
@@ -1243,7 +1272,7 @@
                 </tr>
               </thead>
               <tbody id="purchases-table-body">
-                <tr><td colspan="7" style="text-align: center; padding: 2rem; color: var(--color-text-muted);">Loading purchases...</td></tr>
+                <tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--color-text-muted);">Loading purchases...</td></tr>
               </tbody>
             </table>
           </div>
@@ -2243,10 +2272,28 @@
         <div class="modal-body">
           <div class="form-group">
             <label for="ls-form-customer">Customer Account *</label>
-            <select id="ls-form-customer" class="form-control select-customer" required>
+            <input type="text" id="ls-customer-search" class="form-control" placeholder="🔍 Search customer name or phone..." style="margin-bottom: 0.35rem; font-size: 0.8125rem;" oninput="Operations.filterCustomerDropdown(this, 'ls-form-customer')">
+            <select id="ls-form-customer" class="form-control select-customer" required onchange="Operations.handleLineSaleCustomerChange()">
               <option value="">Select Customer...</option>
             </select>
           </div>
+
+          <!-- Customer Balance Preview Box -->
+          <div id="ls-customer-balance-box" class="payment-calc-box" style="display: none; margin-bottom: 1rem; border-left: 3px solid var(--color-primary);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Current Outstanding Balance:</span>
+              <span id="ls-cust-balance-badge" class="badge">₹0.00</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">This Invoice (Net Addition to Due):</span>
+              <strong id="ls-cust-sale-due" style="font-family: var(--font-mono); font-size: 0.875rem;">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.35rem; border-top: 1px dashed var(--color-border);">
+              <span style="font-size: 0.8125rem; font-weight: 600;">Resulting Balance:</span>
+              <strong id="ls-cust-resulting-balance" style="font-family: var(--font-mono); font-size: 0.9375rem;">₹0.00</strong>
+            </div>
+          </div>
+
           <div class="form-row">
             <div class="form-group">
               <label for="ls-form-route">Delivery Route</label>
@@ -2264,30 +2311,42 @@
             </div>
             <div class="form-group">
               <label for="ls-form-cash">Instant Cash Collected (₹)</label>
-              <input type="number" step="0.01" id="ls-form-cash" class="form-control" value="0.00" oninput="Operations.calcLineSaleDue()">
+              <input type="number" step="0.01" id="ls-form-cash" class="form-control" value="0.00" min="0" oninput="Operations.calcLineSaleDue()">
             </div>
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="ls-form-bank">Bank / UPI Account</label>
-              <select id="ls-form-bank" class="form-control select-bank" onchange="Operations.calcLineSaleDue()">
-                <option value="">None / Cash Only</option>
-              </select>
+
+          <!-- Multi-Bank Payments Section -->
+          <div class="form-group" style="margin-top: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <label style="margin: 0; font-weight: 600; font-size: 0.875rem;">Bank / UPI Payments</label>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-ls-add-bank" onclick="Operations.addLineSaleBankRow()" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">
+                + Add Bank
+              </button>
             </div>
-            <div class="form-group">
-              <label for="ls-form-bank-amount">Bank / UPI Amount (₹)</label>
-              <input type="number" step="0.01" id="ls-form-bank-amount" class="form-control" value="0.00" oninput="Operations.calcLineSaleDue()">
+            <div id="ls-bank-payments-container">
+              <!-- Dynamic bank payment rows rendered here -->
+            </div>
+            <div id="ls-bank-duplicate-warning" style="display: none; color: var(--color-error); font-size: 0.75rem; margin-top: 0.25rem; font-weight: 600;">
+              ⚠️ Each bank account can only be selected once per sale.
             </div>
           </div>
 
           <div class="payment-calc-box" id="ls-calc-box">
             <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
-              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Collected Amount (Cash + Bank):</span>
-              <strong id="ls-calc-collected" style="color: var(--color-success); font-family: var(--font-mono);">₹0.00</strong>
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Cash Amount:</span>
+              <strong id="ls-calc-cash" style="font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Bank Payments Total:</span>
+              <strong id="ls-calc-bank" style="font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem; padding-top: 0.25rem; border-top: 1px dashed var(--color-border);">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Total Received (Cash + Banks):</span>
+              <strong id="ls-calc-collected" style="color: var(--color-success); font-family: var(--font-mono); font-size: 0.9375rem;">₹0.00</strong>
             </div>
             <div style="display: flex; justify-content: space-between;">
               <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Due Balance (Customer Ledger):</span>
-              <strong id="ls-calc-due" style="color: var(--color-warning); font-family: var(--font-mono);">₹0.00</strong>
+              <strong id="ls-calc-due" style="color: var(--color-warning); font-family: var(--font-mono); font-size: 0.9375rem;">₹0.00</strong>
             </div>
             <div id="ls-calc-warning" style="display: none; color: var(--color-error); font-size: 0.75rem; margin-top: 0.35rem; font-weight: 600;">
               ⚠️ Collected amount cannot exceed total invoice amount.
@@ -2373,39 +2432,44 @@
               <input type="number" step="0.01" id="cs-form-total" class="form-control" required placeholder="0.00" oninput="Operations.calcCounterSaleDue()">
             </div>
           </div>
+          <!-- Cash & Multi-Bank Payment Section -->
           <div class="form-group">
-            <label for="cs-form-method">Payment Mode *</label>
-            <select id="cs-form-method" class="form-control" required onchange="Operations.handleCounterSaleMethodChange()">
-              <option value="cash">Physical Cash</option>
-              <option value="bank">Bank / Online / UPI</option>
-              <option value="split">Split (Cash + Bank)</option>
-            </select>
+            <label for="cs-form-cash">Physical Cash Received (₹)</label>
+            <input type="number" step="0.01" id="cs-form-cash" class="form-control" value="0.00" min="0" oninput="Operations.calcCounterSaleDue()">
           </div>
-          <div class="form-group" id="cs-bank-select-group" style="display: none;">
-            <label for="cs-form-bank">Select Bank Account *</label>
-            <select id="cs-form-bank" class="form-control select-bank" onchange="Operations.calcCounterSaleDue()">
-              <option value="">Select Bank Account...</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <div class="form-group" id="cs-cash-group">
-              <label for="cs-form-cash">Cash Amount (₹)</label>
-              <input type="number" step="0.01" id="cs-form-cash" class="form-control" value="0.00" oninput="Operations.calcCounterSaleDue()">
+
+          <!-- Dynamic Bank Payments Section -->
+          <div class="form-group" style="margin-top: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <label style="margin: 0; font-weight: 600; font-size: 0.875rem;">Bank / UPI Payments</label>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-cs-add-bank" onclick="Operations.addCounterSaleBankRow()" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">
+                + Add Bank
+              </button>
             </div>
-            <div class="form-group" id="cs-bank-group">
-              <label for="cs-form-account">Bank Amount (₹)</label>
-              <input type="number" step="0.01" id="cs-form-account" class="form-control" value="0.00" oninput="Operations.calcCounterSaleDue()">
+            <div id="cs-bank-payments-container">
+              <!-- Dynamic bank payment rows rendered here -->
+            </div>
+            <div id="cs-bank-duplicate-warning" style="display: none; color: var(--color-error); font-size: 0.75rem; margin-top: 0.25rem; font-weight: 600;">
+              ⚠️ Each bank account can only be selected once per sale.
             </div>
           </div>
 
           <div class="payment-calc-box" id="cs-calc-box">
             <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
-              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Collected Amount (Cash + Bank):</span>
-              <strong id="cs-calc-collected" style="color: var(--color-success); font-family: var(--font-mono);">₹0.00</strong>
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Cash Amount:</span>
+              <strong id="cs-calc-cash" style="font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Bank Payments Total:</span>
+              <strong id="cs-calc-bank" style="font-family: var(--font-mono);">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem; padding-top: 0.25rem; border-top: 1px dashed var(--color-border);">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Total Received (Cash + Banks):</span>
+              <strong id="cs-calc-collected" style="color: var(--color-success); font-family: var(--font-mono); font-size: 0.9375rem;">₹0.00</strong>
             </div>
             <div style="display: flex; justify-content: space-between;">
               <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Due Amount:</span>
-              <strong id="cs-calc-due" style="color: var(--color-warning); font-family: var(--font-mono);">₹0.00</strong>
+              <strong id="cs-calc-due" style="color: var(--color-warning); font-family: var(--font-mono); font-size: 0.9375rem;">₹0.00</strong>
             </div>
             <div id="cs-calc-warning" style="display: none; color: var(--color-error); font-size: 0.75rem; margin-top: 0.35rem; font-weight: 600;">
               ⚠️ Collected amount cannot exceed total sale amount.
@@ -2472,6 +2536,34 @@
       </div>
       <form id="form-add-purchase">
         <div class="modal-body">
+          <!-- Customer Selection with Search & Live Balance -->
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.25rem;">
+              <label for="purch-form-customer" style="margin-bottom: 0;">Customer / Supplier Account</label>
+              <span style="font-size: 0.75rem; color: var(--color-text-muted);">Optional</span>
+            </div>
+            <input type="text" id="purch-customer-search" class="form-control" placeholder="🔍 Search customer name or phone..." style="margin-bottom: 0.35rem; font-size: 0.8125rem;" oninput="Operations.filterCustomerDropdown(this, 'purch-form-customer')">
+            <select id="purch-form-customer" class="form-control select-customer" onchange="Operations.handlePurchaseCustomerChange()">
+              <option value="">None / Walk-in Vendor</option>
+            </select>
+          </div>
+
+          <!-- Customer Balance Box -->
+          <div id="purch-customer-balance-box" class="payment-calc-box" style="display: none; margin-bottom: 1rem; border-left: 3px solid var(--color-primary);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">Current Outstanding Balance:</span>
+              <span id="purch-cust-balance-badge" class="badge">₹0.00</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <span style="font-size: 0.8125rem; color: var(--color-text-muted);">This Bill (Amount to Pay):</span>
+              <strong id="purch-cust-bill-due" style="font-family: var(--font-mono); font-size: 0.875rem;">₹0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.35rem; border-top: 1px dashed var(--color-border);">
+              <span style="font-size: 0.8125rem; font-weight: 600;">Resulting Balance:</span>
+              <strong id="purch-cust-resulting-balance" style="font-family: var(--font-mono); font-size: 0.9375rem;">₹0.00</strong>
+            </div>
+          </div>
+
           <div class="form-group">
             <label for="purch-form-item">Material / Item Description *</label>
             <input type="text" id="purch-form-item" class="form-control" required placeholder="e.g. Packing Boxes / Raw Material">
@@ -2483,13 +2575,13 @@
             </div>
             <div class="form-group">
               <label for="purch-form-total">Total Bill Amount (₹) *</label>
-              <input type="number" step="0.01" id="purch-form-total" class="form-control" required placeholder="0.00">
+              <input type="number" step="0.01" id="purch-form-total" class="form-control" required placeholder="0.00" oninput="Operations.calcPurchaseBalance()">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label for="purch-form-paid">Amount Paid Now (₹)</label>
-              <input type="number" step="0.01" id="purch-form-paid" class="form-control" value="0.00">
+              <input type="number" step="0.01" id="purch-form-paid" class="form-control" value="0.00" oninput="Operations.calcPurchaseBalance()">
             </div>
             <div class="form-group">
               <label for="purch-form-method">Payment Source</label>
@@ -2524,6 +2616,12 @@
       <form id="form-edit-purchase">
         <input type="hidden" id="edit-purch-id">
         <div class="modal-body">
+          <div class="form-group">
+            <label for="edit-purch-customer">Customer / Supplier Account</label>
+            <select id="edit-purch-customer" class="form-control select-customer">
+              <option value="">None / Walk-in Vendor</option>
+            </select>
+          </div>
           <div class="form-group">
             <label for="edit-purch-item">Item Description</label>
             <input type="text" id="edit-purch-item" class="form-control" required>

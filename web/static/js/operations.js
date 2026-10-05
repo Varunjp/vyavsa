@@ -10,6 +10,10 @@ const Operations = (() => {
   let cachedEmployees = [];
   let cachedCustomers = [];
   let cachedBanks = [];
+  let purchaseCustomerBalance = null;
+  let lineSaleCustomerBalance = null;
+  let lineSaleBankRowCount = 0;
+  let counterSaleBankRowCount = 0;
 
   function formatCurrency(amount) {
     if (amount === null || amount === undefined || amount === '') return '₹0.00';
@@ -107,6 +111,28 @@ const Operations = (() => {
       if (form) form.reset();
       const errEl = el.querySelector('.modal-error-banner');
       if (errEl) errEl.style.display = 'none';
+
+      // Specific modal cleanup
+      if (modalId === 'modal-add-line-sale') {
+        const balBox = document.getElementById('ls-customer-balance-box');
+        if (balBox) balBox.style.display = 'none';
+        const bankContainer = document.getElementById('ls-bank-payments-container');
+        if (bankContainer) bankContainer.innerHTML = '';
+        const warn = document.getElementById('ls-bank-duplicate-warning');
+        if (warn) warn.style.display = 'none';
+        lineSaleCustomerBalance = null;
+        calcLineSaleDue();
+      } else if (modalId === 'modal-add-counter-sale') {
+        const bankContainer = document.getElementById('cs-bank-payments-container');
+        if (bankContainer) bankContainer.innerHTML = '';
+        const warn = document.getElementById('cs-bank-duplicate-warning');
+        if (warn) warn.style.display = 'none';
+        calcCounterSaleDue();
+      } else if (modalId === 'modal-add-purchase') {
+        const balBox = document.getElementById('purch-customer-balance-box');
+        if (balBox) balBox.style.display = 'none';
+        purchaseCustomerBalance = null;
+      }
     }
   }
 
@@ -173,17 +199,47 @@ const Operations = (() => {
 
     document.querySelectorAll('.select-customer').forEach(sel => {
       const cur = sel.value;
-      sel.innerHTML = '<option value="">Select Customer...</option>' +
-        cachedCustomers.map(c => `<option value="${c.id}">${escapeHTML(c.customer_name || 'Customer')}</option>`).join('');
+      const isPurchase = sel.id && sel.id.includes('purch');
+      const defaultText = isPurchase ? 'None / Walk-in Vendor' : 'Select Customer...';
+      sel.innerHTML = `<option value="">${defaultText}</option>` +
+        cachedCustomers.map(c => `<option value="${c.id}">${escapeHTML(c.customer_name || 'Customer')}${c.phone ? ' (' + escapeHTML(c.phone) + ')' : ''}</option>`).join('');
       if (cur) sel.value = cur;
     });
 
     document.querySelectorAll('.select-bank').forEach(sel => {
+      if (sel.classList.contains('ls-bank-select') || sel.classList.contains('cs-bank-select')) return;
       const cur = sel.value;
+      const activeBanks = cachedBanks.filter(b => b.status === 'active' || !b.status);
       sel.innerHTML = '<option value="">None / Cash Only</option>' +
-        cachedBanks.map(b => `<option value="${b.id}">${escapeHTML(b.bank_name)} (${escapeHTML(b.account_number || 'Main')})</option>`).join('');
+        activeBanks.map(b => `<option value="${b.id}">${escapeHTML(b.bank_name)} (${escapeHTML(b.account_number || 'Main')})</option>`).join('');
       if (cur) sel.value = cur;
     });
+  }
+
+  function filterCustomerDropdown(inputEl, selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    const query = (inputEl.value || '').toLowerCase().trim();
+    const curVal = sel.value;
+
+    const matched = cachedCustomers.filter(c => {
+      if (!query) return true;
+      const name = (c.customer_name || '').toLowerCase();
+      const phone = (c.phone || '').toLowerCase();
+      return name.includes(query) || phone.includes(query);
+    });
+
+    const isPurchase = selectId.includes('purch');
+    const defaultLabel = isPurchase ? 'None / Walk-in Vendor' : 'Select Customer...';
+
+    sel.innerHTML = `<option value="">${defaultLabel}</option>` +
+      matched.map(c => `<option value="${c.id}">${escapeHTML(c.customer_name || 'Customer')}${c.phone ? ' (' + escapeHTML(c.phone) + ')' : ''}</option>`).join('');
+
+    if (curVal && matched.some(c => c.id === curVal)) {
+      sel.value = curVal;
+    } else {
+      sel.value = '';
+    }
   }
 
   // ==========================================
@@ -741,7 +797,7 @@ const Operations = (() => {
     if (!res.ok || !Array.isArray(res.data) || res.data.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="7">
+          <td colspan="8">
             <div class="empty-state-box">
               <div class="empty-state-icon">📦</div>
               <div class="empty-state-title">No purchase records found</div>
@@ -760,6 +816,7 @@ const Operations = (() => {
       return `
         <tr>
           <td><strong>${escapeHTML(p.item || 'Item')}</strong></td>
+          <td>${p.customer_name ? `<span class="badge" style="background:rgba(59,130,246,0.1);color:#3b82f6;font-weight:600;">${escapeHTML(p.customer_name)}</span>` : '<span style="color:var(--color-text-muted);font-size:0.8125rem;">Direct / Vendor</span>'}</td>
           <td>${p.quantity || 1}</td>
           <td>${formatDate(p.created_at)}</td>
           <td style="font-weight:700;">${formatCurrency(p.total_amount)}</td>
@@ -1790,25 +1847,156 @@ const Operations = (() => {
     loadBanks();
   }
 
+  // Bank & Payment Row Helpers
+  function renderBankSelectOptions(selectedId = '') {
+    const activeBanks = cachedBanks.filter(b => b.status === 'active' || !b.status);
+    return '<option value="">Select Bank Account...</option>' +
+      activeBanks.map(b => `<option value="${b.id}" ${b.id === selectedId ? 'selected' : ''}>${escapeHTML(b.bank_name)} (${escapeHTML(b.account_number || 'Main')})</option>`).join('');
+  }
+
+  // Line Sale: Customer Balance & Bank Rows
+  async function handleLineSaleCustomerChange() {
+    const sel = document.getElementById('ls-form-customer');
+    const custId = sel ? sel.value : null;
+    const box = document.getElementById('ls-customer-balance-box');
+
+    if (!custId) {
+      lineSaleCustomerBalance = null;
+      if (box) box.style.display = 'none';
+      calcLineSaleDue();
+      return;
+    }
+
+    const badge = document.getElementById('ls-cust-balance-badge');
+    if (badge) {
+      badge.textContent = 'Fetching...';
+      badge.style.cssText = 'background: rgba(148, 163, 184, 0.2); color: #475569;';
+    }
+    if (box) box.style.display = 'block';
+
+    const res = await window.API.get(`/tenant/customers/${custId}/balance`);
+    if (!res.ok || !res.data) {
+      const cached = cachedCustomers.find(c => c.id === custId);
+      lineSaleCustomerBalance = cached ? parseFloat(cached.current_balance) || 0 : 0;
+    } else {
+      lineSaleCustomerBalance = parseFloat(res.data.current_balance) || 0;
+    }
+
+    calcLineSaleDue();
+  }
+
+  function addLineSaleBankRow(bankId = '', amount = '') {
+    const container = document.getElementById('ls-bank-payments-container');
+    if (!container) return;
+    lineSaleBankRowCount++;
+    const rowId = `ls-bank-row-${lineSaleBankRowCount}`;
+
+    const row = document.createElement('div');
+    row.id = rowId;
+    row.className = 'bank-payment-row';
+    row.innerHTML = `
+      <select class="form-control select-bank ls-bank-select" required onchange="Operations.validateLineSaleBanks(); Operations.calcLineSaleDue();">
+        ${renderBankSelectOptions(bankId)}
+      </select>
+      <input type="number" step="0.01" class="form-control bank-amount-input ls-bank-amount" min="0.01" required placeholder="Amount (₹)" value="${amount}" oninput="Operations.calcLineSaleDue();">
+      <button type="button" class="btn-remove-bank" title="Remove Bank Payment" onclick="Operations.removeLineSaleBankRow('${rowId}')">✕</button>
+    `;
+    container.appendChild(row);
+    validateLineSaleBanks();
+    calcLineSaleDue();
+  }
+
+  function removeLineSaleBankRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) row.remove();
+    validateLineSaleBanks();
+    calcLineSaleDue();
+  }
+
+  function validateLineSaleBanks() {
+    const selects = document.querySelectorAll('#ls-bank-payments-container .ls-bank-select');
+    const warning = document.getElementById('ls-bank-duplicate-warning');
+    const selected = [];
+    let hasDuplicate = false;
+
+    selects.forEach(s => {
+      const val = s.value;
+      if (val) {
+        if (selected.includes(val)) {
+          hasDuplicate = true;
+          s.style.borderColor = 'var(--color-error)';
+        } else {
+          selected.push(val);
+          s.style.borderColor = '';
+        }
+      } else {
+        s.style.borderColor = '';
+      }
+    });
+
+    if (warning) warning.style.display = hasDuplicate ? 'block' : 'none';
+    return !hasDuplicate;
+  }
+
   // Line Sale: Calculations & Creation
   function calcLineSaleDue() {
     const total = parseFloat(document.getElementById('ls-form-amount')?.value) || 0;
     const cash = parseFloat(document.getElementById('ls-form-cash')?.value) || 0;
-    const bank = parseFloat(document.getElementById('ls-form-bank-amount')?.value) || 0;
-    const collected = cash + bank;
+
+    let bankTotal = 0;
+    document.querySelectorAll('#ls-bank-payments-container .ls-bank-amount').forEach(inp => {
+      const v = parseFloat(inp.value) || 0;
+      if (v > 0) bankTotal += v;
+    });
+
+    const collected = cash + bankTotal;
     const due = Math.max(0, total - collected);
 
+    const elCash = document.getElementById('ls-calc-cash');
+    const elBank = document.getElementById('ls-calc-bank');
     const elCollected = document.getElementById('ls-calc-collected');
     const elDue = document.getElementById('ls-calc-due');
     const elWarning = document.getElementById('ls-calc-warning');
     const btn = document.getElementById('btn-submit-line-sale');
 
+    if (elCash) elCash.textContent = formatCurrency(cash);
+    if (elBank) elBank.textContent = formatCurrency(bankTotal);
     if (elCollected) elCollected.textContent = formatCurrency(collected);
     if (elDue) elDue.textContent = formatCurrency(due);
 
+    // Update customer live balance preview if selected
+    if (lineSaleCustomerBalance !== null) {
+      const badge = document.getElementById('ls-cust-balance-badge');
+      const elSaleDue = document.getElementById('ls-cust-sale-due');
+      const elResulting = document.getElementById('ls-cust-resulting-balance');
+      const bal = lineSaleCustomerBalance;
+
+      if (badge) {
+        if (bal > 0) {
+          badge.textContent = `${formatCurrency(bal)} (Outstanding Due)`;
+          badge.style.cssText = 'background: rgba(245, 158, 11, 0.15); color: #d97706; font-weight: 700;';
+        } else if (bal < 0) {
+          badge.textContent = `${formatCurrency(Math.abs(bal))} (Credit / Advance)`;
+          badge.style.cssText = 'background: rgba(59, 130, 246, 0.15); color: #2563eb; font-weight: 700;';
+        } else {
+          badge.textContent = '₹0.00 (No Outstanding)';
+          badge.style.cssText = 'background: rgba(16, 185, 129, 0.15); color: #059669; font-weight: 700;';
+        }
+      }
+      if (elSaleDue) elSaleDue.textContent = formatCurrency(due);
+      if (elResulting) {
+        const resulting = bal + due;
+        elResulting.textContent = formatCurrency(resulting);
+        elResulting.style.color = resulting > 0 ? 'var(--color-warning)' : resulting < 0 ? '#2563eb' : 'var(--color-success)';
+      }
+    }
+
+    const hasDuplicateBanks = !validateLineSaleBanks();
     if (total > 0 && collected > total) {
       if (elWarning) elWarning.style.display = 'block';
       if (elCollected) elCollected.style.color = 'var(--color-error)';
+      if (btn) btn.disabled = true;
+    } else if (hasDuplicateBanks) {
       if (btn) btn.disabled = true;
     } else {
       if (elWarning) elWarning.style.display = 'none';
@@ -1824,14 +2012,48 @@ const Operations = (() => {
     const customerID = document.getElementById('ls-form-customer').value;
     const amount = parseFloat(document.getElementById('ls-form-amount').value) || 0;
     const cashIn = parseFloat(document.getElementById('ls-form-cash').value) || 0;
-    const bankID = document.getElementById('ls-form-bank').value || null;
-    const bankAmount = parseFloat(document.getElementById('ls-form-bank-amount').value) || 0;
-    const collected = cashIn + bankAmount;
 
-    if (bankAmount > 0 && (!bankID || bankID === '')) {
-      showModalError('modal-add-line-sale', 'Please select a specific bank account for the bank payment amount.');
-      return;
-    }
+    // Collect bank payments from dynamic rows
+    const bankPayments = [];
+    const seenBanks = new Set();
+    let hasBankError = false;
+
+    document.querySelectorAll('#ls-bank-payments-container .bank-payment-row').forEach(row => {
+      const select = row.querySelector('.ls-bank-select');
+      const input = row.querySelector('.ls-bank-amount');
+      const bankId = select?.value;
+      const bAmt = parseFloat(input?.value) || 0;
+
+      if (!bankId) {
+        showModalError('modal-add-line-sale', 'Please select a bank account for all bank payment rows.');
+        hasBankError = true;
+        return;
+      }
+      if (bAmt <= 0) {
+        showModalError('modal-add-line-sale', 'Bank payment amount must be greater than zero.');
+        hasBankError = true;
+        return;
+      }
+      if (seenBanks.has(bankId)) {
+        showModalError('modal-add-line-sale', 'Duplicate bank selected in payment rows.');
+        hasBankError = true;
+        return;
+      }
+      seenBanks.add(bankId);
+      const bObj = cachedBanks.find(b => b.id === bankId);
+      bankPayments.push({
+        bank_id: bankId,
+        bank_name: bObj ? bObj.bank_name : '',
+        amount: bAmt,
+        note: 'Bank payment'
+      });
+    });
+
+    if (hasBankError) return;
+
+    let totalBank = 0;
+    bankPayments.forEach(bp => { totalBank += bp.amount; });
+    const collected = cashIn + totalBank;
 
     if (amount > 0 && collected > amount) {
       showModalError('modal-add-line-sale', 'Collected amount cannot exceed the total invoice amount.');
@@ -1848,14 +2070,14 @@ const Operations = (() => {
         note: 'Cash collection'
       });
     }
-    if (bankAmount > 0 && bankID) {
+    bankPayments.forEach(bp => {
       payments.push({
         payment_method: 'bank',
-        bank_id: bankID,
-        amount: bankAmount,
-        note: 'Bank / UPI collection'
+        bank_id: bp.bank_id,
+        amount: bp.amount,
+        note: bp.note || 'Bank payment'
       });
-    }
+    });
 
     const payload = {
       customer_id: customerID,
@@ -1863,8 +2085,10 @@ const Operations = (() => {
       salesman: document.getElementById('ls-form-salesman').value.trim(),
       total_amount: amount,
       total_cash_in: cashIn,
-      bank_amount: bankAmount,
-      bank_id: bankID,
+      cash_amount: cashIn,
+      bank_amount: totalBank,
+      bank_id: bankPayments.length > 0 ? bankPayments[0].bank_id : null,
+      bank_payments: bankPayments,
       note: document.getElementById('ls-form-note').value.trim(),
       payments: payments
     };
@@ -1956,34 +2180,91 @@ const Operations = (() => {
     calcCounterSaleDue();
   }
 
+  // Counter Sale: Multi-Bank Rows & Calculations
+  function addCounterSaleBankRow(bankId = '', amount = '') {
+    const container = document.getElementById('cs-bank-payments-container');
+    if (!container) return;
+    counterSaleBankRowCount++;
+    const rowId = `cs-bank-row-${counterSaleBankRowCount}`;
+
+    const row = document.createElement('div');
+    row.id = rowId;
+    row.className = 'bank-payment-row';
+    row.innerHTML = `
+      <select class="form-control select-bank cs-bank-select" required onchange="Operations.validateCounterSaleBanks(); Operations.calcCounterSaleDue();">
+        ${renderBankSelectOptions(bankId)}
+      </select>
+      <input type="number" step="0.01" class="form-control bank-amount-input cs-bank-amount" min="0.01" required placeholder="Amount (₹)" value="${amount}" oninput="Operations.calcCounterSaleDue();">
+      <button type="button" class="btn-remove-bank" title="Remove Bank Payment" onclick="Operations.removeCounterSaleBankRow('${rowId}')">✕</button>
+    `;
+    container.appendChild(row);
+    validateCounterSaleBanks();
+    calcCounterSaleDue();
+  }
+
+  function removeCounterSaleBankRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) row.remove();
+    validateCounterSaleBanks();
+    calcCounterSaleDue();
+  }
+
+  function validateCounterSaleBanks() {
+    const selects = document.querySelectorAll('#cs-bank-payments-container .cs-bank-select');
+    const warning = document.getElementById('cs-bank-duplicate-warning');
+    const selected = [];
+    let hasDuplicate = false;
+
+    selects.forEach(s => {
+      const val = s.value;
+      if (val) {
+        if (selected.includes(val)) {
+          hasDuplicate = true;
+          s.style.borderColor = 'var(--color-error)';
+        } else {
+          selected.push(val);
+          s.style.borderColor = '';
+        }
+      } else {
+        s.style.borderColor = '';
+      }
+    });
+
+    if (warning) warning.style.display = hasDuplicate ? 'block' : 'none';
+    return !hasDuplicate;
+  }
+
   function calcCounterSaleDue() {
     const total = parseFloat(document.getElementById('cs-form-total')?.value) || 0;
-    const method = document.getElementById('cs-form-method')?.value || 'cash';
-    let cash = parseFloat(document.getElementById('cs-form-cash')?.value) || 0;
-    let bank = parseFloat(document.getElementById('cs-form-account')?.value) || 0;
+    const cash = parseFloat(document.getElementById('cs-form-cash')?.value) || 0;
 
-    if (method === 'cash') {
-      cash = total;
-      bank = 0;
-    } else if (method === 'bank') {
-      cash = 0;
-      bank = total;
-    }
+    let bankTotal = 0;
+    document.querySelectorAll('#cs-bank-payments-container .cs-bank-amount').forEach(inp => {
+      const v = parseFloat(inp.value) || 0;
+      if (v > 0) bankTotal += v;
+    });
 
-    const collected = cash + bank;
+    const collected = cash + bankTotal;
     const due = Math.max(0, total - collected);
 
+    const elCash = document.getElementById('cs-calc-cash');
+    const elBank = document.getElementById('cs-calc-bank');
     const elCollected = document.getElementById('cs-calc-collected');
     const elDue = document.getElementById('cs-calc-due');
     const elWarning = document.getElementById('cs-calc-warning');
     const btn = document.getElementById('btn-submit-counter-sale');
 
+    if (elCash) elCash.textContent = formatCurrency(cash);
+    if (elBank) elBank.textContent = formatCurrency(bankTotal);
     if (elCollected) elCollected.textContent = formatCurrency(collected);
     if (elDue) elDue.textContent = formatCurrency(due);
 
+    const hasDuplicateBanks = !validateCounterSaleBanks();
     if (total > 0 && collected > total) {
       if (elWarning) elWarning.style.display = 'block';
       if (elCollected) elCollected.style.color = 'var(--color-error)';
+      if (btn) btn.disabled = true;
+    } else if (hasDuplicateBanks) {
       if (btn) btn.disabled = true;
     } else {
       if (elWarning) elWarning.style.display = 'none';
@@ -1998,25 +2279,49 @@ const Operations = (() => {
 
     const price = parseFloat(document.getElementById('cs-form-price').value) || 0;
     const total = parseFloat(document.getElementById('cs-form-total').value) || 0;
-    const method = document.getElementById('cs-form-method').value;
-    let cash = parseFloat(document.getElementById('cs-form-cash').value) || 0;
-    let bank = parseFloat(document.getElementById('cs-form-account').value) || 0;
-    const bankID = document.getElementById('cs-form-bank')?.value || null;
+    const cash = parseFloat(document.getElementById('cs-form-cash').value) || 0;
 
-    if (method === 'cash') {
-      cash = total;
-      bank = 0;
-    } else if (method === 'bank') {
-      cash = 0;
-      bank = total;
-    }
+    // Collect bank payments from dynamic rows
+    const bankPayments = [];
+    const seenBanks = new Set();
+    let hasBankError = false;
 
-    const collected = cash + bank;
+    document.querySelectorAll('#cs-bank-payments-container .bank-payment-row').forEach(row => {
+      const select = row.querySelector('.cs-bank-select');
+      const input = row.querySelector('.cs-bank-amount');
+      const bankId = select?.value;
+      const bAmt = parseFloat(input?.value) || 0;
 
-    if (bank > 0 && (!bankID || bankID === '')) {
-      showModalError('modal-add-counter-sale', 'Please select a specific bank account for the bank payment.');
-      return;
-    }
+      if (!bankId) {
+        showModalError('modal-add-counter-sale', 'Please select a bank account for all bank payment rows.');
+        hasBankError = true;
+        return;
+      }
+      if (bAmt <= 0) {
+        showModalError('modal-add-counter-sale', 'Bank payment amount must be greater than zero.');
+        hasBankError = true;
+        return;
+      }
+      if (seenBanks.has(bankId)) {
+        showModalError('modal-add-counter-sale', 'Duplicate bank selected in payment rows.');
+        hasBankError = true;
+        return;
+      }
+      seenBanks.add(bankId);
+      const bObj = cachedBanks.find(b => b.id === bankId);
+      bankPayments.push({
+        bank_id: bankId,
+        bank_name: bObj ? bObj.bank_name : '',
+        amount: bAmt,
+        note: 'Counter sale bank payment'
+      });
+    });
+
+    if (hasBankError) return;
+
+    let totalBank = 0;
+    bankPayments.forEach(bp => { totalBank += bp.amount; });
+    const collected = cash + totalBank;
 
     if (total > 0 && collected > total) {
       showModalError('modal-add-counter-sale', 'Collected amount cannot exceed the total sale amount.');
@@ -2025,15 +2330,24 @@ const Operations = (() => {
 
     setButtonLoading(btn, true);
 
+    let paymentMethod = 'cash';
+    if (cash > 0 && totalBank > 0) {
+      paymentMethod = 'split';
+    } else if (totalBank > 0 && cash === 0) {
+      paymentMethod = 'bank';
+    }
+
     const payload = {
       item: document.getElementById('cs-form-item').value.trim(),
       price: price > 0 ? price : total,
       total_amount: total,
-      payment_method: method,
+      payment_method: paymentMethod,
       cash: cash,
-      bank_amount: bank,
-      bank_id: bankID,
-      account: bank
+      cash_amount: cash,
+      account: totalBank,
+      bank_amount: totalBank,
+      bank_id: bankPayments.length > 0 ? bankPayments[0].bank_id : null,
+      bank_payments: bankPayments
     };
 
     const res = await window.API.post('/tenant/counter-sales', payload);
@@ -2101,12 +2415,79 @@ const Operations = (() => {
     loadDashboardMetrics();
   }
 
+  // Purchase: Customer Balance & Handlers
+  async function handlePurchaseCustomerChange() {
+    const sel = document.getElementById('purch-form-customer');
+    const custId = sel ? sel.value : null;
+    const box = document.getElementById('purch-customer-balance-box');
+
+    if (!custId) {
+      purchaseCustomerBalance = null;
+      if (box) box.style.display = 'none';
+      return;
+    }
+
+    const badge = document.getElementById('purch-cust-balance-badge');
+    if (badge) {
+      badge.textContent = 'Fetching...';
+      badge.style.cssText = 'background: rgba(148, 163, 184, 0.2); color: #475569;';
+    }
+    if (box) box.style.display = 'block';
+
+    const res = await window.API.get(`/tenant/customers/${custId}/balance`);
+    if (!res.ok || !res.data) {
+      const cached = cachedCustomers.find(c => c.id === custId);
+      purchaseCustomerBalance = cached ? parseFloat(cached.current_balance) || 0 : 0;
+    } else {
+      purchaseCustomerBalance = parseFloat(res.data.current_balance) || 0;
+    }
+
+    calcPurchaseBalance();
+  }
+
+  function calcPurchaseBalance() {
+    if (purchaseCustomerBalance === null) return;
+    const total = parseFloat(document.getElementById('purch-form-total')?.value) || 0;
+    const paid = parseFloat(document.getElementById('purch-form-paid')?.value) || 0;
+    const pendingDue = Math.max(0, total - paid);
+
+    const badge = document.getElementById('purch-cust-balance-badge');
+    const elBillDue = document.getElementById('purch-cust-bill-due');
+    const elResulting = document.getElementById('purch-cust-resulting-balance');
+
+    const bal = purchaseCustomerBalance;
+    if (badge) {
+      if (bal > 0) {
+        badge.textContent = `${formatCurrency(bal)} (Outstanding Due)`;
+        badge.style.cssText = 'background: rgba(245, 158, 11, 0.15); color: #d97706; font-weight: 700;';
+      } else if (bal < 0) {
+        badge.textContent = `${formatCurrency(Math.abs(bal))} (Credit / Advance)`;
+        badge.style.cssText = 'background: rgba(59, 130, 246, 0.15); color: #2563eb; font-weight: 700;';
+      } else {
+        badge.textContent = '₹0.00 (No Outstanding)';
+        badge.style.cssText = 'background: rgba(16, 185, 129, 0.15); color: #059669; font-weight: 700;';
+      }
+    }
+
+    if (elBillDue) {
+      elBillDue.textContent = formatCurrency(pendingDue);
+    }
+
+    if (elResulting) {
+      // In business trade with customer/vendor, pending purchase bill due is added
+      const resulting = bal + pendingDue;
+      elResulting.textContent = formatCurrency(resulting);
+      elResulting.style.color = resulting > 0 ? 'var(--color-warning)' : resulting < 0 ? '#2563eb' : 'var(--color-success)';
+    }
+  }
+
   // Purchase: Create
   async function submitAddPurchase(e) {
     e.preventDefault();
     const btn = document.getElementById('btn-submit-purchase');
     setButtonLoading(btn, true);
 
+    const customerID = document.getElementById('purch-form-customer')?.value || null;
     const total = parseFloat(document.getElementById('purch-form-total').value) || 0;
     const paid = parseFloat(document.getElementById('purch-form-paid').value) || 0;
     const method = document.getElementById('purch-form-method').value;
@@ -2123,6 +2504,7 @@ const Operations = (() => {
     }
 
     const payload = {
+      customer_id: customerID && customerID.trim() !== '' ? customerID : null,
       item: document.getElementById('purch-form-item').value.trim(),
       quantity: parseInt(document.getElementById('purch-form-quantity').value) || 1,
       total_amount: total,
@@ -2142,6 +2524,7 @@ const Operations = (() => {
     showToast('Purchase recorded successfully');
     loadPurchases();
     loadDashboardMetrics();
+    loadCustomers();
   }
 
   // Purchase: Edit
@@ -2153,6 +2536,8 @@ const Operations = (() => {
     }
     const p = res.data;
     document.getElementById('edit-purch-id').value = p.id;
+    const custSel = document.getElementById('edit-purch-customer');
+    if (custSel) custSel.value = p.customer_id || '';
     document.getElementById('edit-purch-item').value = p.item || '';
     document.getElementById('edit-purch-quantity').value = p.quantity || 1;
     document.getElementById('edit-purch-total').value = p.total_amount || '0';
@@ -2166,11 +2551,13 @@ const Operations = (() => {
     const id = document.getElementById('edit-purch-id').value;
     setButtonLoading(btn, true);
 
+    const customerID = document.getElementById('edit-purch-customer')?.value || null;
     const qty = parseInt(document.getElementById('edit-purch-quantity').value) || 1;
     const total = parseFloat(document.getElementById('edit-purch-total').value) || 0;
     const paid = parseFloat(document.getElementById('edit-purch-paid').value) || 0;
 
     const payload = {
+      customer_id: customerID && customerID.trim() !== '' ? customerID : null,
       item: document.getElementById('edit-purch-item').value.trim(),
       quantity: qty,
       total_amount: total,
@@ -2189,6 +2576,7 @@ const Operations = (() => {
     showToast('Purchase updated successfully');
     loadPurchases();
     loadDashboardMetrics();
+    loadCustomers();
   }
 
   // Expense: Create
@@ -3001,6 +3389,16 @@ const Operations = (() => {
     calcLineSaleDue,
     handleCounterSaleMethodChange,
     calcCounterSaleDue,
+    filterCustomerDropdown,
+    handlePurchaseCustomerChange,
+    calcPurchaseBalance,
+    handleLineSaleCustomerChange,
+    addLineSaleBankRow,
+    removeLineSaleBankRow,
+    validateLineSaleBanks,
+    addCounterSaleBankRow,
+    removeCounterSaleBankRow,
+    validateCounterSaleBanks,
     openAdjustCustomerBalance,
     handleCustomerAdjustmentTypeChange,
     calcCustomerAdjustmentPreview,

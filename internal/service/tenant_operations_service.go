@@ -9,11 +9,19 @@ import (
 	"github.com/Varunjp/vyavsa/internal/auth"
 	"github.com/Varunjp/vyavsa/internal/domain"
 	"github.com/Varunjp/vyavsa/internal/dto"
+	"github.com/Varunjp/vyavsa/internal/metrics"
 	"github.com/Varunjp/vyavsa/internal/repository"
 	appErrors "github.com/Varunjp/vyavsa/pkg/errors"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
+
+type validatedBankPayment struct {
+	BankID   uuid.UUID
+	BankName string
+	Amount   decimal.Decimal
+	Note     string
+}
 
 // TenantOperationsService orchestrates operational business logic for Tenant Admin and Tenant Users
 type TenantOperationsService struct {
@@ -31,6 +39,7 @@ type TenantOperationsService struct {
 	summaryRepo   repository.TenantFinancialSummaryRepository
 	transactor    repository.Transactor
 	hasher        auth.PasswordHasher
+	metrics       *metrics.Metrics
 	location      *time.Location
 	logger        *slog.Logger
 }
@@ -81,6 +90,10 @@ func SetDefaultBusinessLocation(loc *time.Location) {
 func (s *TenantOperationsService) SetLocation(loc *time.Location) {
 	s.location = loc
 	SetDefaultBusinessLocation(loc)
+}
+
+func (s *TenantOperationsService) SetMetrics(m *metrics.Metrics) {
+	s.metrics = m
 }
 
 // todayString returns today's date formatted as YYYY-MM-DD in the configured business timezone
@@ -440,6 +453,19 @@ func (s *TenantOperationsService) ListCustomerAdjustments(ctx context.Context, t
 	return s.custRepo.ListAdjustments(ctx, tenantID, customerID, page, pageSize)
 }
 
+func (s *TenantOperationsService) GetCustomerBalance(ctx context.Context, tenantID, customerID uuid.UUID) (*dto.CustomerBalanceResponse, error) {
+	cust, err := s.custRepo.GetByID(ctx, tenantID, customerID)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.CustomerBalanceResponse{
+		CustomerID:     cust.ID,
+		CustomerName:   cust.CustomerName,
+		CurrentBalance: cust.CurrentBalance,
+		Status:         cust.Status,
+	}, nil
+}
+
 // ==========================================
 // 4. Bank Management (Admin only)
 // ==========================================
@@ -555,66 +581,142 @@ func (s *TenantOperationsService) ListBankTransactions(ctx context.Context, tena
 
 func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID uuid.UUID, role string, req *dto.CreateLineSaleRequest) (*domain.LineSale, error) {
 	if req.TotalAmount.IsNegative() {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("negative_total_amount")
+		}
 		return nil, validationErr("total_amount", "total amount cannot be negative")
 	}
 
 	// Verify customer belongs to tenant
 	cust, err := s.custRepo.GetByID(ctx, tenantID, req.CustomerID)
 	if err != nil {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("invalid_customer")
+		}
 		return nil, appErrors.NewBadRequest("invalid customer for tenant")
 	}
 
-	var cashReceived, bankReceived decimal.Decimal
-	var bankID *uuid.UUID
-	var bankName string
+	var cashReceived decimal.Decimal
+	if req.CashAmount != nil {
+		if req.CashAmount.IsNegative() {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("negative_cash_amount")
+			}
+			return nil, validationErr("cash_amount", "cash amount cannot be negative")
+		}
+		cashReceived = *req.CashAmount
+	} else if req.TotalCashIn.IsNegative() {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("negative_cash_amount")
+		}
+		return nil, validationErr("total_cash_in", "cash amount cannot be negative")
+	} else if req.TotalCashIn.GreaterThan(decimal.Zero) {
+		cashReceived = req.TotalCashIn
+	}
 
-	if len(req.Payments) > 0 {
+	// Extract raw bank splits
+	var rawBankSplits []dto.BankPaymentSplitRequest
+	if len(req.BankPayments) > 0 {
+		rawBankSplits = req.BankPayments
+	} else if len(req.Payments) > 0 {
 		for _, p := range req.Payments {
 			if p.Amount.IsNegative() || p.Amount.IsZero() {
+				if s.metrics != nil {
+					s.metrics.RecordSalesPaymentFailed("invalid_payment_amount")
+				}
 				return nil, validationErr("payment_amount", "payment amount must be greater than zero")
 			}
 			if p.PaymentMethod == "cash" {
 				cashReceived = cashReceived.Add(p.Amount)
-			} else if p.PaymentMethod == "bank" || p.PaymentMethod == "upi" || p.PaymentMethod == "online" {
-				bankReceived = bankReceived.Add(p.Amount)
+			} else if p.PaymentMethod == "bank" || p.PaymentMethod == "upi" || p.PaymentMethod == "online" || p.PaymentMethod == "cheque" || p.PaymentMethod == "other" {
 				if p.BankID == nil || *p.BankID == uuid.Nil {
+					if s.metrics != nil {
+						s.metrics.RecordSalesPaymentFailed("missing_bank_id")
+					}
 					return nil, validationErr("bank_id", "bank account must be selected for bank payments")
 				}
-				bankID = p.BankID
+				rawBankSplits = append(rawBankSplits, dto.BankPaymentSplitRequest{
+					BankID:   *p.BankID,
+					BankName: p.BankName,
+					Amount:   p.Amount,
+					Note:     p.Note,
+				})
 			}
 		}
-	} else {
-		if req.TotalCashIn.GreaterThan(decimal.Zero) {
-			cashReceived = req.TotalCashIn
-		}
-		if req.BankAmount.GreaterThan(decimal.Zero) {
-			bankReceived = req.BankAmount
-			if req.BankID == nil || *req.BankID == uuid.Nil {
-				return nil, validationErr("bank_id", "bank account must be selected when bank amount is specified")
+	} else if req.BankAmount.GreaterThan(decimal.Zero) {
+		if req.BankID == nil || *req.BankID == uuid.Nil {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("missing_bank_id")
 			}
-			bankID = req.BankID
+			return nil, validationErr("bank_id", "bank account must be selected when bank amount is specified")
 		}
+		rawBankSplits = append(rawBankSplits, dto.BankPaymentSplitRequest{
+			BankID: *req.BankID,
+			Amount: req.BankAmount,
+		})
+	}
+
+	// Validate bank payments & tenant isolation
+	seenBanks := make(map[uuid.UUID]bool)
+	validatedBanks := make([]validatedBankPayment, 0, len(rawBankSplits))
+	var bankReceived decimal.Decimal
+
+	for _, bp := range rawBankSplits {
+		if bp.BankID == uuid.Nil {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("empty_bank_id")
+			}
+			return nil, validationErr("bank_payments", "bank account must be selected for each bank payment")
+		}
+		if seenBanks[bp.BankID] {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("duplicate_bank")
+			}
+			return nil, validationErr("bank_payments", "duplicate bank account selected in payments")
+		}
+		seenBanks[bp.BankID] = true
+
+		if bp.Amount.IsNegative() || bp.Amount.IsZero() {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("zero_or_negative_bank_amount")
+			}
+			return nil, validationErr("bank_payments", "bank payment amount must be greater than zero")
+		}
+
+		bank, err := s.bankRepo.GetByID(ctx, tenantID, bp.BankID)
+		if err != nil {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("invalid_bank")
+			}
+			return nil, appErrors.NewBadRequest("invalid bank account specified for line sale payment")
+		}
+		if bank.Status != "active" {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("inactive_bank")
+			}
+			return nil, appErrors.NewBadRequest("selected bank account is inactive")
+		}
+
+		validatedBanks = append(validatedBanks, validatedBankPayment{
+			BankID:   bank.ID,
+			BankName: bank.BankName,
+			Amount:   bp.Amount,
+			Note:     bp.Note,
+		})
+		bankReceived = bankReceived.Add(bp.Amount)
 	}
 
 	collectedAmount := cashReceived.Add(bankReceived)
 	if collectedAmount.GreaterThan(req.TotalAmount) {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("collected_exceeds_total")
+		}
 		return nil, validationErr("collected_amount", "collected amount cannot exceed sale total")
 	}
 
 	due := req.TotalAmount.Sub(collectedAmount)
 	if due.IsNegative() {
 		due = decimal.Zero
-	}
-
-	if bankReceived.GreaterThan(decimal.Zero) {
-		if bankID == nil || *bankID == uuid.Nil {
-			return nil, validationErr("bank_id", "bank account must be selected for bank payment")
-		}
-		bank, err := s.bankRepo.GetByID(ctx, tenantID, *bankID)
-		if err != nil {
-			return nil, appErrors.NewBadRequest("invalid bank account specified for line sale payment")
-		}
-		bankName = bank.BankName
 	}
 
 	sale := &domain.LineSale{
@@ -631,7 +733,7 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 		Balance:         due,
 	}
 
-	payments := make([]domain.LineSalePayment, 0, 2)
+	payments := make([]domain.LineSalePayment, 0, len(validatedBanks)+1)
 	if cashReceived.GreaterThan(decimal.Zero) {
 		payments = append(payments, domain.LineSalePayment{
 			TenantID:      tenantID,
@@ -640,14 +742,18 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 			Note:          "Cash payment",
 		})
 	}
-	if bankReceived.GreaterThan(decimal.Zero) {
+	for _, vb := range validatedBanks {
+		note := vb.Note
+		if note == "" {
+			note = "Bank payment"
+		}
 		payments = append(payments, domain.LineSalePayment{
 			TenantID:      tenantID,
 			PaymentMethod: "bank",
-			BankID:        bankID,
-			BankName:      bankName,
-			Amount:        bankReceived,
-			Note:          "Bank payment",
+			BankID:        &vb.BankID,
+			BankName:      vb.BankName,
+			Amount:        vb.Amount,
+			Note:          note,
 		})
 	}
 
@@ -656,21 +762,21 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 			return err
 		}
 
-		if bankReceived.GreaterThan(decimal.Zero) && bankID != nil {
-			if err := s.bankRepo.AdjustBalance(txCtx, tenantID, *bankID, bankReceived); err != nil {
-				return fmt.Errorf("failed to adjust bank balance: %w", err)
+		for _, vb := range validatedBanks {
+			if err := s.bankRepo.AdjustBalance(txCtx, tenantID, vb.BankID, vb.Amount); err != nil {
+				return fmt.Errorf("failed to adjust bank balance for bank %s: %w", vb.BankName, err)
 			}
 			tx := &domain.BankTransaction{
 				TenantID:        tenantID,
-				BankID:          *bankID,
-				Amount:          bankReceived,
+				BankID:          vb.BankID,
+				Amount:          vb.Amount,
 				TransactionType: "credit",
 				Reason:          "Line Sale: " + cust.CustomerName,
 				SaleType:        "line_sale",
 				SaleID:          &sale.ID,
 			}
 			if err := s.bankRepo.CreateTransaction(txCtx, tx); err != nil {
-				return fmt.Errorf("failed to record bank transaction: %w", err)
+				return fmt.Errorf("failed to record bank transaction for bank %s: %w", vb.BankName, err)
 			}
 		}
 
@@ -700,7 +806,19 @@ func (s *TenantOperationsService) CreateLineSale(ctx context.Context, tenantID u
 		return nil
 	})
 	if err != nil {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("transaction_error")
+		}
 		return nil, err
+	}
+
+	if s.metrics != nil {
+		if cashReceived.GreaterThan(decimal.Zero) {
+			s.metrics.RecordSalesPayment("cash", cashReceived.InexactFloat64())
+		}
+		for _, vb := range validatedBanks {
+			s.metrics.RecordSalesPayment("bank", vb.Amount.InexactFloat64())
+		}
 	}
 
 	return sale, nil
@@ -840,46 +958,130 @@ func (s *TenantOperationsService) ListLineSales(ctx context.Context, tenantID uu
 
 func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantID uuid.UUID, role string, req *dto.CreateCounterSaleRequest) (*domain.CounterSale, error) {
 	if req.TotalAmount.IsNegative() {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("negative_total_amount")
+		}
 		return nil, validationErr("total_amount", "total amount cannot be negative")
 	}
 
-	var cashReceived, bankReceived decimal.Decimal
-	var bankID *uuid.UUID
-	var bankName string
+	var cashReceived decimal.Decimal
+	if req.CashAmount != nil {
+		if req.CashAmount.IsNegative() {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("negative_cash_amount")
+			}
+			return nil, validationErr("cash_amount", "cash amount cannot be negative")
+		}
+		cashReceived = *req.CashAmount
+	} else if req.Cash.IsNegative() {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("negative_cash_amount")
+		}
+		return nil, validationErr("cash", "cash amount cannot be negative")
+	} else if req.Cash.GreaterThan(decimal.Zero) {
+		cashReceived = req.Cash
+	}
 
-	if len(req.Payments) > 0 {
+	var rawBankSplits []dto.BankPaymentSplitRequest
+	if len(req.BankPayments) > 0 {
+		rawBankSplits = req.BankPayments
+	} else if len(req.Payments) > 0 {
 		for _, p := range req.Payments {
 			if p.Amount.IsNegative() || p.Amount.IsZero() {
+				if s.metrics != nil {
+					s.metrics.RecordSalesPaymentFailed("invalid_payment_amount")
+				}
 				return nil, validationErr("payment_amount", "payment amount must be greater than zero")
 			}
 			if p.PaymentMethod == "cash" {
 				cashReceived = cashReceived.Add(p.Amount)
-			} else if p.PaymentMethod == "bank" || p.PaymentMethod == "online" || p.PaymentMethod == "upi" {
-				bankReceived = bankReceived.Add(p.Amount)
+			} else if p.PaymentMethod == "bank" || p.PaymentMethod == "online" || p.PaymentMethod == "upi" || p.PaymentMethod == "cheque" || p.PaymentMethod == "other" {
 				if p.BankID == nil || *p.BankID == uuid.Nil {
+					if s.metrics != nil {
+						s.metrics.RecordSalesPaymentFailed("missing_bank_id")
+					}
 					return nil, validationErr("bank_id", "bank account must be selected for bank payments")
 				}
-				bankID = p.BankID
+				rawBankSplits = append(rawBankSplits, dto.BankPaymentSplitRequest{
+					BankID:   *p.BankID,
+					BankName: p.BankName,
+					Amount:   p.Amount,
+					Note:     p.Note,
+				})
 			}
 		}
-	} else {
-		if req.Cash.GreaterThan(decimal.Zero) {
-			cashReceived = req.Cash
-		}
-		if req.BankAmount.GreaterThan(decimal.Zero) {
-			bankReceived = req.BankAmount
-			if req.BankID == nil || *req.BankID == uuid.Nil {
-				return nil, validationErr("bank_id", "bank account must be selected when bank amount is specified")
+	} else if req.BankAmount.GreaterThan(decimal.Zero) {
+		if req.BankID == nil || *req.BankID == uuid.Nil {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("missing_bank_id")
 			}
-			bankID = req.BankID
-		} else if (req.PaymentMethod == "bank" || req.PaymentMethod == "online" || req.PaymentMethod == "upi") && req.Account.GreaterThan(decimal.Zero) && req.BankID != nil {
-			bankReceived = req.Account
-			bankID = req.BankID
+			return nil, validationErr("bank_id", "bank account must be selected when bank amount is specified")
 		}
+		rawBankSplits = append(rawBankSplits, dto.BankPaymentSplitRequest{
+			BankID: *req.BankID,
+			Amount: req.BankAmount,
+		})
+	} else if (req.PaymentMethod == "bank" || req.PaymentMethod == "online" || req.PaymentMethod == "upi") && req.Account.GreaterThan(decimal.Zero) && req.BankID != nil {
+		rawBankSplits = append(rawBankSplits, dto.BankPaymentSplitRequest{
+			BankID: *req.BankID,
+			Amount: req.Account,
+		})
+	}
+
+	seenBanks := make(map[uuid.UUID]bool)
+	validatedBanks := make([]validatedBankPayment, 0, len(rawBankSplits))
+	var bankReceived decimal.Decimal
+
+	for _, bp := range rawBankSplits {
+		if bp.BankID == uuid.Nil {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("empty_bank_id")
+			}
+			return nil, validationErr("bank_payments", "bank account must be selected for each bank payment")
+		}
+		if seenBanks[bp.BankID] {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("duplicate_bank")
+			}
+			return nil, validationErr("bank_payments", "duplicate bank account selected in payments")
+		}
+		seenBanks[bp.BankID] = true
+
+		if bp.Amount.IsNegative() || bp.Amount.IsZero() {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("zero_or_negative_bank_amount")
+			}
+			return nil, validationErr("bank_payments", "bank payment amount must be greater than zero")
+		}
+
+		bank, err := s.bankRepo.GetByID(ctx, tenantID, bp.BankID)
+		if err != nil {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("invalid_bank")
+			}
+			return nil, appErrors.NewBadRequest("invalid bank account specified for counter sale")
+		}
+		if bank.Status != "active" {
+			if s.metrics != nil {
+				s.metrics.RecordSalesPaymentFailed("inactive_bank")
+			}
+			return nil, appErrors.NewBadRequest("selected bank account is not active")
+		}
+
+		validatedBanks = append(validatedBanks, validatedBankPayment{
+			BankID:   bank.ID,
+			BankName: bank.BankName,
+			Amount:   bp.Amount,
+			Note:     bp.Note,
+		})
+		bankReceived = bankReceived.Add(bp.Amount)
 	}
 
 	collectedAmount := cashReceived.Add(bankReceived)
 	if collectedAmount.GreaterThan(req.TotalAmount) {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("collected_exceeds_total")
+		}
 		return nil, validationErr("collected_amount", "collected amount cannot exceed sale total")
 	}
 
@@ -888,15 +1090,20 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 		due = decimal.Zero
 	}
 
-	if bankReceived.GreaterThan(decimal.Zero) {
-		if bankID == nil || *bankID == uuid.Nil {
-			return nil, validationErr("bank_id", "bank account must be selected for bank payment")
+	var primaryBankID *uuid.UUID
+	if len(validatedBanks) > 0 {
+		primaryBankID = &validatedBanks[0].BankID
+	}
+
+	method := req.PaymentMethod
+	if method == "" {
+		if cashReceived.GreaterThan(decimal.Zero) && bankReceived.GreaterThan(decimal.Zero) {
+			method = "split"
+		} else if bankReceived.GreaterThan(decimal.Zero) {
+			method = "bank"
+		} else {
+			method = "cash"
 		}
-		bank, err := s.bankRepo.GetByID(ctx, tenantID, *bankID)
-		if err != nil {
-			return nil, appErrors.NewBadRequest("invalid bank account specified for counter sale")
-		}
-		bankName = bank.BankName
 	}
 
 	sale := &domain.CounterSale{
@@ -904,15 +1111,15 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 		Item:            req.Item,
 		Price:           req.Price,
 		TotalAmount:     req.TotalAmount,
-		PaymentMethod:   req.PaymentMethod,
+		PaymentMethod:   method,
 		Cash:            cashReceived,
 		BankAmount:      bankReceived,
-		BankID:          bankID,
+		BankID:          primaryBankID,
 		CollectedAmount: collectedAmount,
 		Account:         due,
 	}
 
-	payments := make([]domain.CounterSalePayment, 0, 2)
+	payments := make([]domain.CounterSalePayment, 0, len(validatedBanks)+1)
 	if cashReceived.GreaterThan(decimal.Zero) {
 		payments = append(payments, domain.CounterSalePayment{
 			TenantID:      tenantID,
@@ -921,14 +1128,18 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 			Note:          "Cash payment",
 		})
 	}
-	if bankReceived.GreaterThan(decimal.Zero) {
+	for _, vb := range validatedBanks {
+		note := vb.Note
+		if note == "" {
+			note = "Bank payment"
+		}
 		payments = append(payments, domain.CounterSalePayment{
 			TenantID:      tenantID,
 			PaymentMethod: "bank",
-			BankID:        bankID,
-			BankName:      bankName,
-			Amount:        bankReceived,
-			Note:          "Bank payment",
+			BankID:        &vb.BankID,
+			BankName:      vb.BankName,
+			Amount:        vb.Amount,
+			Note:          note,
 		})
 	}
 
@@ -937,21 +1148,21 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 			return err
 		}
 
-		if bankReceived.GreaterThan(decimal.Zero) && bankID != nil {
-			if err := s.bankRepo.AdjustBalance(txCtx, tenantID, *bankID, bankReceived); err != nil {
-				return fmt.Errorf("failed to adjust bank balance: %w", err)
+		for _, vb := range validatedBanks {
+			if err := s.bankRepo.AdjustBalance(txCtx, tenantID, vb.BankID, vb.Amount); err != nil {
+				return fmt.Errorf("failed to adjust bank balance for bank %s: %w", vb.BankName, err)
 			}
 			tx := &domain.BankTransaction{
 				TenantID:        tenantID,
-				BankID:          *bankID,
-				Amount:          bankReceived,
+				BankID:          vb.BankID,
+				Amount:          vb.Amount,
 				TransactionType: "credit",
 				Reason:          "Counter Sale: " + sale.Item,
 				SaleType:        "counter_sale",
 				SaleID:          &sale.ID,
 			}
 			if err := s.bankRepo.CreateTransaction(txCtx, tx); err != nil {
-				return fmt.Errorf("failed to record bank transaction: %w", err)
+				return fmt.Errorf("failed to record bank transaction for bank %s: %w", vb.BankName, err)
 			}
 		}
 
@@ -972,7 +1183,19 @@ func (s *TenantOperationsService) CreateCounterSale(ctx context.Context, tenantI
 		return nil
 	})
 	if err != nil {
+		if s.metrics != nil {
+			s.metrics.RecordSalesPaymentFailed("transaction_error")
+		}
 		return nil, err
+	}
+
+	if s.metrics != nil {
+		if cashReceived.GreaterThan(decimal.Zero) {
+			s.metrics.RecordSalesPayment("cash", cashReceived.InexactFloat64())
+		}
+		for _, vb := range validatedBanks {
+			s.metrics.RecordSalesPayment("bank", vb.Amount.InexactFloat64())
+		}
 	}
 
 	return sale, nil
@@ -1113,6 +1336,18 @@ func (s *TenantOperationsService) CreatePurchase(ctx context.Context, tenantID u
 		TotalPending: pending,
 	}
 
+	if req.CustomerID != nil && *req.CustomerID != uuid.Nil {
+		cust, err := s.custRepo.GetByID(ctx, tenantID, *req.CustomerID)
+		if err != nil {
+			return nil, appErrors.NewBadRequest("invalid customer for tenant")
+		}
+		if cust.Status != "active" {
+			return nil, appErrors.NewBadRequest("customer is not active")
+		}
+		purchase.CustomerID = &cust.ID
+		purchase.CustomerName = cust.CustomerName
+	}
+
 	payments := make([]domain.TenantPurchasePayment, len(req.Payments))
 	var cashPaid, bankPaid decimal.Decimal
 	for i, p := range req.Payments {
@@ -1201,6 +1436,23 @@ func (s *TenantOperationsService) UpdatePurchase(ctx context.Context, tenantID, 
 	if req.TotalPaid != nil {
 		purchase.TotalPaid = *req.TotalPaid
 		purchase.TotalPending = purchase.TotalAmount.Sub(purchase.TotalPaid)
+	}
+
+	if req.CustomerID != nil {
+		if *req.CustomerID == uuid.Nil {
+			purchase.CustomerID = nil
+			purchase.CustomerName = ""
+		} else {
+			cust, err := s.custRepo.GetByID(ctx, tenantID, *req.CustomerID)
+			if err != nil {
+				return nil, appErrors.NewBadRequest("invalid customer for tenant")
+			}
+			if cust.Status != "active" {
+				return nil, appErrors.NewBadRequest("customer is not active")
+			}
+			purchase.CustomerID = &cust.ID
+			purchase.CustomerName = cust.CustomerName
+		}
 	}
 
 	deltaPaid := purchase.TotalPaid.Sub(oldPaid)

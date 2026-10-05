@@ -302,6 +302,9 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		hasher,
 		s.log.Logger,
 	)
+	if s.metrics != nil {
+		opsService.SetMetrics(s.metrics)
+	}
 	if s.cfg.App.Location != nil {
 		opsService.SetLocation(s.cfg.App.Location)
 	}
@@ -431,6 +434,9 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/purchases/:id", opsHandler.GetPurchaseByID)
 			tenant.PUT("/purchases/:id", opsHandler.UpdatePurchase)
 			tenant.DELETE("/purchases/:id", opsHandler.DeletePurchase)
+
+			// Customer balance (accessible to all tenant staff for transactions)
+			tenant.GET("/customers/:id/balance", opsHandler.GetCustomerBalance)
 
 			// Expenses (Admin & Tenant User)
 			tenant.POST("/expenses", opsHandler.CreateExpense)

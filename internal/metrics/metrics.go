@@ -40,6 +40,13 @@ type Metrics struct {
 	tenantPlanCacheHitsTotal          prometheus.Counter
 	tenantPlanCacheMissesTotal        prometheus.Counter
 	tenantPlanValidationFailuresTotal prometheus.Counter
+
+	// Payment Metrics
+	salesPaymentCreatedTotal *prometheus.CounterVec
+	salesPaymentFailedTotal  *prometheus.CounterVec
+	salesPaymentAmount       *prometheus.CounterVec
+	bankPaymentCreatedTotal  prometheus.Counter
+	cashPaymentCreatedTotal  prometheus.Counter
 }
 
 // New initializes application metrics and registers them with a custom Prometheus registry
@@ -214,6 +221,54 @@ func New() *Metrics {
 				Help:      "Total count of tenant plan mutation validation failures",
 			},
 		),
+
+		salesPaymentCreatedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "sales_payment_created_total",
+				Help:      "Total count of recorded sales payments by payment method",
+			},
+			[]string{"payment_method"},
+		),
+
+		salesPaymentFailedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "sales_payment_failed_total",
+				Help:      "Total count of rejected or failed sales payments",
+			},
+			[]string{"reason"},
+		),
+
+		salesPaymentAmount: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "sales_payment_amount_total",
+				Help:      "Total cumulative amount collected in sales payments",
+			},
+			[]string{"payment_method"},
+		),
+
+		bankPaymentCreatedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "bank_payment_created_total",
+				Help:      "Total count of individual bank payment transactions recorded",
+			},
+		),
+
+		cashPaymentCreatedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "cash_payment_created_total",
+				Help:      "Total count of cash payments recorded",
+			},
+		),
 	}
 
 	reg.MustRegister(
@@ -235,6 +290,11 @@ func New() *Metrics {
 		m.tenantPlanCacheHitsTotal,
 		m.tenantPlanCacheMissesTotal,
 		m.tenantPlanValidationFailuresTotal,
+		m.salesPaymentCreatedTotal,
+		m.salesPaymentFailedTotal,
+		m.salesPaymentAmount,
+		m.bankPaymentCreatedTotal,
+		m.cashPaymentCreatedTotal,
 	)
 
 	return m
@@ -334,6 +394,31 @@ func (m *Metrics) IncTenantPlanCacheMisses() {
 func (m *Metrics) IncTenantPlanValidationFailures() {
 	if m != nil && m.tenantPlanValidationFailuresTotal != nil {
 		m.tenantPlanValidationFailuresTotal.Inc()
+	}
+}
+
+// RecordSalesPayment records a successful sales payment collection
+func (m *Metrics) RecordSalesPayment(method string, amount float64) {
+	if m == nil {
+		return
+	}
+	if m.salesPaymentCreatedTotal != nil {
+		m.salesPaymentCreatedTotal.WithLabelValues(method).Inc()
+	}
+	if m.salesPaymentAmount != nil && amount > 0 {
+		m.salesPaymentAmount.WithLabelValues(method).Add(amount)
+	}
+	if method == "cash" && m.cashPaymentCreatedTotal != nil {
+		m.cashPaymentCreatedTotal.Inc()
+	} else if (method == "bank" || method == "upi" || method == "online") && m.bankPaymentCreatedTotal != nil {
+		m.bankPaymentCreatedTotal.Inc()
+	}
+}
+
+// RecordSalesPaymentFailed records a rejected sales payment collection
+func (m *Metrics) RecordSalesPaymentFailed(reason string) {
+	if m != nil && m.salesPaymentFailedTotal != nil {
+		m.salesPaymentFailedTotal.WithLabelValues(reason).Inc()
 	}
 }
 
