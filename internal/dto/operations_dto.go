@@ -115,15 +115,18 @@ type UpdateCustomerRequest struct {
 }
 
 type CustomerResponse struct {
-	ID             uuid.UUID       `json:"id"`
-	TenantID       uuid.UUID       `json:"tenant_id"`
-	CustomerName   string          `json:"customer_name"`
-	Phone          string          `json:"phone,omitempty"`
-	OpeningBalance decimal.Decimal `json:"opening_balance"`
-	CurrentBalance decimal.Decimal `json:"current_balance"`
-	Status         string          `json:"status"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                 uuid.UUID       `json:"id"`
+	TenantID           uuid.UUID       `json:"tenant_id"`
+	CustomerName       string          `json:"customer_name"`
+	Phone              string          `json:"phone,omitempty"`
+	OpeningBalance     decimal.Decimal `json:"opening_balance"`
+	CurrentBalance     decimal.Decimal `json:"current_balance"`
+	TotalPurchases     decimal.Decimal `json:"total_purchases"`
+	TotalPaid          decimal.Decimal `json:"total_paid"`
+	OutstandingPayable decimal.Decimal `json:"outstanding_payable"`
+	Status             string          `json:"status"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
 }
 
 func ToCustomerResponse(c *domain.TenantCustomer) CustomerResponse {
@@ -138,6 +141,16 @@ func ToCustomerResponse(c *domain.TenantCustomer) CustomerResponse {
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}
+}
+
+func ToCustomerDetailResponse(c *domain.TenantCustomer, summary *domain.CustomerPayableSummary) CustomerResponse {
+	resp := ToCustomerResponse(c)
+	if summary != nil {
+		resp.TotalPurchases = summary.TotalPurchases
+		resp.TotalPaid = summary.TotalPaid
+		resp.OutstandingPayable = summary.OutstandingPayable
+	}
+	return resp
 }
 
 // ==========================================
@@ -197,10 +210,13 @@ type BankPaymentSplitRequest struct {
 }
 
 type CustomerBalanceResponse struct {
-	CustomerID     uuid.UUID       `json:"customer_id"`
-	CustomerName   string          `json:"customer_name"`
-	CurrentBalance decimal.Decimal `json:"current_balance"`
-	Status         string          `json:"status"`
+	CustomerID         uuid.UUID       `json:"customer_id"`
+	CustomerName       string          `json:"customer_name"`
+	CurrentBalance     decimal.Decimal `json:"current_balance"`
+	TotalPurchases     decimal.Decimal `json:"total_purchases"`
+	TotalPaid          decimal.Decimal `json:"total_paid"`
+	OutstandingPayable decimal.Decimal `json:"outstanding_payable"`
+	Status             string          `json:"status"`
 }
 
 type LineSalePaymentRequest struct {
@@ -282,12 +298,14 @@ type PurchasePaymentRequest struct {
 }
 
 type CreatePurchaseRequest struct {
-	CustomerID  *uuid.UUID               `json:"customer_id,omitempty"`
-	Item        string                   `json:"item" binding:"required,min=1,max=255"`
-	Quantity    int                      `json:"quantity" binding:"required,min=1"`
-	TotalAmount decimal.Decimal          `json:"total_amount" binding:"required"`
-	TotalPaid   decimal.Decimal          `json:"total_paid" binding:"omitempty"`
-	Payments    []PurchasePaymentRequest `json:"payments,omitempty"`
+	CustomerID   *uuid.UUID                `json:"customer_id,omitempty"`
+	Item         string                    `json:"item" binding:"required,min=1,max=255"`
+	Quantity     int                       `json:"quantity" binding:"required,min=1"`
+	TotalAmount  decimal.Decimal           `json:"total_amount" binding:"required"`
+	TotalPaid    decimal.Decimal           `json:"total_paid" binding:"omitempty"`
+	CashAmount   *decimal.Decimal          `json:"cash_amount,omitempty"`
+	Payments     []PurchasePaymentRequest  `json:"payments,omitempty"`
+	BankPayments []BankPaymentSplitRequest `json:"bank_payments,omitempty"`
 }
 
 type UpdatePurchaseRequest struct {
@@ -410,4 +428,101 @@ type BankTransactionResponse struct {
 	SaleType        string          `json:"sale_type,omitempty"`
 	SaleID          *uuid.UUID      `json:"sale_id,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
+}
+
+// ==========================================
+// 13. Purchase & Supplier Payment DTOs
+// ==========================================
+
+type PurchaseResponse struct {
+	ID                uuid.UUID                      `json:"id"`
+	TenantID          uuid.UUID                      `json:"tenant_id"`
+	CustomerID        *uuid.UUID                     `json:"customer_id,omitempty"`
+	CustomerName      string                         `json:"customer_name,omitempty"`
+	Item              string                         `json:"item"`
+	Quantity          int                            `json:"quantity"`
+	TotalAmount       decimal.Decimal                `json:"total_amount"`
+	TotalPaid         decimal.Decimal                `json:"total_paid"`
+	TotalPending      decimal.Decimal                `json:"total_pending"`
+	OutstandingAmount decimal.Decimal                `json:"outstanding_amount"`
+	PaymentStatus     string                         `json:"payment_status"`
+	CreatedAt         time.Time                      `json:"created_at"`
+	UpdatedAt         time.Time                      `json:"updated_at"`
+	Payments          []domain.TenantPurchasePayment `json:"payments,omitempty"`
+}
+
+func ToPurchaseResponse(p *domain.TenantPurchase) PurchaseResponse {
+	return PurchaseResponse{
+		ID:                p.ID,
+		TenantID:          p.TenantID,
+		CustomerID:        p.CustomerID,
+		CustomerName:      p.CustomerName,
+		Item:              p.Item,
+		Quantity:          p.Quantity,
+		TotalAmount:       p.TotalAmount,
+		TotalPaid:         p.TotalPaid,
+		TotalPending:      p.TotalPending,
+		OutstandingAmount: p.TotalPending,
+		PaymentStatus:     p.PaymentStatus,
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         p.UpdatedAt,
+		Payments:          p.Payments,
+	}
+}
+
+type RecordSupplierPaymentRequest struct {
+	CustomerID    *uuid.UUID                `json:"customer_id,omitempty"`
+	PurchaseID    *uuid.UUID                `json:"purchase_id,omitempty"`
+	Amount        decimal.Decimal           `json:"amount" binding:"required"`
+	PaymentMethod string                    `json:"payment_method" binding:"required,oneof=cash bank"`
+	BankID        *uuid.UUID                `json:"bank_id,omitempty"`
+	BankPayments  []BankPaymentSplitRequest `json:"bank_payments,omitempty"`
+	Note          string                    `json:"note,omitempty"`
+}
+
+type SupplierPaymentAllocation struct {
+	PurchaseID      uuid.UUID       `json:"purchase_id"`
+	Item            string          `json:"item"`
+	PreviousPending decimal.Decimal `json:"previous_pending"`
+	AmountSettled   decimal.Decimal `json:"amount_settled"`
+	NewPending      decimal.Decimal `json:"new_pending"`
+	PaymentStatus   string          `json:"payment_status"`
+}
+
+type SupplierPaymentResponse struct {
+	PaymentID           uuid.UUID                   `json:"payment_id"`
+	CustomerID          uuid.UUID                   `json:"customer_id"`
+	CustomerName        string                      `json:"customer_name"`
+	Amount              decimal.Decimal             `json:"amount"`
+	PaymentMethod       string                      `json:"payment_method"`
+	PreviousOutstanding decimal.Decimal             `json:"previous_outstanding"`
+	NewOutstanding      decimal.Decimal             `json:"new_outstanding"`
+	Allocations         []SupplierPaymentAllocation `json:"allocations"`
+	CreatedAt           time.Time                   `json:"created_at"`
+}
+
+type CustomerStatementEntry struct {
+	ID             uuid.UUID       `json:"id"`
+	Date           time.Time       `json:"date"`
+	FormattedDate  string          `json:"formatted_date"`
+	Description    string          `json:"description"`
+	EntryType      string          `json:"entry_type"` // "purchase", "settlement_payment"
+	PurchaseAmount decimal.Decimal `json:"purchase_amount"`
+	PaidAmount     decimal.Decimal `json:"paid_amount"`
+	Balance        decimal.Decimal `json:"balance"` // Running cumulative balance
+	PaymentMethod  string          `json:"payment_method,omitempty"`
+	BankName       string          `json:"bank_name,omitempty"`
+	ReferenceID    uuid.UUID       `json:"reference_id"`
+}
+
+type CustomerStatementResponse struct {
+	CustomerID         uuid.UUID                `json:"customer_id"`
+	CustomerName       string                   `json:"customer_name"`
+	Phone              string                   `json:"phone,omitempty"`
+	OpeningBalance     decimal.Decimal          `json:"opening_balance"`
+	CurrentBalance     decimal.Decimal          `json:"current_balance"`
+	TotalPurchases     decimal.Decimal          `json:"total_purchases"`
+	TotalPaid          decimal.Decimal          `json:"total_paid"`
+	OutstandingPayable decimal.Decimal          `json:"outstanding_payable"`
+	Entries            []CustomerStatementEntry `json:"entries"`
 }

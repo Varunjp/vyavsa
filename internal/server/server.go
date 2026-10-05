@@ -434,9 +434,12 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/purchases/:id", opsHandler.GetPurchaseByID)
 			tenant.PUT("/purchases/:id", opsHandler.UpdatePurchase)
 			tenant.DELETE("/purchases/:id", opsHandler.DeletePurchase)
+			tenant.POST("/purchases/:id/payments", opsHandler.RecordPurchaseSettlementPayment)
 
-			// Customer balance (accessible to all tenant staff for transactions)
+			// Customer balance, statement, and settlement payments
 			tenant.GET("/customers/:id/balance", opsHandler.GetCustomerBalance)
+			tenant.GET("/customers/:id/statement", opsHandler.GetCustomerStatement)
+			tenant.POST("/customers/:id/payments", opsHandler.RecordSupplierPayment)
 
 			// Expenses (Admin & Tenant User)
 			tenant.POST("/expenses", opsHandler.CreateExpense)

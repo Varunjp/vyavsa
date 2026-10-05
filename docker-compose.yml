@@ -69,6 +69,8 @@ services:
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8080}:8080"
+    env_file:
+      - .env
     environment:
       APP_NAME: ${APP_NAME:-vyavsa-bill-book-api}
       APP_ENV: ${APP_ENV:-development}
@@ -91,6 +93,13 @@ services:
       LOG_FORMAT: ${LOG_FORMAT:-text}
       PROMETHEUS_ENABLED: ${PROMETHEUS_ENABLED:-true}
       PROMETHEUS_PATH: ${PROMETHEUS_PATH:-/metrics}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@vyavsa.com}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Vyavsa Support}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
     depends_on:
       postgres:
         condition: service_healthy

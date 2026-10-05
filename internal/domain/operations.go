@@ -72,20 +72,47 @@ type CounterSalePayment struct {
 	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
+// Purchase payment status constants
+const (
+	PurchasePaymentStatusPaid          = "PAID"
+	PurchasePaymentStatusPartiallyPaid = "PARTIALLY_PAID"
+	PurchasePaymentStatusUnpaid        = "UNPAID"
+)
+
+// ComputePurchasePaymentStatus derives the payment status from total amount and paid amount
+func ComputePurchasePaymentStatus(totalAmount, totalPaid decimal.Decimal) string {
+	if totalAmount.IsZero() || totalPaid.GreaterThanOrEqual(totalAmount) {
+		return PurchasePaymentStatusPaid
+	}
+	if totalPaid.GreaterThan(decimal.Zero) {
+		return PurchasePaymentStatusPartiallyPaid
+	}
+	return PurchasePaymentStatusUnpaid
+}
+
+// CustomerPayableSummary represents aggregated purchase and payment figures for a customer/supplier
+type CustomerPayableSummary struct {
+	TotalPurchases     decimal.Decimal `json:"total_purchases"`
+	TotalPaid          decimal.Decimal `json:"total_paid"`
+	OutstandingPayable decimal.Decimal `json:"outstanding_payable"`
+}
+
 // TenantPurchase represents inventory/stock purchases
 type TenantPurchase struct {
-	ID           uuid.UUID               `json:"id"`
-	TenantID     uuid.UUID               `json:"tenant_id"`
-	CustomerID   *uuid.UUID              `json:"customer_id,omitempty"`
-	CustomerName string                  `json:"customer_name,omitempty"`
-	Item         string                  `json:"item"`
-	Quantity     int                     `json:"quantity"`
-	TotalAmount  decimal.Decimal         `json:"total_amount"`
-	TotalPaid    decimal.Decimal         `json:"total_paid"`
-	TotalPending decimal.Decimal         `json:"total_pending"`
-	CreatedAt    time.Time               `json:"created_at"`
-	UpdatedAt    time.Time               `json:"updated_at"`
-	Payments     []TenantPurchasePayment `json:"payments,omitempty"`
+	ID                uuid.UUID               `json:"id"`
+	TenantID          uuid.UUID               `json:"tenant_id"`
+	CustomerID        *uuid.UUID              `json:"customer_id,omitempty"`
+	CustomerName      string                  `json:"customer_name,omitempty"`
+	Item              string                  `json:"item"`
+	Quantity          int                     `json:"quantity"`
+	TotalAmount       decimal.Decimal         `json:"total_amount"`
+	TotalPaid         decimal.Decimal         `json:"total_paid"`
+	TotalPending      decimal.Decimal         `json:"total_pending"`
+	OutstandingAmount decimal.Decimal         `json:"outstanding_amount"`
+	PaymentStatus     string                  `json:"payment_status"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	Payments          []TenantPurchasePayment `json:"payments,omitempty"`
 }
 
 // TenantPurchasePayment represents payment towards a purchase
@@ -93,11 +120,13 @@ type TenantPurchasePayment struct {
 	ID            uuid.UUID       `json:"id"`
 	TenantID      uuid.UUID       `json:"tenant_id"`
 	PurchaseID    uuid.UUID       `json:"purchase_id"`
+	CustomerID    *uuid.UUID      `json:"customer_id,omitempty"`
 	PaymentMethod string          `json:"payment_method"`
 	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
 	BankName      string          `json:"bank_name,omitempty"`
 	Amount        decimal.Decimal `json:"amount"`
 	Note          string          `json:"note,omitempty"`
+	IsSettlement  bool            `json:"is_settlement"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
 }
@@ -218,12 +247,13 @@ type CurrentItemOverview struct {
 
 // TodayOverview aggregates the key daily metrics for the tenant dashboard
 type TodayOverview struct {
-	Attendance      TodayAttendanceOverview `json:"attendance"`
-	LineSale        decimal.Decimal         `json:"line_sale"`
-	CounterSale     decimal.Decimal         `json:"counter_sale"`
-	EmployeeAdvance decimal.Decimal         `json:"employee_advance"`
-	CurrentItem     any                     `json:"current_item"`
-	Date            string                  `json:"date"`
+	Attendance         TodayAttendanceOverview `json:"attendance"`
+	LineSale           decimal.Decimal         `json:"line_sale"`
+	CounterSale        decimal.Decimal         `json:"counter_sale"`
+	EmployeeAdvance    decimal.Decimal         `json:"employee_advance"`
+	CurrentItem        any                     `json:"current_item"`
+	OutstandingPayable decimal.Decimal         `json:"outstanding_payable"`
+	Date               string                  `json:"date"`
 }
 
 // FinancialMetrics aggregates all live cash, bank, dues, receivables, and pending salaries

@@ -21,6 +21,7 @@ type TenantEmployeeRepository interface {
 type TenantCustomerRepository interface {
 	Create(ctx context.Context, cust *domain.TenantCustomer) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantCustomer, error)
+	GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantCustomer, error)
 	Update(ctx context.Context, cust *domain.TenantCustomer) error
 	AdjustBalance(ctx context.Context, tenantID, id uuid.UUID, delta decimal.Decimal) error
 	SetBalance(ctx context.Context, tenantID, id uuid.UUID, balance decimal.Decimal) error
@@ -64,9 +65,16 @@ type CounterSaleRepository interface {
 type TenantPurchaseRepository interface {
 	Create(ctx context.Context, purchase *domain.TenantPurchase, payments []domain.TenantPurchasePayment) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantPurchase, error)
+	GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantPurchase, error)
+	GetCustomerPurchasesForUpdate(ctx context.Context, tenantID, customerID uuid.UUID) ([]domain.TenantPurchase, error)
 	Update(ctx context.Context, purchase *domain.TenantPurchase) error
 	Delete(ctx context.Context, tenantID, id uuid.UUID) error
-	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, search string) ([]domain.TenantPurchase, int64, error)
+	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, customerID *uuid.UUID, search string) ([]domain.TenantPurchase, int64, error)
+	CreatePayment(ctx context.Context, payment *domain.TenantPurchasePayment) error
+	ListPaymentsByPurchaseID(ctx context.Context, tenantID, purchaseID uuid.UUID) ([]domain.TenantPurchasePayment, error)
+	ListPaymentsByCustomerID(ctx context.Context, tenantID, customerID uuid.UUID) ([]domain.TenantPurchasePayment, error)
+	GetCustomerPayableSummary(ctx context.Context, tenantID, customerID uuid.UUID) (totalPurchases, totalPaid, outstandingPayable decimal.Decimal, err error)
+	GetCustomerPayableSummariesBatch(ctx context.Context, tenantID uuid.UUID, customerIDs []uuid.UUID) (map[uuid.UUID]domain.CustomerPayableSummary, error)
 }
 
 // TenantExpenseRepository defines persistence contracts for expenses

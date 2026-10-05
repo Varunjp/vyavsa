@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,6 +98,10 @@ func (m *mockOpCustomerRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID
 		return nil, appErrors.NewNotFound("customer not found")
 	}
 	return c, nil
+}
+
+func (m *mockOpCustomerRepo) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantCustomer, error) {
+	return m.GetByID(ctx, tenantID, id)
 }
 
 func (m *mockOpCustomerRepo) Update(ctx context.Context, cust *domain.TenantCustomer) error {
@@ -350,6 +356,23 @@ func (m *mockOpPurchaseRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID
 	return p, nil
 }
 
+func (m *mockOpPurchaseRepo) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantPurchase, error) {
+	return m.GetByID(ctx, tenantID, id)
+}
+
+func (m *mockOpPurchaseRepo) GetCustomerPurchasesForUpdate(ctx context.Context, tenantID, customerID uuid.UUID) ([]domain.TenantPurchase, error) {
+	var list []domain.TenantPurchase
+	for _, p := range m.purchases {
+		if p.TenantID == tenantID && p.CustomerID != nil && *p.CustomerID == customerID && p.TotalPending.GreaterThan(decimal.Zero) {
+			list = append(list, *p)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Before(list[j].CreatedAt)
+	})
+	return list, nil
+}
+
 func (m *mockOpPurchaseRepo) Update(ctx context.Context, p *domain.TenantPurchase) error {
 	m.purchases[p.ID] = p
 	return nil
@@ -360,14 +383,82 @@ func (m *mockOpPurchaseRepo) Delete(ctx context.Context, tenantID, id uuid.UUID)
 	return nil
 }
 
-func (m *mockOpPurchaseRepo) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, search string) ([]domain.TenantPurchase, int64, error) {
+func (m *mockOpPurchaseRepo) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, customerID *uuid.UUID, search string) ([]domain.TenantPurchase, int64, error) {
 	var list []domain.TenantPurchase
 	for _, p := range m.purchases {
-		if p.TenantID == tenantID {
-			list = append(list, *p)
+		if p.TenantID != tenantID {
+			continue
 		}
+		if customerID != nil && (p.CustomerID == nil || *p.CustomerID != *customerID) {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(p.Item), strings.ToLower(search)) && !strings.Contains(strings.ToLower(p.CustomerName), strings.ToLower(search)) {
+			continue
+		}
+		list = append(list, *p)
 	}
 	return list, int64(len(list)), nil
+}
+
+func (m *mockOpPurchaseRepo) CreatePayment(ctx context.Context, payment *domain.TenantPurchasePayment) error {
+	payment.ID = uuid.New()
+	payment.CreatedAt = time.Now().UTC()
+	payment.UpdatedAt = time.Now().UTC()
+	p, ok := m.purchases[payment.PurchaseID]
+	if ok {
+		p.Payments = append(p.Payments, *payment)
+	}
+	return nil
+}
+
+func (m *mockOpPurchaseRepo) ListPaymentsByPurchaseID(ctx context.Context, tenantID, purchaseID uuid.UUID) ([]domain.TenantPurchasePayment, error) {
+	p, ok := m.purchases[purchaseID]
+	if !ok || p.TenantID != tenantID {
+		return nil, nil
+	}
+	return p.Payments, nil
+}
+
+func (m *mockOpPurchaseRepo) ListPaymentsByCustomerID(ctx context.Context, tenantID, customerID uuid.UUID) ([]domain.TenantPurchasePayment, error) {
+	var list []domain.TenantPurchasePayment
+	for _, p := range m.purchases {
+		if p.TenantID == tenantID && p.CustomerID != nil && *p.CustomerID == customerID {
+			list = append(list, p.Payments...)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Before(list[j].CreatedAt)
+	})
+	return list, nil
+}
+
+func (m *mockOpPurchaseRepo) GetCustomerPayableSummary(ctx context.Context, tenantID, customerID uuid.UUID) (totalPurchases, totalPaid, outstandingPayable decimal.Decimal, err error) {
+	for _, p := range m.purchases {
+		if p.TenantID == tenantID && p.CustomerID != nil && *p.CustomerID == customerID {
+			totalPurchases = totalPurchases.Add(p.TotalAmount)
+			totalPaid = totalPaid.Add(p.TotalPaid)
+			outstandingPayable = outstandingPayable.Add(p.TotalPending)
+		}
+	}
+	return totalPurchases, totalPaid, outstandingPayable, nil
+}
+
+func (m *mockOpPurchaseRepo) GetCustomerPayableSummariesBatch(ctx context.Context, tenantID uuid.UUID, customerIDs []uuid.UUID) (map[uuid.UUID]domain.CustomerPayableSummary, error) {
+	result := make(map[uuid.UUID]domain.CustomerPayableSummary)
+	targetIDs := make(map[uuid.UUID]bool)
+	for _, id := range customerIDs {
+		targetIDs[id] = true
+	}
+	for _, p := range m.purchases {
+		if p.TenantID == tenantID && p.CustomerID != nil && targetIDs[*p.CustomerID] {
+			s := result[*p.CustomerID]
+			s.TotalPurchases = s.TotalPurchases.Add(p.TotalAmount)
+			s.TotalPaid = s.TotalPaid.Add(p.TotalPaid)
+			s.OutstandingPayable = s.OutstandingPayable.Add(p.TotalPending)
+			result[*p.CustomerID] = s
+		}
+	}
+	return result, nil
 }
 
 // Mock Expense Repo
@@ -2219,4 +2310,469 @@ func TestOperationsService_TransactionRollbackScenarios(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "simulated bank transaction persistence failure")
 	})
+}
+
+// ----------------------------------------------------
+// Purchase Partial Payments, Multi-Bank & Customer Payable Tests
+// ----------------------------------------------------
+
+func TestOperationsService_PurchasePartialPaymentsAndCustomerPayables(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, custRepo, _, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	// 1. Create a supplier / customer
+	cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "Olive Trades",
+		Status:       "active",
+	})
+	require.NoError(t, err)
+
+	// Create 2 bank accounts for multi-bank tests
+	hdfc, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "HDFC Bank",
+		AccountNumber:  "HDFC12345",
+		OpeningBalance: decimal.NewFromFloat(50000),
+	})
+	require.NoError(t, err)
+
+	sbi, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "SBI Bank",
+		AccountNumber:  "SBI67890",
+		OpeningBalance: decimal.NewFromFloat(30000),
+	})
+	require.NoError(t, err)
+
+	t.Run("Purchase with full payment is marked PAID with zero outstanding", func(t *testing.T) {
+		cashAmt := decimal.NewFromFloat(10000)
+		req := &dto.CreatePurchaseRequest{
+			CustomerID:  &cust.ID,
+			Item:        "Boxes",
+			Quantity:    100,
+			TotalAmount: decimal.NewFromFloat(10000),
+			CashAmount:  &cashAmt,
+		}
+		p, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, req)
+		require.NoError(t, err)
+		assert.Equal(t, domain.PurchasePaymentStatusPaid, p.PaymentStatus)
+		assert.True(t, p.TotalPending.IsZero())
+		assert.True(t, p.OutstandingAmount.IsZero())
+		assert.Equal(t, 10000.0, p.TotalPaid.InexactFloat64())
+	})
+
+	t.Run("Purchase with zero payment is marked UNPAID with full outstanding", func(t *testing.T) {
+		req := &dto.CreatePurchaseRequest{
+			CustomerID:  &cust.ID,
+			Item:        "Pallets",
+			Quantity:    20,
+			TotalAmount: decimal.NewFromFloat(8000),
+		}
+		p, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, req)
+		require.NoError(t, err)
+		assert.Equal(t, domain.PurchasePaymentStatusUnpaid, p.PaymentStatus)
+		assert.Equal(t, 8000.0, p.TotalPending.InexactFloat64())
+		assert.Equal(t, 8000.0, p.OutstandingAmount.InexactFloat64())
+		assert.True(t, p.TotalPaid.IsZero())
+	})
+
+	t.Run("Purchase with partial split payment (Cash + Multi-Bank) is marked PARTIALLY_PAID", func(t *testing.T) {
+		initHdfc, _ := svc.GetBankByID(ctx, tenantID, hdfc.ID)
+		initSbi, _ := svc.GetBankByID(ctx, tenantID, sbi.ID)
+		initHdfcBal := initHdfc.CurrentBalance
+		initSbiBal := initSbi.CurrentBalance
+
+		cashAmt := decimal.NewFromFloat(2000)
+		req := &dto.CreatePurchaseRequest{
+			CustomerID:  &cust.ID,
+			Item:        "Raw Sugar Bags",
+			Quantity:    50,
+			TotalAmount: decimal.NewFromFloat(10000),
+			CashAmount:  &cashAmt,
+			BankPayments: []dto.BankPaymentSplitRequest{
+				{BankID: hdfc.ID, Amount: decimal.NewFromFloat(2000)},
+				{BankID: sbi.ID, Amount: decimal.NewFromFloat(1000)},
+			},
+		}
+		p, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, req)
+		require.NoError(t, err)
+		assert.Equal(t, domain.PurchasePaymentStatusPartiallyPaid, p.PaymentStatus)
+		assert.Equal(t, 5000.0, p.TotalPaid.InexactFloat64())
+		assert.Equal(t, 5000.0, p.TotalPending.InexactFloat64())
+		assert.Equal(t, 5000.0, p.OutstandingAmount.InexactFloat64())
+
+		// Verify bank balances were debited
+		postHdfc, _ := svc.GetBankByID(ctx, tenantID, hdfc.ID)
+		postSbi, _ := svc.GetBankByID(ctx, tenantID, sbi.ID)
+		assert.Equal(t, initHdfcBal.Sub(decimal.NewFromFloat(2000)), postHdfc.CurrentBalance)
+		assert.Equal(t, initSbiBal.Sub(decimal.NewFromFloat(1000)), postSbi.CurrentBalance)
+	})
+
+	t.Run("Customer details and balance return aggregated total purchases, paid, and outstanding payable", func(t *testing.T) {
+		bal, err := svc.GetCustomerBalance(ctx, tenantID, cust.ID)
+		require.NoError(t, err)
+		// Total Purchases: 10000 + 8000 + 10000 = 28000
+		// Total Paid: 10000 + 0 + 5000 = 15000
+		// Outstanding Payable: 0 + 8000 + 5000 = 13000
+		assert.Equal(t, 28000.0, bal.TotalPurchases.InexactFloat64())
+		assert.Equal(t, 15000.0, bal.TotalPaid.InexactFloat64())
+		assert.Equal(t, 13000.0, bal.OutstandingPayable.InexactFloat64())
+
+		details, err := svc.GetCustomerDetails(ctx, tenantID, cust.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 28000.0, details.TotalPurchases.InexactFloat64())
+		assert.Equal(t, 15000.0, details.TotalPaid.InexactFloat64())
+		assert.Equal(t, 13000.0, details.OutstandingPayable.InexactFloat64())
+	})
+
+	t.Run("Cross-tenant customer is rejected during purchase creation", func(t *testing.T) {
+		otherTenantID := uuid.New()
+		otherCust := &domain.TenantCustomer{
+			ID:           uuid.New(),
+			TenantID:     otherTenantID,
+			CustomerName: "Foreign Tenant Supplier",
+			Status:       "active",
+		}
+		_ = custRepo.Create(ctx, otherCust)
+
+		req := &dto.CreatePurchaseRequest{
+			CustomerID:  &otherCust.ID,
+			Item:        "Illegal Item",
+			Quantity:    1,
+			TotalAmount: decimal.NewFromFloat(500),
+		}
+		_, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, req)
+		require.Error(t, err)
+	})
+}
+
+// ----------------------------------------------------
+// Later Settlement & FIFO Allocation Tests
+// ----------------------------------------------------
+
+func TestOperationsService_SupplierPaymentSettlementAndFIFO(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, _, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "ABC Suppliers",
+		Status:       "active",
+	})
+	require.NoError(t, err)
+
+	bank, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "Settlement Bank",
+		AccountNumber:  "SETTL999",
+		OpeningBalance: decimal.NewFromFloat(50000),
+	})
+	require.NoError(t, err)
+
+	// Create 2 purchases with pending balances:
+	// Purchase 1 (older): 10,000 purchase, 5,000 paid -> 5,000 pending
+	cash1 := decimal.NewFromFloat(5000)
+	p1, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+		CustomerID:  &cust.ID,
+		Item:        "Materials Batch 1",
+		Quantity:    10,
+		TotalAmount: decimal.NewFromFloat(10000),
+		CashAmount:  &cash1,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 5000.0, p1.TotalPending.InexactFloat64())
+
+	// Slight delay or ensure CreatedAt order
+	time.Sleep(10 * time.Millisecond)
+
+	// Purchase 2 (newer): 8,000 purchase, 3,000 paid -> 5,000 pending
+	cash2 := decimal.NewFromFloat(3000)
+	p2, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+		CustomerID:  &cust.ID,
+		Item:        "Materials Batch 2",
+		Quantity:    8,
+		TotalAmount: decimal.NewFromFloat(8000),
+		CashAmount:  &cash2,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 5000.0, p2.TotalPending.InexactFloat64())
+
+	// Total customer pending: 5,000 + 5,000 = 10,000
+	balBefore, err := svc.GetCustomerBalance(ctx, tenantID, cust.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 10000.0, balBefore.OutstandingPayable.InexactFloat64())
+
+	t.Run("Overpayment exceeding total outstanding is rejected", func(t *testing.T) {
+		settleReq := &dto.RecordSupplierPaymentRequest{
+			CustomerID:    &cust.ID,
+			Amount:        decimal.NewFromFloat(10000.01),
+			PaymentMethod: "cash",
+		}
+		_, err := svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, settleReq)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds outstanding payable balance")
+	})
+
+	t.Run("Partial settlement allocates FIFO to oldest purchase first", func(t *testing.T) {
+		// Settle 4,000. Oldest purchase p1 had 5,000 pending -> should absorb all 4,000.
+		// Remaining on p1: 1,000. Remaining on p2: 5,000. Customer total pending: 6,000.
+		bankBefore, _ := svc.GetBankByID(ctx, tenantID, bank.ID)
+		bankBeforeBal := bankBefore.CurrentBalance
+
+		settleReq := &dto.RecordSupplierPaymentRequest{
+			CustomerID:    &cust.ID,
+			Amount:        decimal.NewFromFloat(4000),
+			PaymentMethod: "bank",
+			BankID:        &bank.ID,
+			Note:          "Partial settlement 1",
+		}
+		res, err := svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, settleReq)
+		require.NoError(t, err)
+		assert.Equal(t, 4000.0, res.Amount.InexactFloat64())
+		assert.Equal(t, 6000.0, res.NewOutstanding.InexactFloat64())
+		require.Len(t, res.Allocations, 1)
+		assert.Equal(t, p1.ID, res.Allocations[0].PurchaseID)
+		assert.Equal(t, 4000.0, res.Allocations[0].AmountSettled.InexactFloat64())
+		assert.Equal(t, 1000.0, res.Allocations[0].NewPending.InexactFloat64())
+		assert.Equal(t, domain.PurchasePaymentStatusPartiallyPaid, res.Allocations[0].PaymentStatus)
+
+		// Check bank debited
+		bankAfter, _ := svc.GetBankByID(ctx, tenantID, bank.ID)
+		assert.Equal(t, bankBeforeBal.Sub(decimal.NewFromFloat(4000)), bankAfter.CurrentBalance)
+
+		// Verify p1 state via GetPurchaseByID
+		p1Updated, err := svc.GetPurchaseByID(ctx, tenantID, p1.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 1000.0, p1Updated.TotalPending.InexactFloat64())
+		assert.Equal(t, 9000.0, p1Updated.TotalPaid.InexactFloat64())
+		assert.Equal(t, domain.PurchasePaymentStatusPartiallyPaid, p1Updated.PaymentStatus)
+	})
+
+	t.Run("Second settlement spans remainder of oldest purchase and part of next purchase", func(t *testing.T) {
+		// Currently p1 has 1,000 pending, p2 has 5,000 pending.
+		// Settle 3,000.
+		// p1 absorbs 1,000 (status becomes PAID).
+		// p2 absorbs 2,000 (pending becomes 3,000, status PARTIALLY_PAID).
+		// Customer pending becomes 3,000.
+		settleReq := &dto.RecordSupplierPaymentRequest{
+			CustomerID:    &cust.ID,
+			Amount:        decimal.NewFromFloat(3000),
+			PaymentMethod: "cash",
+			Note:          "Settlement spanning purchases",
+		}
+		res, err := svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, settleReq)
+		require.NoError(t, err)
+		assert.Equal(t, 3000.0, res.Amount.InexactFloat64())
+		assert.Equal(t, 3000.0, res.NewOutstanding.InexactFloat64())
+		require.Len(t, res.Allocations, 2)
+
+		// Allocation 1 -> p1
+		assert.Equal(t, p1.ID, res.Allocations[0].PurchaseID)
+		assert.Equal(t, 1000.0, res.Allocations[0].AmountSettled.InexactFloat64())
+		assert.True(t, res.Allocations[0].NewPending.IsZero())
+		assert.Equal(t, domain.PurchasePaymentStatusPaid, res.Allocations[0].PaymentStatus)
+
+		// Allocation 2 -> p2
+		assert.Equal(t, p2.ID, res.Allocations[1].PurchaseID)
+		assert.Equal(t, 2000.0, res.Allocations[1].AmountSettled.InexactFloat64())
+		assert.Equal(t, 3000.0, res.Allocations[1].NewPending.InexactFloat64())
+		assert.Equal(t, domain.PurchasePaymentStatusPartiallyPaid, res.Allocations[1].PaymentStatus)
+
+		// Check p1 is PAID
+		p1Updated, _ := svc.GetPurchaseByID(ctx, tenantID, p1.ID)
+		assert.Equal(t, domain.PurchasePaymentStatusPaid, p1Updated.PaymentStatus)
+		assert.True(t, p1Updated.TotalPending.IsZero())
+
+		// Check p2 is PARTIALLY_PAID
+		p2Updated, _ := svc.GetPurchaseByID(ctx, tenantID, p2.ID)
+		assert.Equal(t, 3000.0, p2Updated.TotalPending.InexactFloat64())
+	})
+
+	t.Run("Final settlement clears all outstanding to 0", func(t *testing.T) {
+		settleReq := &dto.RecordSupplierPaymentRequest{
+			CustomerID:    &cust.ID,
+			Amount:        decimal.NewFromFloat(3000),
+			PaymentMethod: "cash",
+		}
+		res, err := svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, settleReq)
+		require.NoError(t, err)
+		assert.True(t, res.NewOutstanding.IsZero())
+
+		balFinal, err := svc.GetCustomerBalance(ctx, tenantID, cust.ID)
+		require.NoError(t, err)
+		assert.True(t, balFinal.OutstandingPayable.IsZero())
+		assert.Equal(t, 18000.0, balFinal.TotalPurchases.InexactFloat64())
+		assert.Equal(t, 18000.0, balFinal.TotalPaid.InexactFloat64())
+	})
+
+	t.Run("Direct settlement against a specific purchase", func(t *testing.T) {
+		// Create a 3rd purchase: 4,000 total, 1,000 paid -> 3,000 pending
+		cash3 := decimal.NewFromFloat(1000)
+		p3, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+			CustomerID:  &cust.ID,
+			Item:        "Specific Purchase Item",
+			Quantity:    1,
+			TotalAmount: decimal.NewFromFloat(4000),
+			CashAmount:  &cash3,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 3000.0, p3.TotalPending.InexactFloat64())
+
+		// Pay 3000 directly against p3
+		res, err := svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordSupplierPaymentRequest{
+			PurchaseID:    &p3.ID,
+			Amount:        decimal.NewFromFloat(3000),
+			PaymentMethod: "cash",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 3000.0, res.Amount.InexactFloat64())
+		assert.True(t, res.NewOutstanding.IsZero())
+
+		p3Updated, _ := svc.GetPurchaseByID(ctx, tenantID, p3.ID)
+		assert.Equal(t, domain.PurchasePaymentStatusPaid, p3Updated.PaymentStatus)
+		assert.True(t, p3Updated.TotalPending.IsZero())
+	})
+}
+
+// ----------------------------------------------------
+// Customer Statement Ledger Tests
+// ----------------------------------------------------
+
+func TestOperationsService_CustomerStatement(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, _, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	cust, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "Olive Statement Trades",
+		Status:       "active",
+	})
+	require.NoError(t, err)
+
+	// Day 1: Purchase 10,000, Paid 5,000 -> Pending 5,000
+	cash1 := decimal.NewFromFloat(5000)
+	_, err = svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+		CustomerID:  &cust.ID,
+		Item:        "X Item",
+		Quantity:    10,
+		TotalAmount: decimal.NewFromFloat(10000),
+		CashAmount:  &cash1,
+	})
+	require.NoError(t, err)
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Day 2: Purchase 8,000, Paid 3,000 -> Pending 5,000 (total pending 10,000)
+	cash2 := decimal.NewFromFloat(3000)
+	_, err = svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+		CustomerID:  &cust.ID,
+		Item:        "Y Item",
+		Quantity:    5,
+		TotalAmount: decimal.NewFromFloat(8000),
+		CashAmount:  &cash2,
+	})
+	require.NoError(t, err)
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Day 3: Settlement payment 5,000 -> Pending 5,000
+	_, err = svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordSupplierPaymentRequest{
+		CustomerID:    &cust.ID,
+		Amount:        decimal.NewFromFloat(5000),
+		PaymentMethod: "cash",
+		Note:          "Payment to Olive Trades",
+	})
+	require.NoError(t, err)
+
+	stmt, err := svc.GetCustomerStatement(ctx, tenantID, cust.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Olive Statement Trades", stmt.CustomerName)
+	assert.Equal(t, 18000.0, stmt.TotalPurchases.InexactFloat64())
+	assert.Equal(t, 13000.0, stmt.TotalPaid.InexactFloat64())
+	assert.Equal(t, 5000.0, stmt.OutstandingPayable.InexactFloat64())
+
+	// Check entries structure
+	require.NotEmpty(t, stmt.Entries)
+	// The final entry's Balance should match the OutstandingPayable
+	lastEntry := stmt.Entries[len(stmt.Entries)-1]
+	assert.Equal(t, 5000.0, lastEntry.Balance.InexactFloat64())
+}
+
+func TestOperationsService_ListCustomers_OutstandingPayablePopulated(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// 1. Create two customers
+	custA, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "Supplier Alpha",
+		Phone:        "1111111111",
+		Status:       "active",
+	})
+	require.NoError(t, err)
+
+	custB, err := svc.CreateCustomer(ctx, tenantID, &dto.CreateCustomerRequest{
+		CustomerName: "Supplier Beta",
+		Phone:        "2222222222",
+		Status:       "active",
+	})
+	require.NoError(t, err)
+
+	// 2. Create purchase for Supplier Alpha: ₹10,000 with ₹4,000 paid -> ₹6,000 pending
+	cashAmount := decimal.NewFromFloat(4000)
+	_, err = svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+		CustomerID:  &custA.ID,
+		Item:        "Widget A",
+		Quantity:    10,
+		TotalAmount: decimal.NewFromFloat(10000),
+		CashAmount:  &cashAmount,
+	})
+	require.NoError(t, err)
+
+	// 3. List customers
+	customers, total, err := svc.ListCustomers(ctx, tenantID, 1, 10, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, customers, 2)
+
+	var foundA, foundB *dto.CustomerResponse
+	for i := range customers {
+		if customers[i].ID == custA.ID {
+			foundA = &customers[i]
+		}
+		if customers[i].ID == custB.ID {
+			foundB = &customers[i]
+		}
+	}
+
+	require.NotNil(t, foundA)
+	assert.Equal(t, "Supplier Alpha", foundA.CustomerName)
+	assert.Equal(t, 10000.0, foundA.TotalPurchases.InexactFloat64())
+	assert.Equal(t, 4000.0, foundA.TotalPaid.InexactFloat64())
+	assert.Equal(t, 6000.0, foundA.OutstandingPayable.InexactFloat64())
+
+	require.NotNil(t, foundB)
+	assert.Equal(t, "Supplier Beta", foundB.CustomerName)
+	assert.True(t, foundB.TotalPurchases.IsZero())
+	assert.True(t, foundB.TotalPaid.IsZero())
+	assert.True(t, foundB.OutstandingPayable.IsZero())
+}
+
+func TestOperationsService_TodayOverview_OutstandingPayable(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, _, _, _, _, summaryRepo := setupTestOperationsServiceWithRepos()
+
+	// Update summary repo with outstanding payable
+	summary, err := summaryRepo.GetByTenantID(ctx, tenantID)
+	require.NoError(t, err)
+	summary.TotalPayable = decimal.NewFromFloat(15450.50)
+	err = summaryRepo.Update(ctx, summary)
+	require.NoError(t, err)
+
+	// 1. GetTodayOverview
+	overview, err := svc.GetTodayOverview(ctx, tenantID)
+	require.NoError(t, err)
+	require.NotNil(t, overview)
+	assert.True(t, overview.OutstandingPayable.Equal(decimal.NewFromFloat(15450.50)), "TodayOverview should have correct outstanding payable")
+
+	// 2. GetFinancialMetrics
+	metrics, err := svc.GetFinancialMetrics(ctx, tenantID)
+	require.NoError(t, err)
+	require.NotNil(t, metrics)
+	require.NotNil(t, metrics.TodayOverview)
+	assert.True(t, metrics.TodayOverview.OutstandingPayable.Equal(decimal.NewFromFloat(15450.50)), "FinancialMetrics TodayOverview should have correct outstanding payable")
 }

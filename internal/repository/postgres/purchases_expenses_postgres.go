@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 // ==========================================
@@ -25,9 +26,14 @@ func NewTenantPurchasePostgres(pool *pgxpool.Pool) *TenantPurchasePostgres {
 }
 
 func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.TenantPurchase, payments []domain.TenantPurchasePayment) error {
+	if purchase.PaymentStatus == "" {
+		purchase.PaymentStatus = domain.ComputePurchasePaymentStatus(purchase.TotalAmount, purchase.TotalPaid)
+	}
+	purchase.OutstandingAmount = purchase.TotalPending
+
 	pQuery := `
-		INSERT INTO tenant_purchase (tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO tenant_purchase (tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, payment_status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -40,6 +46,7 @@ func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.Te
 		purchase.TotalAmount,
 		purchase.TotalPaid,
 		purchase.TotalPending,
+		purchase.PaymentStatus,
 	).Scan(&purchase.ID, &purchase.CreatedAt, &purchase.UpdatedAt)
 	if err != nil {
 		return appErrors.NewDatabase(fmt.Errorf("failed to create purchase: %w", err))
@@ -49,19 +56,24 @@ func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.Te
 		payment := &payments[i]
 		payment.TenantID = purchase.TenantID
 		payment.PurchaseID = purchase.ID
+		if payment.CustomerID == nil {
+			payment.CustomerID = purchase.CustomerID
+		}
 		pmQuery := `
-			INSERT INTO tenant_purchase_payment (tenant_id, purchase_id, payment_method, bank_id, bank_name, amount, note)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			INSERT INTO tenant_purchase_payment (tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING id, created_at, updated_at
 		`
 		if err := exec.QueryRow(ctx, pmQuery,
 			payment.TenantID,
 			payment.PurchaseID,
+			payment.CustomerID,
 			payment.PaymentMethod,
 			payment.BankID,
 			payment.BankName,
 			payment.Amount,
 			payment.Note,
+			payment.IsSettlement,
 		).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
 			return appErrors.NewDatabase(fmt.Errorf("failed to create purchase payment: %w", err))
 		}
@@ -73,7 +85,7 @@ func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.Te
 
 func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantPurchase, error) {
 	pQuery := `
-		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, created_at, updated_at
+		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, payment_status, created_at, updated_at
 		FROM tenant_purchase
 		WHERE tenant_id = $1 AND id = $2
 	`
@@ -89,6 +101,7 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 		&p.TotalAmount,
 		&p.TotalPaid,
 		&p.TotalPending,
+		&p.PaymentStatus,
 		&p.CreatedAt,
 		&p.UpdatedAt,
 	)
@@ -98,9 +111,10 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 		}
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get purchase: %w", err))
 	}
+	p.OutstandingAmount = p.TotalPending
 
 	pmQuery := `
-		SELECT id, tenant_id, purchase_id, payment_method, bank_id, bank_name, amount, note, created_at, updated_at
+		SELECT id, tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement, created_at, updated_at
 		FROM tenant_purchase_payment
 		WHERE tenant_id = $1 AND purchase_id = $2
 		ORDER BY created_at ASC
@@ -118,11 +132,13 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 			&pm.ID,
 			&pm.TenantID,
 			&pm.PurchaseID,
+			&pm.CustomerID,
 			&pm.PaymentMethod,
 			&pm.BankID,
 			&pm.BankName,
 			&pm.Amount,
 			&pm.Note,
+			&pm.IsSettlement,
 			&pm.CreatedAt,
 			&pm.UpdatedAt,
 		); err != nil {
@@ -134,11 +150,90 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 	return &p, nil
 }
 
+func (r *TenantPurchasePostgres) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantPurchase, error) {
+	pQuery := `
+		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, payment_status, created_at, updated_at
+		FROM tenant_purchase
+		WHERE tenant_id = $1 AND id = $2
+		FOR UPDATE
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var p domain.TenantPurchase
+	err := exec.QueryRow(ctx, pQuery, tenantID, id).Scan(
+		&p.ID,
+		&p.TenantID,
+		&p.CustomerID,
+		&p.CustomerName,
+		&p.Item,
+		&p.Quantity,
+		&p.TotalAmount,
+		&p.TotalPaid,
+		&p.TotalPending,
+		&p.PaymentStatus,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("purchase not found within tenant")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get purchase for update: %w", err))
+	}
+	p.OutstandingAmount = p.TotalPending
+	return &p, nil
+}
+
+func (r *TenantPurchasePostgres) GetCustomerPurchasesForUpdate(ctx context.Context, tenantID, customerID uuid.UUID) ([]domain.TenantPurchase, error) {
+	pQuery := `
+		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, payment_status, created_at, updated_at
+		FROM tenant_purchase
+		WHERE tenant_id = $1 AND customer_id = $2 AND total_pending > 0
+		ORDER BY created_at ASC
+		FOR UPDATE
+	`
+	exec := GetExecutor(ctx, r.pool)
+	rows, err := exec.Query(ctx, pQuery, tenantID, customerID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get customer purchases for update: %w", err))
+	}
+	defer rows.Close()
+
+	purchases := make([]domain.TenantPurchase, 0)
+	for rows.Next() {
+		var p domain.TenantPurchase
+		if err := rows.Scan(
+			&p.ID,
+			&p.TenantID,
+			&p.CustomerID,
+			&p.CustomerName,
+			&p.Item,
+			&p.Quantity,
+			&p.TotalAmount,
+			&p.TotalPaid,
+			&p.TotalPending,
+			&p.PaymentStatus,
+			&p.CreatedAt,
+			&p.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan customer purchase for update: %w", err))
+		}
+		p.OutstandingAmount = p.TotalPending
+		purchases = append(purchases, p)
+	}
+
+	return purchases, nil
+}
+
 func (r *TenantPurchasePostgres) Update(ctx context.Context, purchase *domain.TenantPurchase) error {
+	if purchase.PaymentStatus == "" {
+		purchase.PaymentStatus = domain.ComputePurchasePaymentStatus(purchase.TotalAmount, purchase.TotalPaid)
+	}
+	purchase.OutstandingAmount = purchase.TotalPending
+
 	query := `
 		UPDATE tenant_purchase
-		SET customer_id = $1, customer_name = $2, item = $3, quantity = $4, total_amount = $5, total_paid = $6, total_pending = $7, updated_at = NOW()
-		WHERE tenant_id = $8 AND id = $9
+		SET customer_id = $1, customer_name = $2, item = $3, quantity = $4, total_amount = $5, total_paid = $6, total_pending = $7, payment_status = $8, updated_at = NOW()
+		WHERE tenant_id = $9 AND id = $10
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -150,6 +245,7 @@ func (r *TenantPurchasePostgres) Update(ctx context.Context, purchase *domain.Te
 		purchase.TotalAmount,
 		purchase.TotalPaid,
 		purchase.TotalPending,
+		purchase.PaymentStatus,
 		purchase.TenantID,
 		purchase.ID,
 	).Scan(&purchase.UpdatedAt)
@@ -175,7 +271,7 @@ func (r *TenantPurchasePostgres) Delete(ctx context.Context, tenantID, id uuid.U
 	return nil
 }
 
-func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, search string) ([]domain.TenantPurchase, int64, error) {
+func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, customerID *uuid.UUID, search string) ([]domain.TenantPurchase, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -194,6 +290,12 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 		argIdx++
 	}
 
+	if customerID != nil && *customerID != uuid.Nil {
+		baseWhere += fmt.Sprintf(" AND customer_id = $%d", argIdx)
+		args = append(args, *customerID)
+		argIdx++
+	}
+
 	if search != "" {
 		baseWhere += fmt.Sprintf(" AND (item ILIKE $%d OR customer_name ILIKE $%d)", argIdx, argIdx)
 		args = append(args, "%"+search+"%")
@@ -208,7 +310,7 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 	}
 
 	listQuery := fmt.Sprintf(`
-		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, created_at, updated_at
+		SELECT id, tenant_id, customer_id, customer_name, item, quantity, total_amount, total_paid, total_pending, payment_status, created_at, updated_at
 		FROM tenant_purchase
 		%s
 		ORDER BY created_at DESC
@@ -235,15 +337,175 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 			&p.TotalAmount,
 			&p.TotalPaid,
 			&p.TotalPending,
+			&p.PaymentStatus,
 			&p.CreatedAt,
 			&p.UpdatedAt,
 		); err != nil {
 			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan purchase: %w", err))
 		}
+		p.OutstandingAmount = p.TotalPending
 		purchases = append(purchases, p)
 	}
 
 	return purchases, total, nil
+}
+
+func (r *TenantPurchasePostgres) CreatePayment(ctx context.Context, payment *domain.TenantPurchasePayment) error {
+	pmQuery := `
+		INSERT INTO tenant_purchase_payment (tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, created_at, updated_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, pmQuery,
+		payment.TenantID,
+		payment.PurchaseID,
+		payment.CustomerID,
+		payment.PaymentMethod,
+		payment.BankID,
+		payment.BankName,
+		payment.Amount,
+		payment.Note,
+		payment.IsSettlement,
+	).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to create purchase payment: %w", err))
+	}
+	return nil
+}
+
+func (r *TenantPurchasePostgres) ListPaymentsByPurchaseID(ctx context.Context, tenantID, purchaseID uuid.UUID) ([]domain.TenantPurchasePayment, error) {
+	pmQuery := `
+		SELECT id, tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement, created_at, updated_at
+		FROM tenant_purchase_payment
+		WHERE tenant_id = $1 AND purchase_id = $2
+		ORDER BY created_at ASC
+	`
+	exec := GetExecutor(ctx, r.pool)
+	rows, err := exec.Query(ctx, pmQuery, tenantID, purchaseID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get purchase payments: %w", err))
+	}
+	defer rows.Close()
+
+	payments := make([]domain.TenantPurchasePayment, 0)
+	for rows.Next() {
+		var pm domain.TenantPurchasePayment
+		if err := rows.Scan(
+			&pm.ID,
+			&pm.TenantID,
+			&pm.PurchaseID,
+			&pm.CustomerID,
+			&pm.PaymentMethod,
+			&pm.BankID,
+			&pm.BankName,
+			&pm.Amount,
+			&pm.Note,
+			&pm.IsSettlement,
+			&pm.CreatedAt,
+			&pm.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan purchase payment: %w", err))
+		}
+		payments = append(payments, pm)
+	}
+	return payments, nil
+}
+
+func (r *TenantPurchasePostgres) ListPaymentsByCustomerID(ctx context.Context, tenantID, customerID uuid.UUID) ([]domain.TenantPurchasePayment, error) {
+	pmQuery := `
+		SELECT p.id, p.tenant_id, p.purchase_id, p.customer_id, p.payment_method, p.bank_id, p.bank_name, p.amount, p.note, p.is_settlement, p.created_at, p.updated_at
+		FROM tenant_purchase_payment p
+		LEFT JOIN tenant_purchase tp ON tp.id = p.purchase_id
+		WHERE p.tenant_id = $1 AND (p.customer_id = $2 OR tp.customer_id = $2)
+		ORDER BY p.created_at ASC
+	`
+	exec := GetExecutor(ctx, r.pool)
+	rows, err := exec.Query(ctx, pmQuery, tenantID, customerID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to list customer purchase payments: %w", err))
+	}
+	defer rows.Close()
+
+	payments := make([]domain.TenantPurchasePayment, 0)
+	for rows.Next() {
+		var pm domain.TenantPurchasePayment
+		if err := rows.Scan(
+			&pm.ID,
+			&pm.TenantID,
+			&pm.PurchaseID,
+			&pm.CustomerID,
+			&pm.PaymentMethod,
+			&pm.BankID,
+			&pm.BankName,
+			&pm.Amount,
+			&pm.Note,
+			&pm.IsSettlement,
+			&pm.CreatedAt,
+			&pm.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan customer purchase payment: %w", err))
+		}
+		payments = append(payments, pm)
+	}
+	return payments, nil
+}
+
+func (r *TenantPurchasePostgres) GetCustomerPayableSummary(ctx context.Context, tenantID, customerID uuid.UUID) (totalPurchases, totalPaid, outstandingPayable decimal.Decimal, err error) {
+	query := `
+		SELECT
+			COALESCE(SUM(total_amount), 0.00),
+			COALESCE(SUM(total_paid), 0.00),
+			COALESCE(SUM(total_pending), 0.00)
+		FROM tenant_purchase
+		WHERE tenant_id = $1 AND customer_id = $2
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err = exec.QueryRow(ctx, query, tenantID, customerID).Scan(&totalPurchases, &totalPaid, &outstandingPayable)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, decimal.Zero, appErrors.NewDatabase(fmt.Errorf("failed to get customer payable summary: %w", err))
+	}
+	return totalPurchases, totalPaid, outstandingPayable, nil
+}
+
+func (r *TenantPurchasePostgres) GetCustomerPayableSummariesBatch(ctx context.Context, tenantID uuid.UUID, customerIDs []uuid.UUID) (map[uuid.UUID]domain.CustomerPayableSummary, error) {
+	result := make(map[uuid.UUID]domain.CustomerPayableSummary)
+	if len(customerIDs) == 0 {
+		return result, nil
+	}
+
+	query := `
+		SELECT
+			customer_id,
+			COALESCE(SUM(total_amount), 0.00),
+			COALESCE(SUM(total_paid), 0.00),
+			COALESCE(SUM(total_pending), 0.00)
+		FROM tenant_purchase
+		WHERE tenant_id = $1 AND customer_id = ANY($2)
+		GROUP BY customer_id
+	`
+	exec := GetExecutor(ctx, r.pool)
+	rows, err := exec.Query(ctx, query, tenantID, customerIDs)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get customer payable summaries batch: %w", err))
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var custID *uuid.UUID
+		var summary domain.CustomerPayableSummary
+		if err := rows.Scan(&custID, &summary.TotalPurchases, &summary.TotalPaid, &summary.OutstandingPayable); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan customer payable summary: %w", err))
+		}
+		if custID != nil {
+			result[*custID] = summary
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("rows error in customer payable summaries batch: %w", err))
+	}
+
+	return result, nil
 }
 
 // ==========================================

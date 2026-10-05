@@ -149,6 +149,8 @@ func (r *RedisConfig) Addr() string {
 func Load() (*Config, error) {
 	// Best-effort load from .env file (does not overwrite existing environment variables)
 	_ = godotenv.Load()
+	_ = godotenv.Load("../.env")
+	_ = godotenv.Load("../../.env")
 
 	tz := getEnv("APP_TIMEZONE", "Asia/Kolkata")
 	loc, err := time.LoadLocation(tz)
