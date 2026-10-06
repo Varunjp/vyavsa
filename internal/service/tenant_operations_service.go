@@ -35,6 +35,8 @@ type TenantOperationsService struct {
 	purchRepo     repository.TenantPurchaseRepository
 	expRepo       repository.TenantExpenseRepository
 	attRepo       repository.AttendanceRepository
+	advRepo       repository.EmployeeAdvanceRepository
+	otRepo        repository.EmployeeOvertimeRepository
 	salaryRepo    repository.EmployeeSalaryRepository
 	statsRepo     repository.TenantDailyStatsRepository
 	summaryRepo   repository.TenantFinancialSummaryRepository
@@ -55,6 +57,8 @@ func NewTenantOperationsService(
 	purchRepo repository.TenantPurchaseRepository,
 	expRepo repository.TenantExpenseRepository,
 	attRepo repository.AttendanceRepository,
+	advRepo repository.EmployeeAdvanceRepository,
+	otRepo repository.EmployeeOvertimeRepository,
 	salaryRepo repository.EmployeeSalaryRepository,
 	statsRepo repository.TenantDailyStatsRepository,
 	summaryRepo repository.TenantFinancialSummaryRepository,
@@ -72,6 +76,8 @@ func NewTenantOperationsService(
 		purchRepo:     purchRepo,
 		expRepo:       expRepo,
 		attRepo:       attRepo,
+		advRepo:       advRepo,
+		otRepo:        otRepo,
 		salaryRepo:    salaryRepo,
 		statsRepo:     statsRepo,
 		summaryRepo:   summaryRepo,
@@ -282,6 +288,10 @@ func (s *TenantOperationsService) UpdateEmployee(ctx context.Context, tenantID, 
 
 	if err := s.empRepo.Update(ctx, emp); err != nil {
 		return nil, err
+	}
+
+	if req.Salary != nil {
+		_, _ = s.salaryRepo.RecalculateBalance(ctx, tenantID, id)
 	}
 
 	return emp, nil
@@ -1861,6 +1871,12 @@ func (s *TenantOperationsService) RecordSupplierPayment(ctx context.Context, ten
 				custID = &customer.ID
 			}
 
+			pDate := req.PaymentDate
+			if pDate == "" {
+				pDate = todayString()
+			}
+			refID := req.ReferenceID
+
 			if req.PaymentMethod == "cash" {
 				paymentRecord := &domain.TenantPurchasePayment{
 					TenantID:      tenantID,
@@ -1868,6 +1884,9 @@ func (s *TenantOperationsService) RecordSupplierPayment(ctx context.Context, ten
 					CustomerID:    custID,
 					PaymentMethod: "cash",
 					Amount:        alloc,
+					PaymentDate:   pDate,
+					ReferenceID:   refID,
+					Status:        "COMPLETED",
 					Note:          req.Note,
 					IsSettlement:  true,
 				}
@@ -1885,6 +1904,9 @@ func (s *TenantOperationsService) RecordSupplierPayment(ctx context.Context, ten
 						BankID:        &vb.BankID,
 						BankName:      vb.BankName,
 						Amount:        alloc,
+						PaymentDate:   pDate,
+						ReferenceID:   refID,
+						Status:        "COMPLETED",
 						Note:          req.Note,
 						IsSettlement:  true,
 					}
@@ -1903,6 +1925,9 @@ func (s *TenantOperationsService) RecordSupplierPayment(ctx context.Context, ten
 								BankID:        &vb.BankID,
 								BankName:      vb.BankName,
 								Amount:        share,
+								PaymentDate:   pDate,
+								ReferenceID:   refID,
+								Status:        "COMPLETED",
 								Note:          req.Note,
 								IsSettlement:  true,
 							}
@@ -2143,10 +2168,29 @@ func (s *TenantOperationsService) CreateExpense(ctx context.Context, tenantID uu
 		return nil, validationErr("total_amount", "total amount cannot be negative")
 	}
 
+	isAdvance := req.Category == "employee_advance" || (req.EmployeeID != nil && *req.EmployeeID != uuid.Nil)
+	var employee *domain.TenantEmployee
+	if isAdvance {
+		if req.EmployeeID == nil || *req.EmployeeID == uuid.Nil {
+			return nil, validationErr("employee_id", "an employee must be selected when expense type is employee advance")
+		}
+		emp, err := s.empRepo.GetByID(ctx, tenantID, *req.EmployeeID)
+		if err != nil {
+			return nil, appErrors.NewBadRequest("invalid employee for tenant")
+		}
+		employee = emp
+		req.Category = "employee_advance"
+	}
+
 	expense := &domain.TenantExpense{
 		TenantID:    tenantID,
 		Item:        req.Item,
 		TotalAmount: req.TotalAmount,
+		Category:    req.Category,
+		EmployeeID:  req.EmployeeID,
+	}
+	if employee != nil {
+		expense.EmployeeName = employee.Name
 	}
 
 	payments := make([]domain.TenantExpensePayment, len(req.Payments))
@@ -2196,6 +2240,54 @@ func (s *TenantOperationsService) CreateExpense(ctx context.Context, tenantID uu
 	err := s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
 		if err := s.expRepo.Create(txCtx, expense, payments); err != nil {
 			return err
+		}
+
+		// If this is an employee advance, record in employee_advances and update attendance & salary balance
+		if isAdvance && employee != nil {
+			pm := req.PaymentMethod
+			if pm == "" {
+				pm = "cash"
+			}
+			advRecord := &domain.EmployeeAdvance{
+				TenantID:      tenantID,
+				EmployeeID:    employee.ID,
+				EmployeeName:  employee.Name,
+				Amount:        req.TotalAmount,
+				PaymentMethod: pm,
+				ReferenceID:   req.ReferenceID,
+				AdvanceDate:   todayString(),
+				Notes:         req.Item,
+			}
+			if err := s.advRepo.Create(txCtx, advRecord); err != nil {
+				return fmt.Errorf("failed to record advance ledger entry: %w", err)
+			}
+
+			// Update attendance advance for today
+			att, err := s.attRepo.GetByEmployeeAndDate(txCtx, tenantID, employee.ID, todayString())
+			if err == nil {
+				if att == nil {
+					att = &domain.Attendance{
+						TenantID:   tenantID,
+						EmployeeID: employee.ID,
+						Date:       todayString(),
+						Status:     "present",
+						Advance:    req.TotalAmount,
+					}
+				} else {
+					att.Advance = att.Advance.Add(req.TotalAmount)
+				}
+				_ = s.attRepo.Upsert(txCtx, att)
+			}
+
+			// Deduct from employee net salary balance
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, employee.ID, req.TotalAmount.Neg()); err != nil {
+				return fmt.Errorf("failed to adjust salary balance for advance: %w", err)
+			}
+			_, _ = s.salaryRepo.RecalculateBalance(txCtx, tenantID, employee.ID)
+
+			if s.metrics != nil {
+				s.metrics.IncEmployeeAdvancesCreated()
+			}
 		}
 
 		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
@@ -2356,6 +2448,17 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 		newDailySalary = decimal.Zero // absent, leave
 	}
 
+	var oldOTAmount decimal.Decimal
+	if existing != nil {
+		oldOTAmount = existing.OTAmount
+	}
+
+	newOTAmount := req.OTAmount
+	if newOTAmount.IsZero() && req.OT.GreaterThan(decimal.Zero) {
+		newOTAmount = req.OT.Mul(emp.OTRate)
+	}
+	otDelta := newOTAmount.Sub(oldOTAmount)
+
 	salaryDelta := newDailySalary.Sub(oldDailySalary)
 	advanceDelta := req.Advance.Sub(oldAdvance)
 
@@ -2366,12 +2469,33 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 		Status:      req.Status,
 		DailySalary: newDailySalary,
 		OT:          req.OT,
+		OTAmount:    newOTAmount,
 		Advance:     req.Advance,
 	}
 
 	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
 		if err := s.attRepo.Upsert(txCtx, att); err != nil {
 			return err
+		}
+
+		// Handle overtime delta
+		if !otDelta.IsZero() {
+			if otDelta.GreaterThan(decimal.Zero) {
+				otRecord := &domain.EmployeeOvertime{
+					TenantID:     tenantID,
+					EmployeeID:   req.EmployeeID,
+					EmployeeName: emp.Name,
+					Amount:       otDelta,
+					OvertimeDate: attDate,
+					Notes:        "Attendance overtime",
+				}
+				if err := s.otRepo.Create(txCtx, otRecord); err != nil {
+					return fmt.Errorf("failed to create overtime transaction: %w", err)
+				}
+			}
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, otDelta); err != nil {
+				return fmt.Errorf("failed to adjust employee salary balance for overtime: %w", err)
+			}
 		}
 
 		// Credit/debit employee salary balance by salary delta (avoids crediting absent, handles status change/retry idempotently)
@@ -2390,11 +2514,27 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 					return fmt.Errorf("failed to update financial summary for attendance advance: %w", err)
 				}
 			}
+			if advanceDelta.GreaterThan(decimal.Zero) {
+				advRecord := &domain.EmployeeAdvance{
+					TenantID:      tenantID,
+					EmployeeID:    req.EmployeeID,
+					EmployeeName:  emp.Name,
+					Amount:        advanceDelta,
+					PaymentMethod: "cash",
+					AdvanceDate:   attDate,
+					Notes:         "Attendance cash advance",
+				}
+				if err := s.advRepo.Create(txCtx, advRecord); err != nil {
+					return fmt.Errorf("failed to create advance transaction: %w", err)
+				}
+			}
 			// Deduct advance from employee salary balance
 			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, advanceDelta.Neg()); err != nil {
 				return fmt.Errorf("failed to adjust employee salary balance for advance: %w", err)
 			}
 		}
+
+		_, _ = s.salaryRepo.RecalculateBalance(txCtx, tenantID, req.EmployeeID)
 
 		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, attDate); err != nil {
 			s.logger.WarnContext(txCtx, "failed to sync daily stats after attendance record", "error", err.Error())
@@ -2409,6 +2549,10 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 }
 
 func (s *TenantOperationsService) RecordOvertime(ctx context.Context, tenantID uuid.UUID, role string, req *dto.RecordOvertimeRequest) (*domain.Attendance, error) {
+	if req.Amount.IsNegative() || req.Amount.IsZero() {
+		return nil, validationErr("amount", "overtime amount must be strictly greater than zero")
+	}
+
 	emp, err := s.empRepo.GetByID(ctx, tenantID, req.EmployeeID)
 	if err != nil {
 		return nil, appErrors.NewBadRequest("invalid employee for tenant")
@@ -2425,6 +2569,21 @@ func (s *TenantOperationsService) RecordOvertime(ctx context.Context, tenantID u
 
 	var updatedAtt *domain.Attendance
 	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		// 1. Record permanent overtime transaction in employee_overtime table
+		otRecord := &domain.EmployeeOvertime{
+			TenantID:     tenantID,
+			EmployeeID:   req.EmployeeID,
+			EmployeeName: emp.Name,
+			Amount:       req.Amount,
+			OvertimeDate: date,
+			ReferenceID:  req.ReferenceID,
+			Notes:        req.Note,
+		}
+		if err := s.otRepo.Create(txCtx, otRecord); err != nil {
+			return fmt.Errorf("failed to create overtime transaction: %w", err)
+		}
+
+		// 2. Update daily attendance record (storing direct OT amount)
 		existing, err := s.attRepo.GetByEmployeeAndDate(txCtx, tenantID, req.EmployeeID, date)
 		if err != nil {
 			return err
@@ -2437,10 +2596,14 @@ func (s *TenantOperationsService) RecordOvertime(ctx context.Context, tenantID u
 				Date:       date,
 				Status:     "present",
 				OT:         req.OT,
+				OTAmount:   req.Amount,
 				Advance:    decimal.Zero,
 			}
 		} else {
-			existing.OT = existing.OT.Add(req.OT)
+			if req.OT.GreaterThan(decimal.Zero) {
+				existing.OT = existing.OT.Add(req.OT)
+			}
+			existing.OTAmount = existing.OTAmount.Add(req.Amount)
 		}
 
 		if err := s.attRepo.Upsert(txCtx, existing); err != nil {
@@ -2448,12 +2611,14 @@ func (s *TenantOperationsService) RecordOvertime(ctx context.Context, tenantID u
 		}
 		updatedAtt = existing
 
-		// Add OT wage to employee salary balance: ot_hours * ot_rate
-		if emp.OTRate.GreaterThan(decimal.Zero) {
-			otWages := req.OT.Mul(emp.OTRate)
-			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, otWages); err != nil {
-				return err
-			}
+		// 3. Add OT amount to employee salary balance
+		if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, req.Amount); err != nil {
+			return fmt.Errorf("failed to adjust salary balance for overtime: %w", err)
+		}
+		_, _ = s.salaryRepo.RecalculateBalance(txCtx, tenantID, req.EmployeeID)
+
+		if s.metrics != nil {
+			s.metrics.IncOvertimeCreated()
 		}
 
 		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, date); err != nil {
@@ -2473,7 +2638,7 @@ func (s *TenantOperationsService) RecordAdvance(ctx context.Context, tenantID uu
 		return nil, validationErr("amount", "advance amount must be greater than zero")
 	}
 
-	_, err := s.empRepo.GetByID(ctx, tenantID, req.EmployeeID)
+	emp, err := s.empRepo.GetByID(ctx, tenantID, req.EmployeeID)
 	if err != nil {
 		return nil, appErrors.NewBadRequest("invalid employee for tenant")
 	}
@@ -2487,8 +2652,29 @@ func (s *TenantOperationsService) RecordAdvance(ctx context.Context, tenantID uu
 		return nil, err
 	}
 
+	pm := req.PaymentMethod
+	if pm == "" {
+		pm = "cash"
+	}
+
 	var updatedAtt *domain.Attendance
 	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		// 1. Record permanent transaction in employee_advances table
+		adv := &domain.EmployeeAdvance{
+			TenantID:      tenantID,
+			EmployeeID:    req.EmployeeID,
+			EmployeeName:  emp.Name,
+			Amount:        req.Amount,
+			PaymentMethod: pm,
+			ReferenceID:   req.ReferenceID,
+			AdvanceDate:   date,
+			Notes:         req.Note,
+		}
+		if err := s.advRepo.Create(txCtx, adv); err != nil {
+			return fmt.Errorf("failed to create advance transaction: %w", err)
+		}
+
+		// 2. Update daily attendance record
 		existing, err := s.attRepo.GetByEmployeeAndDate(txCtx, tenantID, req.EmployeeID, date)
 		if err != nil {
 			return err
@@ -2501,6 +2687,7 @@ func (s *TenantOperationsService) RecordAdvance(ctx context.Context, tenantID uu
 				Date:       date,
 				Status:     "present",
 				OT:         decimal.Zero,
+				OTAmount:   decimal.Zero,
 				Advance:    req.Amount,
 			}
 		} else {
@@ -2512,7 +2699,7 @@ func (s *TenantOperationsService) RecordAdvance(ctx context.Context, tenantID uu
 		}
 		updatedAtt = existing
 
-		// Update financial summary: deduct cash (or bank)
+		// 3. Update financial summary: deduct cash (or bank)
 		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
 		if err == nil {
 			if req.PaymentMethod == "bank" {
@@ -2525,9 +2712,14 @@ func (s *TenantOperationsService) RecordAdvance(ctx context.Context, tenantID uu
 			}
 		}
 
-		// Deduct advance from employee salary balance
+		// 4. Deduct advance from employee salary balance
 		if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, req.EmployeeID, req.Amount.Neg()); err != nil {
-			return fmt.Errorf("failed to adjust employee salary balance for advance: %w", err)
+			return fmt.Errorf("failed to adjust salary balance for advance: %w", err)
+		}
+		_, _ = s.salaryRepo.RecalculateBalance(txCtx, tenantID, req.EmployeeID)
+
+		if s.metrics != nil {
+			s.metrics.IncEmployeeAdvancesCreated()
 		}
 
 		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, date); err != nil {
@@ -2558,6 +2750,14 @@ func (s *TenantOperationsService) UpdateAttendance(ctx context.Context, tenantID
 	if req.OT != nil {
 		att.OT = *req.OT
 	}
+	if req.OTAmount != nil {
+		att.OTAmount = *req.OTAmount
+	} else if req.OT != nil {
+		emp, err := s.empRepo.GetByID(ctx, tenantID, att.EmployeeID)
+		if err == nil {
+			att.OTAmount = req.OT.Mul(emp.OTRate)
+		}
+	}
 	if req.Advance != nil {
 		att.Advance = *req.Advance
 	}
@@ -2566,6 +2766,7 @@ func (s *TenantOperationsService) UpdateAttendance(ctx context.Context, tenantID
 		return nil, err
 	}
 
+	_, _ = s.salaryRepo.RecalculateBalance(ctx, tenantID, att.EmployeeID)
 	_, _ = s.statsRepo.ComputeAndSyncDailyStats(ctx, tenantID, att.Date)
 	return att, nil
 }
@@ -2634,6 +2835,11 @@ func (s *TenantOperationsService) PaySalary(ctx context.Context, tenantID, emplo
 		req.BankName = bank.BankName
 	}
 
+	pDate := req.PaymentDate
+	if pDate == "" {
+		pDate = todayString()
+	}
+
 	payment := &domain.EmployeeSalaryPayment{
 		TenantID:      tenantID,
 		EmployeeID:    employeeID,
@@ -2642,10 +2848,25 @@ func (s *TenantOperationsService) PaySalary(ctx context.Context, tenantID, emplo
 		BankID:        req.BankID,
 		BankName:      req.BankName,
 		Amount:        req.Amount,
+		PaymentDate:   pDate,
+		ReferenceID:   req.ReferenceID,
+		Status:        "COMPLETED",
 		Note:          req.Note,
 	}
 
 	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		// Acquire row-level lock on employee salary to prevent double payments
+		currentSalary, err := s.salaryRepo.GetByEmployeeIDForUpdate(txCtx, tenantID, employeeID)
+		if err != nil {
+			return err
+		}
+		if currentSalary.Balance.LessThanOrEqual(decimal.Zero) {
+			return appErrors.NewBadRequest(fmt.Sprintf("employee '%s' has no outstanding salary balance to pay", emp.Name))
+		}
+		if req.Amount.GreaterThan(currentSalary.Balance) {
+			return appErrors.NewBadRequest(fmt.Sprintf("payment amount (₹%s) exceeds outstanding salary balance (₹%s)", req.Amount.StringFixed(2), currentSalary.Balance.StringFixed(2)))
+		}
+
 		if err := s.salaryRepo.CreatePayment(txCtx, payment); err != nil {
 			return err
 		}
@@ -2654,6 +2875,7 @@ func (s *TenantOperationsService) PaySalary(ctx context.Context, tenantID, emplo
 		if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, employeeID, req.Amount.Neg()); err != nil {
 			return err
 		}
+		_, _ = s.salaryRepo.RecalculateBalance(txCtx, tenantID, employeeID)
 
 		// Update financial summary
 		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
@@ -2666,6 +2888,10 @@ func (s *TenantOperationsService) PaySalary(ctx context.Context, tenantID, emplo
 			if err := s.summaryRepo.Update(txCtx, summary); err != nil {
 				return fmt.Errorf("failed to update financial summary for salary payment: %w", err)
 			}
+		}
+
+		if s.metrics != nil {
+			s.metrics.IncSalaryPayments()
 		}
 
 		if _, err := s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString()); err != nil {
@@ -2682,6 +2908,198 @@ func (s *TenantOperationsService) PaySalary(ctx context.Context, tenantID, emplo
 
 func (s *TenantOperationsService) ListSalaryPayments(ctx context.Context, tenantID uuid.UUID, employeeID *uuid.UUID, page, pageSize int) ([]domain.EmployeeSalaryPayment, int64, error) {
 	return s.salaryRepo.ListPayments(ctx, tenantID, employeeID, page, pageSize)
+}
+
+func (s *TenantOperationsService) GetSalaryStatement(ctx context.Context, tenantID, employeeID uuid.UUID) (*domain.EmployeeSalaryStatement, error) {
+	return s.salaryRepo.GetStatement(ctx, tenantID, employeeID)
+}
+
+func (s *TenantOperationsService) ListEmployeeAdvances(ctx context.Context, tenantID uuid.UUID, page, pageSize int, employeeID *uuid.UUID, date string) ([]domain.EmployeeAdvance, int64, error) {
+	return s.advRepo.List(ctx, tenantID, page, pageSize, employeeID, date)
+}
+
+func (s *TenantOperationsService) ListEmployeeOvertime(ctx context.Context, tenantID uuid.UUID, page, pageSize int, employeeID *uuid.UUID, date string) ([]domain.EmployeeOvertime, int64, error) {
+	return s.otRepo.List(ctx, tenantID, page, pageSize, employeeID, date)
+}
+
+func (s *TenantOperationsService) ListPurchasePaymentsByPurchaseID(ctx context.Context, tenantID, purchaseID uuid.UUID) ([]domain.TenantPurchasePayment, error) {
+	return s.purchRepo.ListPaymentsByPurchaseID(ctx, tenantID, purchaseID)
+}
+
+func (s *TenantOperationsService) RecordLineSalePayment(ctx context.Context, tenantID, lineSaleID uuid.UUID, role string, req *dto.RecordSalePaymentRequest) (*domain.LineSalePayment, error) {
+	if req.Amount.LessThanOrEqual(decimal.Zero) {
+		return nil, validationErr("amount", "payment amount must be greater than zero")
+	}
+	if req.PaymentMethod != "cash" && req.PaymentMethod != "bank" {
+		return nil, validationErr("payment_method", "payment method must be either 'cash' or 'bank'")
+	}
+
+	if req.PaymentMethod == "bank" && req.BankID != nil && *req.BankID != uuid.Nil {
+		bank, err := s.bankRepo.GetByID(ctx, tenantID, *req.BankID)
+		if err != nil {
+			return nil, appErrors.NewBadRequest("invalid bank account specified for line sale payment")
+		}
+		req.BankName = bank.BankName
+	}
+
+	pDate := req.PaymentDate
+	if pDate == "" {
+		pDate = todayString()
+	}
+
+	var payment *domain.LineSalePayment
+	err := s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		sale, err := s.lineSaleRepo.GetByIDForUpdate(txCtx, tenantID, lineSaleID)
+		if err != nil {
+			return err
+		}
+		if sale.Balance.LessThanOrEqual(decimal.Zero) {
+			return appErrors.NewBadRequest("line sale has already been fully collected")
+		}
+		if req.Amount.GreaterThan(sale.Balance) {
+			return appErrors.NewBadRequest(fmt.Sprintf("payment amount (₹%s) exceeds outstanding balance (₹%s)", req.Amount.StringFixed(2), sale.Balance.StringFixed(2)))
+		}
+
+		payment = &domain.LineSalePayment{
+			TenantID:      tenantID,
+			LineSaleID:    lineSaleID,
+			PaymentMethod: req.PaymentMethod,
+			BankID:        req.BankID,
+			BankName:      req.BankName,
+			Amount:        req.Amount,
+			PaymentDate:   pDate,
+			ReferenceID:   req.ReferenceID,
+			Status:        "COMPLETED",
+			Note:          req.Note,
+		}
+		if err := s.lineSaleRepo.CreatePayment(txCtx, payment); err != nil {
+			return fmt.Errorf("failed to create line sale payment: %w", err)
+		}
+
+		sale.CollectedAmount = sale.CollectedAmount.Add(req.Amount)
+		if req.PaymentMethod == "cash" {
+			sale.TotalCashIn = sale.TotalCashIn.Add(req.Amount)
+		} else {
+			sale.BankAmount = sale.BankAmount.Add(req.Amount)
+		}
+		sale.Balance = sale.Balance.Sub(req.Amount)
+		if err := s.lineSaleRepo.Update(txCtx, sale); err != nil {
+			return fmt.Errorf("failed to update line sale balance: %w", err)
+		}
+
+		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+		if err == nil {
+			if req.PaymentMethod == "cash" {
+				summary.CashBalance = summary.CashBalance.Add(req.Amount)
+			} else {
+				summary.BankBalance = summary.BankBalance.Add(req.Amount)
+			}
+			_ = s.summaryRepo.Update(txCtx, summary)
+		}
+
+		if s.metrics != nil {
+			s.metrics.RecordSalesPayment(req.PaymentMethod, req.Amount.InexactFloat64())
+		}
+
+		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return payment, nil
+}
+
+func (s *TenantOperationsService) ListLineSalePayments(ctx context.Context, tenantID, lineSaleID uuid.UUID) ([]domain.LineSalePayment, error) {
+	return s.lineSaleRepo.ListPaymentsByLineSaleID(ctx, tenantID, lineSaleID)
+}
+
+func (s *TenantOperationsService) RecordCounterSalePayment(ctx context.Context, tenantID, counterSaleID uuid.UUID, role string, req *dto.RecordSalePaymentRequest) (*domain.CounterSalePayment, error) {
+	if req.Amount.LessThanOrEqual(decimal.Zero) {
+		return nil, validationErr("amount", "payment amount must be greater than zero")
+	}
+	if req.PaymentMethod != "cash" && req.PaymentMethod != "bank" {
+		return nil, validationErr("payment_method", "payment method must be either 'cash' or 'bank'")
+	}
+
+	if req.PaymentMethod == "bank" && req.BankID != nil && *req.BankID != uuid.Nil {
+		bank, err := s.bankRepo.GetByID(ctx, tenantID, *req.BankID)
+		if err != nil {
+			return nil, appErrors.NewBadRequest("invalid bank account specified for counter sale payment")
+		}
+		req.BankName = bank.BankName
+	}
+
+	pDate := req.PaymentDate
+	if pDate == "" {
+		pDate = todayString()
+	}
+
+	var payment *domain.CounterSalePayment
+	err := s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		sale, err := s.countSaleRepo.GetByIDForUpdate(txCtx, tenantID, counterSaleID)
+		if err != nil {
+			return err
+		}
+		pending := sale.TotalAmount.Sub(sale.CollectedAmount)
+		if pending.LessThanOrEqual(decimal.Zero) {
+			return appErrors.NewBadRequest("counter sale has already been fully collected")
+		}
+		if req.Amount.GreaterThan(pending) {
+			return appErrors.NewBadRequest(fmt.Sprintf("payment amount (₹%s) exceeds pending amount (₹%s)", req.Amount.StringFixed(2), pending.StringFixed(2)))
+		}
+
+		payment = &domain.CounterSalePayment{
+			TenantID:      tenantID,
+			CounterSaleID: counterSaleID,
+			PaymentMethod: req.PaymentMethod,
+			BankID:        req.BankID,
+			BankName:      req.BankName,
+			Amount:        req.Amount,
+			PaymentDate:   pDate,
+			ReferenceID:   req.ReferenceID,
+			Status:        "COMPLETED",
+			Note:          req.Note,
+		}
+		if err := s.countSaleRepo.CreatePayment(txCtx, payment); err != nil {
+			return fmt.Errorf("failed to create counter sale payment: %w", err)
+		}
+
+		sale.CollectedAmount = sale.CollectedAmount.Add(req.Amount)
+		if req.PaymentMethod == "cash" {
+			sale.Cash = sale.Cash.Add(req.Amount)
+		} else {
+			sale.BankAmount = sale.BankAmount.Add(req.Amount)
+		}
+		if err := s.countSaleRepo.Update(txCtx, sale); err != nil {
+			return fmt.Errorf("failed to update counter sale: %w", err)
+		}
+
+		summary, err := s.summaryRepo.GetByTenantIDForUpdate(txCtx, tenantID)
+		if err == nil {
+			if req.PaymentMethod == "cash" {
+				summary.CashBalance = summary.CashBalance.Add(req.Amount)
+			} else {
+				summary.BankBalance = summary.BankBalance.Add(req.Amount)
+			}
+			_ = s.summaryRepo.Update(txCtx, summary)
+		}
+
+		if s.metrics != nil {
+			s.metrics.RecordSalesPayment(req.PaymentMethod, req.Amount.InexactFloat64())
+		}
+
+		_, _ = s.statsRepo.ComputeAndSyncDailyStats(txCtx, tenantID, todayString())
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return payment, nil
+}
+
+func (s *TenantOperationsService) ListCounterSalePayments(ctx context.Context, tenantID, counterSaleID uuid.UUID) ([]domain.CounterSalePayment, error) {
+	return s.countSaleRepo.ListPaymentsByCounterSaleID(ctx, tenantID, counterSaleID)
 }
 
 func hasStatsActivity(s *domain.TenantDailyStats) bool {

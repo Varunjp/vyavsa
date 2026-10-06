@@ -269,6 +269,27 @@ func (m *mockOpLineSaleRepo) Update(ctx context.Context, sale *domain.LineSale) 
 	return nil
 }
 
+func (m *mockOpLineSaleRepo) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.LineSale, error) {
+	return m.GetByID(ctx, tenantID, id)
+}
+
+func (m *mockOpLineSaleRepo) CreatePayment(ctx context.Context, payment *domain.LineSalePayment) error {
+	payment.ID = uuid.New()
+	payment.CreatedAt = time.Now().UTC()
+	payment.UpdatedAt = time.Now().UTC()
+	if s, ok := m.sales[payment.LineSaleID]; ok {
+		s.Payments = append(s.Payments, *payment)
+	}
+	return nil
+}
+
+func (m *mockOpLineSaleRepo) ListPaymentsByLineSaleID(ctx context.Context, tenantID, lineSaleID uuid.UUID) ([]domain.LineSalePayment, error) {
+	if s, ok := m.sales[lineSaleID]; ok && s.TenantID == tenantID {
+		return s.Payments, nil
+	}
+	return []domain.LineSalePayment{}, nil
+}
+
 func (m *mockOpLineSaleRepo) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
 	delete(m.sales, id)
 	return nil
@@ -308,6 +329,27 @@ func (m *mockOpCounterSaleRepo) GetByID(ctx context.Context, tenantID, id uuid.U
 		return nil, appErrors.NewNotFound("counter sale not found")
 	}
 	return s, nil
+}
+
+func (m *mockOpCounterSaleRepo) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.CounterSale, error) {
+	return m.GetByID(ctx, tenantID, id)
+}
+
+func (m *mockOpCounterSaleRepo) CreatePayment(ctx context.Context, payment *domain.CounterSalePayment) error {
+	payment.ID = uuid.New()
+	payment.CreatedAt = time.Now().UTC()
+	payment.UpdatedAt = time.Now().UTC()
+	if s, ok := m.sales[payment.CounterSaleID]; ok {
+		s.Payments = append(s.Payments, *payment)
+	}
+	return nil
+}
+
+func (m *mockOpCounterSaleRepo) ListPaymentsByCounterSaleID(ctx context.Context, tenantID, counterSaleID uuid.UUID) ([]domain.CounterSalePayment, error) {
+	if s, ok := m.sales[counterSaleID]; ok && s.TenantID == tenantID {
+		return s.Payments, nil
+	}
+	return []domain.CounterSalePayment{}, nil
 }
 
 func (m *mockOpCounterSaleRepo) Update(ctx context.Context, sale *domain.CounterSale) error {
@@ -657,6 +699,32 @@ func (m *mockOpSalaryRepo) ListPending(ctx context.Context, tenantID uuid.UUID, 
 	return list, int64(len(list)), nil
 }
 
+func (m *mockOpSalaryRepo) GetByEmployeeIDForUpdate(ctx context.Context, tenantID, employeeID uuid.UUID) (*domain.EmployeeSalary, error) {
+	return m.GetByEmployeeID(ctx, tenantID, employeeID)
+}
+
+func (m *mockOpSalaryRepo) RecalculateBalance(ctx context.Context, tenantID, employeeID uuid.UUID) (*domain.EmployeeSalary, error) {
+	return m.GetByEmployeeID(ctx, tenantID, employeeID)
+}
+
+func (m *mockOpSalaryRepo) GetTotalPaymentsByEmployee(ctx context.Context, tenantID, employeeID uuid.UUID) (decimal.Decimal, error) {
+	var total decimal.Decimal
+	for _, p := range m.payments {
+		if p.TenantID == tenantID && p.EmployeeID == employeeID {
+			total = total.Add(p.Amount)
+		}
+	}
+	return total, nil
+}
+
+func (m *mockOpSalaryRepo) GetStatement(ctx context.Context, tenantID, employeeID uuid.UUID) (*domain.EmployeeSalaryStatement, error) {
+	sal, _ := m.GetByEmployeeID(ctx, tenantID, employeeID)
+	return &domain.EmployeeSalaryStatement{
+		EmployeeID: employeeID,
+		NetPayable: sal.Balance,
+	}, nil
+}
+
 func (m *mockOpSalaryRepo) CreatePayment(ctx context.Context, payment *domain.EmployeeSalaryPayment) error {
 	payment.ID = uuid.New()
 	payment.CreatedAt = time.Now().UTC()
@@ -676,6 +744,110 @@ func (m *mockOpSalaryRepo) ListPayments(ctx context.Context, tenantID uuid.UUID,
 		}
 	}
 	return list, int64(len(list)), nil
+}
+
+// Mock Advance Repo
+type mockOpAdvanceRepo struct {
+	advances []domain.EmployeeAdvance
+}
+
+func newMockOpAdvanceRepo() *mockOpAdvanceRepo {
+	return &mockOpAdvanceRepo{advances: make([]domain.EmployeeAdvance, 0)}
+}
+
+func (m *mockOpAdvanceRepo) Create(ctx context.Context, adv *domain.EmployeeAdvance) error {
+	adv.ID = uuid.New()
+	adv.CreatedAt = time.Now().UTC()
+	adv.UpdatedAt = time.Now().UTC()
+	m.advances = append(m.advances, *adv)
+	return nil
+}
+
+func (m *mockOpAdvanceRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.EmployeeAdvance, error) {
+	for _, a := range m.advances {
+		if a.TenantID == tenantID && a.ID == id {
+			return &a, nil
+		}
+	}
+	return nil, appErrors.NewNotFound("advance not found")
+}
+
+func (m *mockOpAdvanceRepo) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, employeeID *uuid.UUID, date string) ([]domain.EmployeeAdvance, int64, error) {
+	var list []domain.EmployeeAdvance
+	for _, a := range m.advances {
+		if a.TenantID == tenantID {
+			if employeeID != nil && a.EmployeeID != *employeeID {
+				continue
+			}
+			if date != "" && a.AdvanceDate != date {
+				continue
+			}
+			list = append(list, a)
+		}
+	}
+	return list, int64(len(list)), nil
+}
+
+func (m *mockOpAdvanceRepo) GetTotalAdvancesByEmployee(ctx context.Context, tenantID, employeeID uuid.UUID) (decimal.Decimal, error) {
+	var total decimal.Decimal
+	for _, a := range m.advances {
+		if a.TenantID == tenantID && a.EmployeeID == employeeID {
+			total = total.Add(a.Amount)
+		}
+	}
+	return total, nil
+}
+
+// Mock Overtime Repo
+type mockOpOvertimeRepo struct {
+	overtimes []domain.EmployeeOvertime
+}
+
+func newMockOpOvertimeRepo() *mockOpOvertimeRepo {
+	return &mockOpOvertimeRepo{overtimes: make([]domain.EmployeeOvertime, 0)}
+}
+
+func (m *mockOpOvertimeRepo) Create(ctx context.Context, ot *domain.EmployeeOvertime) error {
+	ot.ID = uuid.New()
+	ot.CreatedAt = time.Now().UTC()
+	ot.UpdatedAt = time.Now().UTC()
+	m.overtimes = append(m.overtimes, *ot)
+	return nil
+}
+
+func (m *mockOpOvertimeRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.EmployeeOvertime, error) {
+	for _, o := range m.overtimes {
+		if o.TenantID == tenantID && o.ID == id {
+			return &o, nil
+		}
+	}
+	return nil, appErrors.NewNotFound("overtime not found")
+}
+
+func (m *mockOpOvertimeRepo) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, employeeID *uuid.UUID, date string) ([]domain.EmployeeOvertime, int64, error) {
+	var list []domain.EmployeeOvertime
+	for _, o := range m.overtimes {
+		if o.TenantID == tenantID {
+			if employeeID != nil && o.EmployeeID != *employeeID {
+				continue
+			}
+			if date != "" && o.OvertimeDate != date {
+				continue
+			}
+			list = append(list, o)
+		}
+	}
+	return list, int64(len(list)), nil
+}
+
+func (m *mockOpOvertimeRepo) GetTotalOvertimeByEmployee(ctx context.Context, tenantID, employeeID uuid.UUID) (decimal.Decimal, error) {
+	var total decimal.Decimal
+	for _, o := range m.overtimes {
+		if o.TenantID == tenantID && o.EmployeeID == employeeID {
+			total = total.Add(o.Amount)
+		}
+	}
+	return total, nil
 }
 
 // Mock Daily Stats Repo
@@ -733,6 +905,8 @@ func setupTestOperationsServiceWithRepos() (*TenantOperationsService, uuid.UUID,
 	purchRepo := newMockOpPurchaseRepo()
 	expRepo := newMockOpExpenseRepo()
 	attRepo := newMockOpAttendanceRepo()
+	advRepo := newMockOpAdvanceRepo()
+	otRepo := newMockOpOvertimeRepo()
 	salaryRepo := newMockOpSalaryRepo()
 	statsRepo := newMockOpDailyStatsRepo()
 	summaryRepo := newMockFinancialSummaryRepo()
@@ -759,6 +933,8 @@ func setupTestOperationsServiceWithRepos() (*TenantOperationsService, uuid.UUID,
 		purchRepo,
 		expRepo,
 		attRepo,
+		advRepo,
+		otRepo,
 		salaryRepo,
 		statsRepo,
 		summaryRepo,
@@ -850,11 +1026,11 @@ func TestOperationsService_EmployeeAndSalaryFlow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "present", att.Status)
 
-	// 3. Record OT
+	// 3. Record OT (direct amount as per new requirement)
 	_, err = svc.RecordOvertime(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordOvertimeRequest{
 		EmployeeID: emp.ID,
 		Date:       todayString(),
-		OT:         decimal.NewFromFloat(4.00), // 4 * 150 = 600
+		Amount:     decimal.NewFromFloat(600.00),
 	})
 	require.NoError(t, err)
 
@@ -2775,4 +2951,248 @@ func TestOperationsService_TodayOverview_OutstandingPayable(t *testing.T) {
 	require.NotNil(t, metrics)
 	require.NotNil(t, metrics.TodayOverview)
 	assert.True(t, metrics.TodayOverview.OutstandingPayable.Equal(decimal.NewFromFloat(15450.50)), "FinancialMetrics TodayOverview should have correct outstanding payable")
+}
+
+func TestOperationsService_FinancialLedger_DirectOvertime(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// 1. Create employee Rahul with Base Salary ₹20,000
+	emp, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Rahul",
+		Salary: decimal.NewFromFloat(20000.00),
+	})
+	require.NoError(t, err)
+
+	// Set opening balance to base salary
+	_, err = svc.UpdateSalaryBalance(ctx, tenantID, emp.ID, &dto.UpdateSalaryBalanceRequest{
+		Balance: decimal.NewFromFloat(20000.00),
+	})
+	require.NoError(t, err)
+
+	// 2. Overtime validation: reject zero or negative amount
+	_, err = svc.RecordOvertime(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordOvertimeRequest{
+		EmployeeID: emp.ID,
+		Date:       todayString(),
+		Amount:     decimal.Zero,
+	})
+	require.Error(t, err, "zero overtime amount should be rejected")
+
+	_, err = svc.RecordOvertime(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordOvertimeRequest{
+		EmployeeID: emp.ID,
+		Date:       todayString(),
+		Amount:     decimal.NewFromFloat(-500.00),
+	})
+	require.Error(t, err, "negative overtime amount should be rejected")
+
+	// 3. Record Overtime directly: ₹2,000
+	att, err := svc.RecordOvertime(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordOvertimeRequest{
+		EmployeeID:  emp.ID,
+		Date:        todayString(),
+		Amount:      decimal.NewFromFloat(2000.00),
+		ReferenceID: "OT-2026-001",
+		Note:        "Weekend maintenance shift",
+	})
+	require.NoError(t, err)
+	assert.True(t, att.OTAmount.Equal(decimal.NewFromFloat(2000.00)))
+
+	// 4. Verify employee salary balance increased from 20,000 to 22,000
+	sal, err := svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(22000.00)), "overtime amount must increase net salary balance to 22000")
+
+	// 5. Verify overtime history is stored
+	ots, totalOT, err := svc.ListEmployeeOvertime(ctx, tenantID, 1, 10, &emp.ID, "")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), totalOT)
+	require.Len(t, ots, 1)
+	assert.True(t, ots[0].Amount.Equal(decimal.NewFromFloat(2000.00)))
+	assert.Equal(t, "OT-2026-001", ots[0].ReferenceID)
+}
+
+func TestOperationsService_FinancialLedger_AdvancesAndExpenses(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// 1. Create employee
+	emp, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Priya Sharma",
+		Salary: decimal.NewFromFloat(25000.00),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateSalaryBalance(ctx, tenantID, emp.ID, &dto.UpdateSalaryBalanceRequest{
+		Balance: decimal.NewFromFloat(25000.00),
+	})
+	require.NoError(t, err)
+
+	// 2. Add Overtime ₹3,000 -> Gross Balance = 28,000
+	_, err = svc.RecordOvertime(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordOvertimeRequest{
+		EmployeeID: emp.ID,
+		Date:       todayString(),
+		Amount:     decimal.NewFromFloat(3000.00),
+	})
+	require.NoError(t, err)
+
+	sal, err := svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(28000.00)))
+
+	// 3. Record Advance #1: ₹2,000 -> Balance = 26,000
+	_, err = svc.RecordAdvance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAdvanceRequest{
+		EmployeeID:    emp.ID,
+		Date:          todayString(),
+		Amount:        decimal.NewFromFloat(2000.00),
+		PaymentMethod: "cash",
+		ReferenceID:   "ADV-001",
+		Note:          "Emergency medical advance",
+	})
+	require.NoError(t, err)
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(26000.00)))
+
+	// 4. Record Advance #2 via Expenses module: ₹1,500 -> Balance = 24,500
+	exp, err := svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Festival Advance for Priya",
+		TotalAmount:   decimal.NewFromFloat(1500.00),
+		Category:      "employee_advance",
+		EmployeeID:    &emp.ID,
+		PaymentMethod: "cash",
+		ReferenceID:   "ADV-002",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "employee_advance", exp.Category)
+	assert.Equal(t, &emp.ID, exp.EmployeeID)
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(24500.00)), "advances must cumulatively reduce salary balance")
+
+	// 5. Verify advance transaction history holds both records
+	advances, totalAdv, err := svc.ListEmployeeAdvances(ctx, tenantID, 1, 10, &emp.ID, "")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), totalAdv)
+	require.Len(t, advances, 2)
+}
+
+func TestOperationsService_FinancialLedger_SalaryPaymentAndProtection(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	emp, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Vikram",
+		Salary: decimal.NewFromFloat(20000.00),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateSalaryBalance(ctx, tenantID, emp.ID, &dto.UpdateSalaryBalanceRequest{
+		Balance: decimal.NewFromFloat(20000.00),
+	})
+	require.NoError(t, err)
+
+	// Overtime ₹2,000, Advance ₹3,000 -> Net Payable = 19,000
+	_, err = svc.RecordOvertime(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordOvertimeRequest{
+		EmployeeID: emp.ID,
+		Amount:     decimal.NewFromFloat(2000.00),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.RecordAdvance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAdvanceRequest{
+		EmployeeID: emp.ID,
+		Amount:     decimal.NewFromFloat(3000.00),
+	})
+	require.NoError(t, err)
+
+	sal, err := svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(19000.00)))
+
+	// Concurrency / Overpayment protection: Attempting to pay ₹25,000 should be rejected!
+	_, err = svc.PaySalary(ctx, tenantID, emp.ID, &dto.PaySalaryRequest{
+		PaymentMethod: "cash",
+		Amount:        decimal.NewFromFloat(25000.00),
+	})
+	require.Error(t, err, "cannot pay more than current outstanding salary balance")
+
+	// Payout exact net payable: ₹19,000
+	payment, err := svc.PaySalary(ctx, tenantID, emp.ID, &dto.PaySalaryRequest{
+		PaymentMethod: "cash",
+		Amount:        decimal.NewFromFloat(19000.00),
+		ReferenceID:   "SAL-PAY-001",
+		Note:          "October Full Payout",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "COMPLETED", payment.Status)
+	assert.Equal(t, "SAL-PAY-001", payment.ReferenceID)
+
+	// Balance should now be ₹0
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.IsZero(), "balance must be zero after full payment")
+
+	// Subsequent payment should be rejected as balance is 0
+	_, err = svc.PaySalary(ctx, tenantID, emp.ID, &dto.PaySalaryRequest{
+		PaymentMethod: "cash",
+		Amount:        decimal.NewFromFloat(100.00),
+	})
+	require.Error(t, err, "cannot pay when outstanding balance is zero")
+}
+
+func TestOperationsService_PaymentHistory_PurchasesAndSales(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// 1. Create Purchase of ₹10,000 with initial ₹0 paid
+	purch, err := svc.CreatePurchase(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreatePurchaseRequest{
+		Item:        "Steel Rods 12mm",
+		Quantity:    100,
+		TotalAmount: decimal.NewFromFloat(10000.00),
+		Payments:    []dto.PurchasePaymentRequest{},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "UNPAID", purch.PaymentStatus)
+	assert.True(t, purch.TotalPending.Equal(decimal.NewFromFloat(10000.00)))
+
+	// 2. Partial payment #1: ₹4,000 via Cash
+	_, err = svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordSupplierPaymentRequest{
+		PurchaseID:    &purch.ID,
+		Amount:        decimal.NewFromFloat(4000.00),
+		PaymentMethod: "cash",
+		ReferenceID:   "PAY-001",
+		Note:          "Part payment",
+	})
+	require.NoError(t, err)
+
+	updatedPurch, err := svc.GetPurchaseByID(ctx, tenantID, purch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "PARTIALLY_PAID", updatedPurch.PaymentStatus)
+	assert.True(t, updatedPurch.TotalPaid.Equal(decimal.NewFromFloat(4000.00)))
+	assert.True(t, updatedPurch.TotalPending.Equal(decimal.NewFromFloat(6000.00)))
+
+	// 3. Partial payment #2: ₹6,000 full settlement
+	_, err = svc.RecordSupplierPayment(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordSupplierPaymentRequest{
+		PurchaseID:    &purch.ID,
+		Amount:        decimal.NewFromFloat(6000.00),
+		PaymentMethod: "cash",
+		ReferenceID:   "PAY-002",
+		Note:          "Final balance payment",
+	})
+	require.NoError(t, err)
+
+	updatedPurch, err = svc.GetPurchaseByID(ctx, tenantID, purch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "PAID", updatedPurch.PaymentStatus)
+	assert.True(t, updatedPurch.TotalPaid.Equal(decimal.NewFromFloat(10000.00)))
+	assert.True(t, updatedPurch.TotalPending.IsZero())
+
+	// 4. Verify payment history: BOTH payment records remain permanently available!
+	payments, err := svc.ListPurchasePaymentsByPurchaseID(ctx, tenantID, purch.ID)
+	require.NoError(t, err)
+	require.Len(t, payments, 2)
+	assert.True(t, payments[0].Amount.Equal(decimal.NewFromFloat(4000.00)))
+	assert.Equal(t, "PAY-001", payments[0].ReferenceID)
+	assert.True(t, payments[1].Amount.Equal(decimal.NewFromFloat(6000.00)))
+	assert.Equal(t, "PAY-002", payments[1].ReferenceID)
 }

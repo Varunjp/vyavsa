@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Varunjp/vyavsa/internal/domain"
 	appErrors "github.com/Varunjp/vyavsa/pkg/errors"
@@ -59,10 +60,18 @@ func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.Te
 		if payment.CustomerID == nil {
 			payment.CustomerID = purchase.CustomerID
 		}
+		pDate := payment.PaymentDate
+		if pDate == "" {
+			pDate = time.Now().UTC().Format("2006-01-02")
+		}
+		pStatus := payment.Status
+		if pStatus == "" {
+			pStatus = "COMPLETED"
+		}
 		pmQuery := `
-			INSERT INTO tenant_purchase_payment (tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			RETURNING id, created_at, updated_at
+			INSERT INTO tenant_purchase_payment (tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, payment_date, reference_id, status, note, is_settlement)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12)
+			RETURNING id, payment_date::text, reference_id, status, created_at, updated_at
 		`
 		if err := exec.QueryRow(ctx, pmQuery,
 			payment.TenantID,
@@ -72,9 +81,12 @@ func (r *TenantPurchasePostgres) Create(ctx context.Context, purchase *domain.Te
 			payment.BankID,
 			payment.BankName,
 			payment.Amount,
+			pDate,
+			payment.ReferenceID,
+			pStatus,
 			payment.Note,
 			payment.IsSettlement,
-		).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
+		).Scan(&payment.ID, &payment.PaymentDate, &payment.ReferenceID, &payment.Status, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
 			return appErrors.NewDatabase(fmt.Errorf("failed to create purchase payment: %w", err))
 		}
 	}
@@ -114,10 +126,14 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 	p.OutstandingAmount = p.TotalPending
 
 	pmQuery := `
-		SELECT id, tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement, created_at, updated_at
+		SELECT id, tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount,
+		       COALESCE(payment_date::text, created_at::date::text) as payment_date,
+		       COALESCE(reference_id, '') as reference_id,
+		       COALESCE(status, 'COMPLETED') as status,
+		       note, is_settlement, created_at, updated_at
 		FROM tenant_purchase_payment
 		WHERE tenant_id = $1 AND purchase_id = $2
-		ORDER BY created_at ASC
+		ORDER BY COALESCE(payment_date, created_at::date) ASC, created_at ASC
 	`
 	rows, err := exec.Query(ctx, pmQuery, tenantID, id)
 	if err != nil {
@@ -137,6 +153,9 @@ func (r *TenantPurchasePostgres) GetByID(ctx context.Context, tenantID, id uuid.
 			&pm.BankID,
 			&pm.BankName,
 			&pm.Amount,
+			&pm.PaymentDate,
+			&pm.ReferenceID,
+			&pm.Status,
 			&pm.Note,
 			&pm.IsSettlement,
 			&pm.CreatedAt,
@@ -351,10 +370,18 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 }
 
 func (r *TenantPurchasePostgres) CreatePayment(ctx context.Context, payment *domain.TenantPurchasePayment) error {
+	pDate := payment.PaymentDate
+	if pDate == "" {
+		pDate = time.Now().UTC().Format("2006-01-02")
+	}
+	pStatus := payment.Status
+	if pStatus == "" {
+		pStatus = "COMPLETED"
+	}
 	pmQuery := `
-		INSERT INTO tenant_purchase_payment (tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, created_at, updated_at
+		INSERT INTO tenant_purchase_payment (tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, payment_date, reference_id, status, note, is_settlement)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12)
+		RETURNING id, payment_date::text, reference_id, status, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, pmQuery,
@@ -365,9 +392,12 @@ func (r *TenantPurchasePostgres) CreatePayment(ctx context.Context, payment *dom
 		payment.BankID,
 		payment.BankName,
 		payment.Amount,
+		pDate,
+		payment.ReferenceID,
+		pStatus,
 		payment.Note,
 		payment.IsSettlement,
-	).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt)
+	).Scan(&payment.ID, &payment.PaymentDate, &payment.ReferenceID, &payment.Status, &payment.CreatedAt, &payment.UpdatedAt)
 	if err != nil {
 		return appErrors.NewDatabase(fmt.Errorf("failed to create purchase payment: %w", err))
 	}
@@ -376,10 +406,14 @@ func (r *TenantPurchasePostgres) CreatePayment(ctx context.Context, payment *dom
 
 func (r *TenantPurchasePostgres) ListPaymentsByPurchaseID(ctx context.Context, tenantID, purchaseID uuid.UUID) ([]domain.TenantPurchasePayment, error) {
 	pmQuery := `
-		SELECT id, tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount, note, is_settlement, created_at, updated_at
+		SELECT id, tenant_id, purchase_id, customer_id, payment_method, bank_id, bank_name, amount,
+		       COALESCE(payment_date::text, created_at::date::text) as payment_date,
+		       COALESCE(reference_id, '') as reference_id,
+		       COALESCE(status, 'COMPLETED') as status,
+		       note, is_settlement, created_at, updated_at
 		FROM tenant_purchase_payment
 		WHERE tenant_id = $1 AND purchase_id = $2
-		ORDER BY created_at ASC
+		ORDER BY COALESCE(payment_date, created_at::date) ASC, created_at ASC
 	`
 	exec := GetExecutor(ctx, r.pool)
 	rows, err := exec.Query(ctx, pmQuery, tenantID, purchaseID)
@@ -400,6 +434,9 @@ func (r *TenantPurchasePostgres) ListPaymentsByPurchaseID(ctx context.Context, t
 			&pm.BankID,
 			&pm.BankName,
 			&pm.Amount,
+			&pm.PaymentDate,
+			&pm.ReferenceID,
+			&pm.Status,
 			&pm.Note,
 			&pm.IsSettlement,
 			&pm.CreatedAt,
@@ -414,11 +451,15 @@ func (r *TenantPurchasePostgres) ListPaymentsByPurchaseID(ctx context.Context, t
 
 func (r *TenantPurchasePostgres) ListPaymentsByCustomerID(ctx context.Context, tenantID, customerID uuid.UUID) ([]domain.TenantPurchasePayment, error) {
 	pmQuery := `
-		SELECT p.id, p.tenant_id, p.purchase_id, p.customer_id, p.payment_method, p.bank_id, p.bank_name, p.amount, p.note, p.is_settlement, p.created_at, p.updated_at
+		SELECT p.id, p.tenant_id, p.purchase_id, p.customer_id, p.payment_method, p.bank_id, p.bank_name, p.amount,
+		       COALESCE(p.payment_date::text, p.created_at::date::text) as payment_date,
+		       COALESCE(p.reference_id, '') as reference_id,
+		       COALESCE(p.status, 'COMPLETED') as status,
+		       p.note, p.is_settlement, p.created_at, p.updated_at
 		FROM tenant_purchase_payment p
 		LEFT JOIN tenant_purchase tp ON tp.id = p.purchase_id
 		WHERE p.tenant_id = $1 AND (p.customer_id = $2 OR tp.customer_id = $2)
-		ORDER BY p.created_at ASC
+		ORDER BY COALESCE(p.payment_date, p.created_at::date) ASC, p.created_at ASC
 	`
 	exec := GetExecutor(ctx, r.pool)
 	rows, err := exec.Query(ctx, pmQuery, tenantID, customerID)
@@ -439,6 +480,9 @@ func (r *TenantPurchasePostgres) ListPaymentsByCustomerID(ctx context.Context, t
 			&pm.BankID,
 			&pm.BankName,
 			&pm.Amount,
+			&pm.PaymentDate,
+			&pm.ReferenceID,
+			&pm.Status,
 			&pm.Note,
 			&pm.IsSettlement,
 			&pm.CreatedAt,
@@ -521,17 +565,23 @@ func NewTenantExpensePostgres(pool *pgxpool.Pool) *TenantExpensePostgres {
 }
 
 func (r *TenantExpensePostgres) Create(ctx context.Context, expense *domain.TenantExpense, payments []domain.TenantExpensePayment) error {
+	cat := expense.Category
+	if cat == "" {
+		cat = "general"
+	}
 	eQuery := `
-		INSERT INTO tenant_expense (tenant_id, item, total_amount)
-		VALUES ($1, $2, $3)
-		RETURNING id, created_at, updated_at
+		INSERT INTO tenant_expense (tenant_id, item, total_amount, category, employee_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, category, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, eQuery,
 		expense.TenantID,
 		expense.Item,
 		expense.TotalAmount,
-	).Scan(&expense.ID, &expense.CreatedAt, &expense.UpdatedAt)
+		cat,
+		expense.EmployeeID,
+	).Scan(&expense.ID, &expense.Category, &expense.CreatedAt, &expense.UpdatedAt)
 	if err != nil {
 		return appErrors.NewDatabase(fmt.Errorf("failed to create expense: %w", err))
 	}
@@ -564,9 +614,10 @@ func (r *TenantExpensePostgres) Create(ctx context.Context, expense *domain.Tena
 
 func (r *TenantExpensePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantExpense, error) {
 	eQuery := `
-		SELECT id, tenant_id, item, total_amount, created_at, updated_at
-		FROM tenant_expense
-		WHERE tenant_id = $1 AND id = $2
+		SELECT e.id, e.tenant_id, e.item, e.total_amount, COALESCE(e.category, 'general'), e.employee_id, COALESCE(emp.name, ''), e.created_at, e.updated_at
+		FROM tenant_expense e
+		LEFT JOIN tenant_employees emp ON emp.id = e.employee_id
+		WHERE e.tenant_id = $1 AND e.id = $2
 	`
 	exec := GetExecutor(ctx, r.pool)
 	var e domain.TenantExpense
@@ -575,6 +626,9 @@ func (r *TenantExpensePostgres) GetByID(ctx context.Context, tenantID, id uuid.U
 		&e.TenantID,
 		&e.Item,
 		&e.TotalAmount,
+		&e.Category,
+		&e.EmployeeID,
+		&e.EmployeeName,
 		&e.CreatedAt,
 		&e.UpdatedAt,
 	)
@@ -621,16 +675,22 @@ func (r *TenantExpensePostgres) GetByID(ctx context.Context, tenantID, id uuid.U
 }
 
 func (r *TenantExpensePostgres) Update(ctx context.Context, expense *domain.TenantExpense) error {
+	cat := expense.Category
+	if cat == "" {
+		cat = "general"
+	}
 	query := `
 		UPDATE tenant_expense
-		SET item = $1, total_amount = $2, updated_at = NOW()
-		WHERE tenant_id = $3 AND id = $4
+		SET item = $1, total_amount = $2, category = $3, employee_id = $4, updated_at = NOW()
+		WHERE tenant_id = $5 AND id = $6
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, query,
 		expense.Item,
 		expense.TotalAmount,
+		cat,
+		expense.EmployeeID,
 		expense.TenantID,
 		expense.ID,
 	).Scan(&expense.UpdatedAt)
@@ -665,23 +725,28 @@ func (r *TenantExpensePostgres) List(ctx context.Context, tenantID uuid.UUID, pa
 	}
 	offset := (page - 1) * pageSize
 
-	baseWhere := "WHERE tenant_id = $1"
+	baseWhere := "WHERE e.tenant_id = $1"
 	args := []any{tenantID}
 	argIdx := 2
 
 	if date != "" {
-		baseWhere += fmt.Sprintf(" AND created_at::date = $%d", argIdx)
+		baseWhere += fmt.Sprintf(" AND e.created_at::date = $%d", argIdx)
 		args = append(args, date)
 		argIdx++
 	}
 
 	if search != "" {
-		baseWhere += fmt.Sprintf(" AND item ILIKE $%d", argIdx)
+		baseWhere += fmt.Sprintf(" AND (e.item ILIKE $%d OR COALESCE(e.category, '') ILIKE $%d OR COALESCE(emp.name, '') ILIKE $%d)", argIdx, argIdx, argIdx)
 		args = append(args, "%"+search+"%")
 		argIdx++
 	}
 
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM tenant_expense %s", baseWhere)
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM tenant_expense e
+		LEFT JOIN tenant_employees emp ON emp.id = e.employee_id
+		%s
+	`, baseWhere)
 	exec := GetExecutor(ctx, r.pool)
 	var total int64
 	if err := exec.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
@@ -689,10 +754,11 @@ func (r *TenantExpensePostgres) List(ctx context.Context, tenantID uuid.UUID, pa
 	}
 
 	listQuery := fmt.Sprintf(`
-		SELECT id, tenant_id, item, total_amount, created_at, updated_at
-		FROM tenant_expense
+		SELECT e.id, e.tenant_id, e.item, e.total_amount, COALESCE(e.category, 'general'), e.employee_id, COALESCE(emp.name, ''), e.created_at, e.updated_at
+		FROM tenant_expense e
+		LEFT JOIN tenant_employees emp ON emp.id = e.employee_id
 		%s
-		ORDER BY created_at DESC
+		ORDER BY e.created_at DESC
 		LIMIT $%d OFFSET $%d
 	`, baseWhere, argIdx, argIdx+1)
 	args = append(args, pageSize, offset)
@@ -711,6 +777,9 @@ func (r *TenantExpensePostgres) List(ctx context.Context, tenantID uuid.UUID, pa
 			&e.TenantID,
 			&e.Item,
 			&e.TotalAmount,
+			&e.Category,
+			&e.EmployeeID,
+			&e.EmployeeName,
 			&e.CreatedAt,
 			&e.UpdatedAt,
 		); err != nil {

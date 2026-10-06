@@ -42,14 +42,17 @@ type Metrics struct {
 	tenantPlanValidationFailuresTotal prometheus.Counter
 
 	// Payment Metrics
-	salesPaymentCreatedTotal    *prometheus.CounterVec
-	salesPaymentFailedTotal     *prometheus.CounterVec
-	salesPaymentAmount          *prometheus.CounterVec
-	purchasePaymentCreatedTotal *prometheus.CounterVec
-	purchasePaymentFailedTotal  *prometheus.CounterVec
-	purchasePaymentAmount       *prometheus.CounterVec
-	bankPaymentCreatedTotal     prometheus.Counter
-	cashPaymentCreatedTotal     prometheus.Counter
+	salesPaymentCreatedTotal     *prometheus.CounterVec
+	salesPaymentFailedTotal      *prometheus.CounterVec
+	salesPaymentAmount           *prometheus.CounterVec
+	purchasePaymentCreatedTotal  *prometheus.CounterVec
+	purchasePaymentFailedTotal   *prometheus.CounterVec
+	purchasePaymentAmount        *prometheus.CounterVec
+	bankPaymentCreatedTotal      prometheus.Counter
+	cashPaymentCreatedTotal      prometheus.Counter
+	overtimeCreatedTotal         prometheus.Counter
+	employeeAdvancesCreatedTotal prometheus.Counter
+	salaryPaymentsTotal          prometheus.Counter
 }
 
 // New initializes application metrics and registers them with a custom Prometheus registry
@@ -302,6 +305,30 @@ func New() *Metrics {
 				Help:      "Total count of cash payments recorded",
 			},
 		),
+		overtimeCreatedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "staff",
+				Name:      "overtime_created_total",
+				Help:      "Total count of overtime entries recorded",
+			},
+		),
+		employeeAdvancesCreatedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "staff",
+				Name:      "employee_advances_created_total",
+				Help:      "Total count of employee advance records created",
+			},
+		),
+		salaryPaymentsTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "staff",
+				Name:      "salary_payments_total",
+				Help:      "Total count of salary disbursements made",
+			},
+		),
 	}
 
 	reg.MustRegister(
@@ -331,6 +358,9 @@ func New() *Metrics {
 		m.purchasePaymentAmount,
 		m.bankPaymentCreatedTotal,
 		m.cashPaymentCreatedTotal,
+		m.overtimeCreatedTotal,
+		m.employeeAdvancesCreatedTotal,
+		m.salaryPaymentsTotal,
 	)
 
 	return m
@@ -430,6 +460,27 @@ func (m *Metrics) IncTenantPlanCacheMisses() {
 func (m *Metrics) IncTenantPlanValidationFailures() {
 	if m != nil && m.tenantPlanValidationFailuresTotal != nil {
 		m.tenantPlanValidationFailuresTotal.Inc()
+	}
+}
+
+// IncOvertimeCreated increments the total overtime entries recorded counter
+func (m *Metrics) IncOvertimeCreated() {
+	if m != nil && m.overtimeCreatedTotal != nil {
+		m.overtimeCreatedTotal.Inc()
+	}
+}
+
+// IncEmployeeAdvancesCreated increments the total employee advances recorded counter
+func (m *Metrics) IncEmployeeAdvancesCreated() {
+	if m != nil && m.employeeAdvancesCreatedTotal != nil {
+		m.employeeAdvancesCreatedTotal.Inc()
+	}
+}
+
+// IncSalaryPayments increments the total salary disbursements counter
+func (m *Metrics) IncSalaryPayments() {
+	if m != nil && m.salaryPaymentsTotal != nil {
+		m.salaryPaymentsTotal.Inc()
 	}
 }
 

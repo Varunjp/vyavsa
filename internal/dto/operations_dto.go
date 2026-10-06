@@ -325,20 +325,27 @@ type ExpensePaymentRequest struct {
 	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
 	BankName      string          `json:"bank_name,omitempty"`
 	Amount        decimal.Decimal `json:"amount" binding:"required"`
+	PaymentDate   string          `json:"payment_date,omitempty"`
+	ReferenceID   string          `json:"reference_id,omitempty"`
 	Note          string          `json:"note,omitempty"`
 }
 
 type CreateExpenseRequest struct {
 	Item          string                  `json:"item" binding:"required,min=1,max=255"`
+	Category      string                  `json:"category" binding:"omitempty"`
+	EmployeeID    *uuid.UUID              `json:"employee_id,omitempty"`
 	TotalAmount   decimal.Decimal         `json:"total_amount" binding:"required"`
 	PaymentMethod string                  `json:"payment_method" binding:"omitempty"`
 	BankID        *uuid.UUID              `json:"bank_id,omitempty"`
 	BankName      string                  `json:"bank_name,omitempty"`
+	ReferenceID   string                  `json:"reference_id,omitempty"`
 	Payments      []ExpensePaymentRequest `json:"payments,omitempty"`
 }
 
 type UpdateExpenseRequest struct {
 	Item        string           `json:"item" binding:"omitempty"`
+	Category    string           `json:"category" binding:"omitempty"`
+	EmployeeID  *uuid.UUID       `json:"employee_id" binding:"omitempty"`
 	TotalAmount *decimal.Decimal `json:"total_amount" binding:"omitempty"`
 }
 
@@ -351,19 +358,24 @@ type RecordAttendanceRequest struct {
 	Date       string          `json:"date" binding:"omitempty"` // YYYY-MM-DD
 	Status     string          `json:"status" binding:"required,oneof=present absent half_day leave"`
 	OT         decimal.Decimal `json:"ot" binding:"omitempty"`
+	OTAmount   decimal.Decimal `json:"ot_amount" binding:"omitempty"`
 	Advance    decimal.Decimal `json:"advance" binding:"omitempty"`
 }
 
 type UpdateAttendanceRequest struct {
-	Status  string           `json:"status" binding:"omitempty,oneof=present absent half_day leave"`
-	OT      *decimal.Decimal `json:"ot" binding:"omitempty"`
-	Advance *decimal.Decimal `json:"advance" binding:"omitempty"`
+	Status   string           `json:"status" binding:"omitempty,oneof=present absent half_day leave"`
+	OT       *decimal.Decimal `json:"ot" binding:"omitempty"`
+	OTAmount *decimal.Decimal `json:"ot_amount" binding:"omitempty"`
+	Advance  *decimal.Decimal `json:"advance" binding:"omitempty"`
 }
 
 type RecordOvertimeRequest struct {
-	EmployeeID uuid.UUID       `json:"employee_id" binding:"required"`
-	Date       string          `json:"date" binding:"omitempty"`
-	OT         decimal.Decimal `json:"ot" binding:"required"`
+	EmployeeID  uuid.UUID       `json:"employee_id" binding:"required"`
+	Date        string          `json:"date" binding:"omitempty"`
+	Amount      decimal.Decimal `json:"amount" binding:"omitempty"` // Direct overtime amount (New primary)
+	OT          decimal.Decimal `json:"ot" binding:"omitempty"`     // Fallback for backward compatibility
+	ReferenceID string          `json:"reference_id" binding:"omitempty"`
+	Note        string          `json:"note" binding:"omitempty"`
 }
 
 type RecordAdvanceRequest struct {
@@ -373,6 +385,7 @@ type RecordAdvanceRequest struct {
 	PaymentMethod string          `json:"payment_method" binding:"omitempty"` // cash or bank
 	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
 	BankName      string          `json:"bank_name,omitempty"`
+	ReferenceID   string          `json:"reference_id,omitempty"`
 	Note          string          `json:"note,omitempty"`
 }
 
@@ -385,11 +398,23 @@ type PaySalaryRequest struct {
 	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
 	BankName      string          `json:"bank_name,omitempty"`
 	Amount        decimal.Decimal `json:"amount" binding:"required"`
+	PaymentDate   string          `json:"payment_date" binding:"omitempty"`
+	ReferenceID   string          `json:"reference_id" binding:"omitempty"`
 	Note          string          `json:"note,omitempty"`
 }
 
 type UpdateSalaryBalanceRequest struct {
 	Balance decimal.Decimal `json:"balance" binding:"required"`
+}
+
+type RecordSalePaymentRequest struct {
+	Amount        decimal.Decimal `json:"amount" binding:"required"`
+	PaymentMethod string          `json:"payment_method" binding:"required"` // cash, bank, upi, cheque
+	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
+	BankName      string          `json:"bank_name,omitempty"`
+	PaymentDate   string          `json:"payment_date" binding:"omitempty"`
+	ReferenceID   string          `json:"reference_id" binding:"omitempty"`
+	Note          string          `json:"note,omitempty"`
 }
 
 // ==========================================
@@ -477,6 +502,8 @@ type RecordSupplierPaymentRequest struct {
 	PaymentMethod string                    `json:"payment_method" binding:"required,oneof=cash bank"`
 	BankID        *uuid.UUID                `json:"bank_id,omitempty"`
 	BankPayments  []BankPaymentSplitRequest `json:"bank_payments,omitempty"`
+	PaymentDate   string                    `json:"payment_date,omitempty"`
+	ReferenceID   string                    `json:"reference_id,omitempty"`
 	Note          string                    `json:"note,omitempty"`
 }
 

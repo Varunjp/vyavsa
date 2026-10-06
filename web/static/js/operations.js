@@ -722,6 +722,7 @@ const Operations = (() => {
           <td style="color:${balance > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)'};font-weight:600;">${formatCurrency(s.balance)}</td>
           <td style="text-align:right;">
             <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.showLineSalePaymentHistory('${s.id}', '${escapeHTML(s.customer_name || 'Customer')}', ${s.total_amount || 0}, ${s.total_cash_in || 0}, ${s.balance || 0})" title="View Payment History">History</button>
               <button class="btn btn-sm btn-secondary" onclick="Operations.viewLineSale('${s.id}')">View</button>
               ${isAdmin ? `
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openEditLineSale('${s.id}')">Edit</button>
@@ -770,6 +771,7 @@ const Operations = (() => {
           <td style="color:var(--color-primary);font-weight:600;">${formatCurrency(s.account)}</td>
           <td style="text-align:right;">
             <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.showCounterSalePaymentHistory('${s.id}', '${escapeHTML(s.item || 'Counter Sale')}', ${s.total_amount || 0})" title="View Payment History">History</button>
               <button class="btn btn-sm btn-secondary" onclick="Operations.viewCounterSale('${s.id}')">View</button>
               ${isAdmin ? `
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openEditCounterSale('${s.id}')">Edit</button>
@@ -815,7 +817,7 @@ const Operations = (() => {
           <td><strong>${escapeHTML(a.employee_name || 'Staff')}</strong></td>
           <td>${formatDate(a.date)}</td>
           <td><span class="status-badge ${badgeCls}">${escapeHTML(a.status.toUpperCase())}</span></td>
-          <td>${parseFloat(a.ot) > 0 ? a.ot + ' hrs' : '—'}</td>
+          <td style="color:${parseFloat(a.ot_amount) > 0 ? 'var(--color-success)' : 'inherit'};font-weight:600;">${parseFloat(a.ot_amount) > 0 ? formatCurrency(a.ot_amount) : (parseFloat(a.ot) > 0 ? a.ot + ' hrs' : '—')}</td>
           <td style="color:${parseFloat(a.advance) > 0 ? 'var(--color-error)' : 'inherit'};font-weight:600;">${parseFloat(a.advance) > 0 ? formatCurrency(a.advance) : '—'}</td>
           <td style="text-align:right;">
             <button class="btn btn-sm btn-secondary" onclick="Operations.openEditAttendance('${a.id}')">Edit</button>
@@ -872,6 +874,7 @@ const Operations = (() => {
           <td>${statusBadge}</td>
           <td style="text-align:right;">
             <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;align-items:center;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.showPurchasePaymentHistory('${p.id}', '${escapeHTML(p.item || 'Purchase')}', ${p.total_amount || 0})" title="View Payment History" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">History</button>
               ${pending > 0 ? `
                 <button class="btn btn-sm btn-primary" onclick="Operations.openMakePaymentModal({purchaseId: '${p.id}', customerId: '${p.customer_id || ''}', customerName: '${escapeHTML(p.customer_name || 'Direct Vendor')}', pending: ${pending}, item: '${escapeHTML(p.item || '')}'})" title="Pay outstanding for this purchase" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">Pay</button>
               ` : ''}
@@ -912,9 +915,13 @@ const Operations = (() => {
 
     tbody.innerHTML = res.data.map(e => {
       const isAdmin = currentRole === 'admin';
+      const isAdvance = e.category === 'employee_advance';
       return `
         <tr>
-          <td><strong>${escapeHTML(e.item || 'Expense')}</strong></td>
+          <td>
+            <strong>${escapeHTML(e.item || 'Expense')}</strong>
+            ${isAdvance ? `<span class="badge" style="margin-left: 0.375rem; font-size: 0.7rem; background: rgba(239, 68, 68, 0.1); color: var(--color-error); font-weight: 700;">${escapeHTML(e.employee_name ? 'STAFF ADVANCE: ' + e.employee_name : 'STAFF ADVANCE')}</span>` : (e.category && e.category !== 'general' ? `<span class="badge" style="margin-left: 0.375rem; font-size: 0.7rem; background: rgba(99, 102, 241, 0.1); color: #6366f1;">${escapeHTML(e.category.replace('_', ' ').toUpperCase())}</span>` : '')}
+          </td>
           <td>${formatDate(e.created_at)}</td>
           <td style="font-weight:700;color:var(--color-error);">${formatCurrency(e.total_amount)}</td>
           <td style="text-align:right;">
@@ -1121,17 +1128,24 @@ const Operations = (() => {
     const pendingTbody = document.getElementById('pending-salaries-table-body');
     if (pendingTbody) {
       if (!pendingRes.ok || !Array.isArray(pendingRes.data) || pendingRes.data.length === 0) {
-        pendingTbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff members have pending accrued salary balances.</td></tr>`;
+        pendingTbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff members have pending accrued salary balances.</td></tr>`;
       } else {
         pendingTbody.innerHTML = pendingRes.data.map(ps => `
           <tr>
             <td><strong>${escapeHTML(ps.employee_name || 'Staff')}</strong></td>
             <td>${formatCurrency(ps.salary_rate)}</td>
+            <td style="color:var(--color-success);font-weight:600;">+${formatCurrency(ps.total_overtime || 0)}</td>
+            <td style="font-weight:600;">${formatCurrency(ps.gross_salary || ps.salary_rate)}</td>
+            <td style="color:var(--color-error);font-weight:600;">-${formatCurrency(ps.total_advances || 0)}</td>
+            <td style="color:var(--color-text-muted);font-weight:600;">-${formatCurrency(ps.total_paid || 0)}</td>
             <td style="font-weight:700;color:var(--color-warning);">${formatCurrency(ps.balance)}</td>
             <td style="text-align:right;">
-              <button class="btn btn-sm btn-primary" onclick="Operations.openPaySalary('${ps.employee_id}', '${escapeHTML(ps.employee_name)}', '${ps.balance}')">
-                Disburse Payout →
-              </button>
+              <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+                <button class="btn btn-sm btn-secondary" onclick="Operations.openSalaryStatement('${ps.employee_id}', '${escapeHTML(ps.employee_name)}')">Statement</button>
+                <button class="btn btn-sm btn-primary" onclick="Operations.openPaySalary('${ps.employee_id}', '${escapeHTML(ps.employee_name)}', '${ps.balance}')">
+                  Disburse Payout →
+                </button>
+              </div>
             </td>
           </tr>
         `).join('');
@@ -1143,16 +1157,20 @@ const Operations = (() => {
     const allTbody = document.getElementById('salaries-table-body');
     if (allTbody) {
       if (!allRes.ok || !Array.isArray(allRes.data) || allRes.data.length === 0) {
-        allTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff payroll ledgers found.</td></tr>`;
+        allTbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff payroll ledgers found.</td></tr>`;
       } else {
         allTbody.innerHTML = allRes.data.map(s => `
           <tr>
             <td><strong>${escapeHTML(s.employee_name || 'Staff')}</strong></td>
             <td>${formatCurrency(s.salary_rate)}</td>
-            <td>${formatCurrency(s.ot_rate)}/hr</td>
-            <td style="font-weight:700;">${formatCurrency(s.balance)}</td>
+            <td style="color:var(--color-success);font-weight:600;">+${formatCurrency(s.total_overtime || 0)}</td>
+            <td style="font-weight:600;">${formatCurrency(s.gross_salary || s.salary_rate)}</td>
+            <td style="color:var(--color-error);font-weight:600;">-${formatCurrency(s.total_advances || 0)}</td>
+            <td style="color:var(--color-text-muted);font-weight:600;">-${formatCurrency(s.total_paid || 0)}</td>
+            <td style="font-weight:700;color:${parseFloat(s.balance) > 0 ? 'var(--color-warning)' : 'inherit'};">${formatCurrency(s.balance)}</td>
             <td style="text-align:right;">
               <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+                <button class="btn btn-sm btn-secondary" onclick="Operations.openSalaryStatement('${s.employee_id}', '${escapeHTML(s.employee_name)}')">Statement</button>
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openPaySalary('${s.employee_id}', '${escapeHTML(s.employee_name)}', '${s.balance}')">Pay</button>
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openAdjustSalary('${s.employee_id}', '${escapeHTML(s.employee_name)}', '${s.balance}')">Adjust Rate</button>
               </div>
@@ -2748,6 +2766,23 @@ const Operations = (() => {
     loadCustomers();
   }
 
+  // Expense: Category Change Handler
+  function handleExpenseCategoryChange(val) {
+    const empGroup = document.getElementById('exp-form-emp-group');
+    const empSelect = document.getElementById('exp-form-emp');
+    const itemInput = document.getElementById('exp-form-item');
+    if (val === 'employee_advance') {
+      if (empGroup) empGroup.style.display = 'block';
+      if (empSelect) empSelect.required = true;
+      if (itemInput && (!itemInput.value || itemInput.value === 'Shop rent' || itemInput.value === 'Electricity bill')) {
+        itemInput.value = 'Staff Advance Payment';
+      }
+    } else {
+      if (empGroup) empGroup.style.display = 'none';
+      if (empSelect) empSelect.required = false;
+    }
+  }
+
   // Expense: Create
   async function submitAddExpense(e) {
     e.preventDefault();
@@ -2757,9 +2792,23 @@ const Operations = (() => {
     const amount = parseFloat(document.getElementById('exp-form-amount').value) || 0;
     const method = document.getElementById('exp-form-method').value;
     const bankID = document.getElementById('exp-form-bank').value || null;
+    const category = document.getElementById('exp-form-category')?.value || 'general';
+    const employeeID = (category === 'employee_advance') ? (document.getElementById('exp-form-emp')?.value || null) : null;
+    const refID = document.getElementById('exp-form-ref')?.value?.trim() || null;
+    const date = document.getElementById('exp-form-date')?.value || null;
+
+    if (category === 'employee_advance' && !employeeID) {
+      setButtonLoading(btn, false);
+      showModalError('modal-add-expense', 'Please select a staff member for the advance payment.');
+      return;
+    }
 
     const payload = {
       item: document.getElementById('exp-form-item').value.trim(),
+      category: category,
+      employee_id: employeeID,
+      reference_id: refID,
+      payment_date: date,
       total_amount: amount,
       payment_method: method,
       bank_id: bankID
@@ -2776,6 +2825,8 @@ const Operations = (() => {
     closeModal('modal-add-expense');
     showToast('Expense recorded successfully');
     loadExpenses();
+    loadSalaries();
+    loadAttendance();
     loadDashboardMetrics();
   }
 
@@ -2826,11 +2877,13 @@ const Operations = (() => {
     const btn = document.getElementById('btn-submit-attendance');
     setButtonLoading(btn, true);
 
+    const ot = parseFloat(document.getElementById('att-form-ot').value) || 0;
     const payload = {
       employee_id: document.getElementById('att-form-emp').value,
       date: document.getElementById('att-form-date').value || getTodayString(),
       status: document.getElementById('att-form-status').value,
-      ot: parseFloat(document.getElementById('att-form-ot').value) || 0,
+      ot: ot,
+      ot_amount: ot,
       advance: parseFloat(document.getElementById('att-form-advance').value) || 0
     };
 
@@ -2859,7 +2912,7 @@ const Operations = (() => {
     document.getElementById('edit-att-id').value = a.id;
     document.getElementById('edit-att-empname').textContent = a.employee_name || 'Staff Member';
     document.getElementById('edit-att-status').value = a.status || 'present';
-    document.getElementById('edit-att-ot').value = a.ot || '0';
+    document.getElementById('edit-att-ot').value = (parseFloat(a.ot_amount) > 0 ? a.ot_amount : (a.ot || '0'));
     document.getElementById('edit-att-advance').value = a.advance || '0';
     openModal('modal-edit-attendance');
   }
@@ -2876,6 +2929,7 @@ const Operations = (() => {
     const payload = {
       status: document.getElementById('edit-att-status').value,
       ot: ot,
+      ot_amount: ot,
       advance: advance
     };
 
@@ -2899,10 +2953,19 @@ const Operations = (() => {
     const btn = document.getElementById('btn-submit-ot');
     setButtonLoading(btn, true);
 
+    const amount = parseFloat(document.getElementById('ot-form-amount').value) || 0;
+    if (amount <= 0) {
+      setButtonLoading(btn, false);
+      showModalError('modal-record-ot', 'Overtime amount must be greater than zero.');
+      return;
+    }
+
     const payload = {
       employee_id: document.getElementById('ot-form-emp').value,
       date: document.getElementById('ot-form-date').value || getTodayString(),
-      ot: parseFloat(document.getElementById('ot-form-hours').value) || 0
+      amount: amount,
+      reference_id: document.getElementById('ot-form-ref')?.value?.trim() || '',
+      note: document.getElementById('ot-form-note')?.value?.trim() || ''
     };
 
     const res = await window.API.post('/tenant/overtime', payload);
@@ -2914,8 +2977,10 @@ const Operations = (() => {
     }
 
     closeModal('modal-record-ot');
-    showToast('Overtime hours recorded successfully');
+    showToast('Overtime amount recorded successfully');
     loadAttendance();
+    loadSalaries();
+    loadDashboardMetrics();
   }
 
   // Advance: Record
@@ -2924,11 +2989,20 @@ const Operations = (() => {
     const btn = document.getElementById('btn-submit-advance');
     setButtonLoading(btn, true);
 
+    const amount = parseFloat(document.getElementById('adv-form-amount').value) || 0;
+    if (amount <= 0) {
+      setButtonLoading(btn, false);
+      showModalError('modal-record-advance', 'Advance amount must be greater than zero.');
+      return;
+    }
+
     const payload = {
       employee_id: document.getElementById('adv-form-emp').value,
       date: document.getElementById('adv-form-date').value || getTodayString(),
-      amount: parseFloat(document.getElementById('adv-form-amount').value) || 0,
-      payment_method: document.getElementById('adv-form-method').value
+      amount: amount,
+      payment_method: document.getElementById('adv-form-method').value,
+      reference_id: document.getElementById('adv-form-ref')?.value?.trim() || '',
+      note: document.getElementById('adv-form-note')?.value?.trim() || ''
     };
 
     const res = await window.API.post('/tenant/advances', payload);
@@ -2942,6 +3016,7 @@ const Operations = (() => {
     closeModal('modal-record-advance');
     showToast('Staff advance payment recorded');
     loadAttendance();
+    loadSalaries();
     loadDashboardMetrics();
   }
 
@@ -2951,6 +3026,8 @@ const Operations = (() => {
     document.getElementById('pay-salary-empname').textContent = empName;
     document.getElementById('pay-salary-pending').textContent = formatCurrency(balance);
     document.getElementById('pay-salary-amount').value = Math.max(0, parseFloat(balance) || 0);
+    const dateInput = document.getElementById('pay-salary-date');
+    if (dateInput) dateInput.value = getTodayString();
     openModal('modal-pay-salary');
   }
 
@@ -2964,6 +3041,8 @@ const Operations = (() => {
       amount: parseFloat(document.getElementById('pay-salary-amount').value) || 0,
       payment_method: document.getElementById('pay-salary-method').value,
       bank_id: document.getElementById('pay-salary-bank').value || null,
+      reference_id: document.getElementById('pay-salary-ref')?.value?.trim() || '',
+      payment_date: document.getElementById('pay-salary-date')?.value || null,
       note: document.getElementById('pay-salary-note').value.trim()
     };
 
@@ -2979,6 +3058,244 @@ const Operations = (() => {
     showToast('Salary disbursed successfully');
     loadSalaries();
     loadDashboardMetrics();
+  }
+
+  // Salary Statement / Ledger
+  let currentSalaryStatement = null;
+
+  async function openSalaryStatement(empId, empName) {
+    const res = await window.API.get(`/tenant/salaries/${empId}/statement`);
+    if (!res.ok || !res.data) {
+      showToast(res.error || 'Failed to load employee salary statement', 'error');
+      return;
+    }
+
+    const s = res.data;
+    currentSalaryStatement = s;
+
+    document.getElementById('stmt-salary-empname').textContent = `${s.employee_name || empName || 'Staff Member'} — Salary Ledger`;
+    document.getElementById('stmt-salary-base').textContent = formatCurrency(s.base_salary);
+    document.getElementById('stmt-salary-ot').textContent = formatCurrency(s.total_overtime);
+    document.getElementById('stmt-salary-gross').textContent = formatCurrency(s.gross_salary);
+    document.getElementById('stmt-salary-advances').textContent = formatCurrency(s.total_advances);
+    document.getElementById('stmt-salary-paid').textContent = formatCurrency(s.total_paid);
+    document.getElementById('stmt-salary-net').textContent = formatCurrency(s.net_payable);
+
+    // Overtime entries
+    const otTbody = document.getElementById('stmt-salary-ot-tbody');
+    const otCount = document.getElementById('stmt-salary-ot-count');
+    if (otTbody) {
+      if (Array.isArray(s.overtimes) && s.overtimes.length > 0) {
+        if (otCount) otCount.textContent = `${s.overtimes.length} entries`;
+        otTbody.innerHTML = s.overtimes.map(o => `
+          <tr>
+            <td>${formatDate(o.overtime_date || o.created_at)}</td>
+            <td style="color:var(--color-success);font-weight:600;">+${formatCurrency(o.amount)}</td>
+            <td>${escapeHTML(o.reference_id || '—')}</td>
+            <td>${escapeHTML(o.notes || '—')}</td>
+          </tr>
+        `).join('');
+      } else {
+        if (otCount) otCount.textContent = '0 entries';
+        otTbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:1rem;">No overtime records.</td></tr>`;
+      }
+    }
+
+    // Advances entries
+    const advTbody = document.getElementById('stmt-salary-adv-tbody');
+    const advCount = document.getElementById('stmt-salary-adv-count');
+    if (advTbody) {
+      if (Array.isArray(s.advances) && s.advances.length > 0) {
+        if (advCount) advCount.textContent = `${s.advances.length} entries`;
+        advTbody.innerHTML = s.advances.map(a => `
+          <tr>
+            <td>${formatDate(a.advance_date || a.created_at)}</td>
+            <td style="color:var(--color-error);font-weight:600;">-${formatCurrency(a.amount)}</td>
+            <td><span class="badge">${escapeHTML((a.payment_method || 'cash').toUpperCase())}</span></td>
+            <td>${escapeHTML(a.reference_id || '—')}</td>
+            <td>${escapeHTML(a.notes || '—')}</td>
+          </tr>
+        `).join('');
+      } else {
+        if (advCount) advCount.textContent = '0 entries';
+        advTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:1rem;">No advance records.</td></tr>`;
+      }
+    }
+
+    // Payout entries
+    const payTbody = document.getElementById('stmt-salary-pay-tbody');
+    const payCount = document.getElementById('stmt-salary-pay-count');
+    if (payTbody) {
+      if (Array.isArray(s.payments) && s.payments.length > 0) {
+        if (payCount) payCount.textContent = `${s.payments.length} entries`;
+        payTbody.innerHTML = s.payments.map(p => `
+          <tr>
+            <td>${formatDate(p.payment_date || p.created_at)}</td>
+            <td style="color:#3b82f6;font-weight:600;">-${formatCurrency(p.amount)}</td>
+            <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+            <td>${escapeHTML(p.reference_id || p.id ? p.id.substring(0, 8) : '—')}</td>
+            <td>${escapeHTML(p.note || '—')}</td>
+          </tr>
+        `).join('');
+      } else {
+        if (payCount) payCount.textContent = '0 entries';
+        payTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:1rem;">No payment records.</td></tr>`;
+      }
+    }
+
+    openModal('modal-salary-statement');
+  }
+
+  function openPaySalaryFromStatement() {
+    if (!currentSalaryStatement) return;
+    const s = currentSalaryStatement;
+    closeModal('modal-salary-statement');
+    openPaySalary(s.employee_id, s.employee_name, s.net_payable);
+  }
+
+  // Payment History Inspector
+  async function showPurchasePaymentHistory(purchaseId, itemName, totalAmount) {
+    document.getElementById('pmt-hist-title').textContent = 'Purchase Payment History';
+    document.getElementById('pmt-hist-subtitle').textContent = `Procurement Item: ${itemName}`;
+    document.getElementById('pmt-hist-total').textContent = formatCurrency(totalAmount);
+
+    const tbody = document.getElementById('pmt-hist-tbody');
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">Loading payment records...</td></tr>`;
+    openModal('modal-payment-history');
+
+    const res = await window.API.get(`/tenant/purchases/${purchaseId}/payments`);
+    if (!res.ok || !Array.isArray(res.data)) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-error);padding:1.5rem;">Failed to load payment history.</td></tr>`;
+      return;
+    }
+
+    const payments = res.data;
+    let paidSum = 0;
+    payments.forEach(p => { paidSum += parseFloat(p.amount) || 0; });
+    const pending = Math.max(0, totalAmount - paidSum);
+
+    document.getElementById('pmt-hist-paid').textContent = formatCurrency(paidSum);
+    document.getElementById('pmt-hist-pending').textContent = formatCurrency(pending);
+
+    let statusHtml = '<span class="status-badge danger">UNPAID</span>';
+    if (pending <= 0 && totalAmount > 0) {
+      statusHtml = '<span class="status-badge paid">PAID</span>';
+    } else if (paidSum > 0) {
+      statusHtml = '<span class="status-badge pending">PARTIALLY PAID</span>';
+    }
+    document.getElementById('pmt-hist-status').innerHTML = statusHtml;
+
+    if (payments.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">No payment transactions recorded yet.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = payments.map(p => `
+      <tr>
+        <td><strong>${escapeHTML(p.reference_id || (p.id ? p.id.substring(0, 8) : 'PAY'))}</strong></td>
+        <td>${formatDate(p.payment_date || p.created_at)}</td>
+        <td style="font-weight:700;color:var(--color-success);">${formatCurrency(p.amount)}</td>
+        <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+        <td><span class="status-badge ${p.status === 'completed' || !p.status ? 'paid' : 'pending'}">${escapeHTML((p.status || 'completed').toUpperCase())}</span></td>
+        <td>${escapeHTML(p.notes || '—')}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function showLineSalePaymentHistory(saleId, customerName, totalAmount, totalCashIn, balance) {
+    document.getElementById('pmt-hist-title').textContent = 'Line Sale Payment History';
+    document.getElementById('pmt-hist-subtitle').textContent = `Customer: ${customerName}`;
+    document.getElementById('pmt-hist-total').textContent = formatCurrency(totalAmount);
+
+    const tbody = document.getElementById('pmt-hist-tbody');
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">Loading payment records...</td></tr>`;
+    openModal('modal-payment-history');
+
+    const res = await window.API.get(`/tenant/line-sales/${saleId}/payments`);
+    if (!res.ok || !Array.isArray(res.data)) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-error);padding:1.5rem;">Failed to load payment history.</td></tr>`;
+      return;
+    }
+
+    const payments = res.data;
+    let paidSum = 0;
+    payments.forEach(p => { paidSum += parseFloat(p.amount) || 0; });
+    const pending = Math.max(0, (parseFloat(balance) || (totalAmount - paidSum)));
+
+    document.getElementById('pmt-hist-paid').textContent = formatCurrency(paidSum > 0 ? paidSum : totalCashIn);
+    document.getElementById('pmt-hist-pending').textContent = formatCurrency(pending);
+
+    let statusHtml = '<span class="status-badge danger">UNPAID</span>';
+    if (pending <= 0) {
+      statusHtml = '<span class="status-badge paid">PAID</span>';
+    } else if (paidSum > 0 || totalCashIn > 0) {
+      statusHtml = '<span class="status-badge pending">PARTIALLY PAID</span>';
+    }
+    document.getElementById('pmt-hist-status').innerHTML = statusHtml;
+
+    if (payments.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">No payment records found. (Initial cash in: ${formatCurrency(totalCashIn)})</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = payments.map(p => `
+      <tr>
+        <td><strong>${escapeHTML(p.reference_id || (p.id ? p.id.substring(0, 8) : 'PAY'))}</strong></td>
+        <td>${formatDate(p.payment_date || p.created_at)}</td>
+        <td style="font-weight:700;color:var(--color-success);">${formatCurrency(p.amount)}</td>
+        <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+        <td><span class="status-badge ${p.status === 'completed' || !p.status ? 'paid' : 'pending'}">${escapeHTML((p.status || 'completed').toUpperCase())}</span></td>
+        <td>${escapeHTML(p.notes || '—')}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function showCounterSalePaymentHistory(saleId, itemName, totalAmount) {
+    document.getElementById('pmt-hist-title').textContent = 'Counter Sale Payment History';
+    document.getElementById('pmt-hist-subtitle').textContent = `Item: ${itemName}`;
+    document.getElementById('pmt-hist-total').textContent = formatCurrency(totalAmount);
+
+    const tbody = document.getElementById('pmt-hist-tbody');
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">Loading payment records...</td></tr>`;
+    openModal('modal-payment-history');
+
+    const res = await window.API.get(`/tenant/counter-sales/${saleId}/payments`);
+    if (!res.ok || !Array.isArray(res.data)) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-error);padding:1.5rem;">Failed to load payment history.</td></tr>`;
+      return;
+    }
+
+    const payments = res.data;
+    let paidSum = 0;
+    payments.forEach(p => { paidSum += parseFloat(p.amount) || 0; });
+    const pending = Math.max(0, totalAmount - paidSum);
+
+    document.getElementById('pmt-hist-paid').textContent = formatCurrency(paidSum);
+    document.getElementById('pmt-hist-pending').textContent = formatCurrency(pending);
+
+    let statusHtml = '<span class="status-badge danger">UNPAID</span>';
+    if (pending <= 0) {
+      statusHtml = '<span class="status-badge paid">PAID</span>';
+    } else if (paidSum > 0) {
+      statusHtml = '<span class="status-badge pending">PARTIALLY PAID</span>';
+    }
+    document.getElementById('pmt-hist-status').innerHTML = statusHtml;
+
+    if (payments.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">No payment records found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = payments.map(p => `
+      <tr>
+        <td><strong>${escapeHTML(p.reference_id || (p.id ? p.id.substring(0, 8) : 'PAY'))}</strong></td>
+        <td>${formatDate(p.payment_date || p.created_at)}</td>
+        <td style="font-weight:700;color:var(--color-success);">${formatCurrency(p.amount)}</td>
+        <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+        <td><span class="status-badge ${p.status === 'completed' || !p.status ? 'paid' : 'pending'}">${escapeHTML((p.status || 'completed').toUpperCase())}</span></td>
+        <td>${escapeHTML(p.notes || '—')}</td>
+      </tr>
+    `).join('');
   }
 
   // Salary: Adjust Balance
@@ -3852,6 +4169,12 @@ const Operations = (() => {
     handleSupplierPayMethodChange,
     calcSupplierPaymentRemaining,
     submitSupplierPayment,
+    handleExpenseCategoryChange,
+    openSalaryStatement,
+    openPaySalaryFromStatement,
+    showPurchasePaymentHistory,
+    showLineSalePaymentHistory,
+    showCounterSalePaymentHistory,
     handleLineSaleCustomerChange,
     addLineSaleBankRow,
     removeLineSaleBankRow,
