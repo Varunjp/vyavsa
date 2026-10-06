@@ -42,11 +42,17 @@ type Metrics struct {
 	tenantPlanValidationFailuresTotal prometheus.Counter
 
 	// Payment Metrics
-	salesPaymentCreatedTotal *prometheus.CounterVec
-	salesPaymentFailedTotal  *prometheus.CounterVec
-	salesPaymentAmount       *prometheus.CounterVec
-	bankPaymentCreatedTotal  prometheus.Counter
-	cashPaymentCreatedTotal  prometheus.Counter
+	salesPaymentCreatedTotal     *prometheus.CounterVec
+	salesPaymentFailedTotal      *prometheus.CounterVec
+	salesPaymentAmount           *prometheus.CounterVec
+	purchasePaymentCreatedTotal  *prometheus.CounterVec
+	purchasePaymentFailedTotal   *prometheus.CounterVec
+	purchasePaymentAmount        *prometheus.CounterVec
+	bankPaymentCreatedTotal      prometheus.Counter
+	cashPaymentCreatedTotal      prometheus.Counter
+	overtimeCreatedTotal         prometheus.Counter
+	employeeAdvancesCreatedTotal prometheus.Counter
+	salaryPaymentsTotal          prometheus.Counter
 }
 
 // New initializes application metrics and registers them with a custom Prometheus registry
@@ -252,6 +258,36 @@ func New() *Metrics {
 			[]string{"payment_method"},
 		),
 
+		purchasePaymentCreatedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "purchase_payment_created_total",
+				Help:      "Total count of recorded purchase/supplier payments by payment method",
+			},
+			[]string{"payment_method"},
+		),
+
+		purchasePaymentFailedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "purchase_payment_failed_total",
+				Help:      "Total count of rejected or failed purchase/supplier payments",
+			},
+			[]string{"reason"},
+		),
+
+		purchasePaymentAmount: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "payment",
+				Name:      "purchase_payment_amount_total",
+				Help:      "Total cumulative amount disbursed in purchase/supplier payments",
+			},
+			[]string{"payment_method"},
+		),
+
 		bankPaymentCreatedTotal: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "billbook",
@@ -267,6 +303,30 @@ func New() *Metrics {
 				Subsystem: "payment",
 				Name:      "cash_payment_created_total",
 				Help:      "Total count of cash payments recorded",
+			},
+		),
+		overtimeCreatedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "staff",
+				Name:      "overtime_created_total",
+				Help:      "Total count of overtime entries recorded",
+			},
+		),
+		employeeAdvancesCreatedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "staff",
+				Name:      "employee_advances_created_total",
+				Help:      "Total count of employee advance records created",
+			},
+		),
+		salaryPaymentsTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "staff",
+				Name:      "salary_payments_total",
+				Help:      "Total count of salary disbursements made",
 			},
 		),
 	}
@@ -293,8 +353,14 @@ func New() *Metrics {
 		m.salesPaymentCreatedTotal,
 		m.salesPaymentFailedTotal,
 		m.salesPaymentAmount,
+		m.purchasePaymentCreatedTotal,
+		m.purchasePaymentFailedTotal,
+		m.purchasePaymentAmount,
 		m.bankPaymentCreatedTotal,
 		m.cashPaymentCreatedTotal,
+		m.overtimeCreatedTotal,
+		m.employeeAdvancesCreatedTotal,
+		m.salaryPaymentsTotal,
 	)
 
 	return m
@@ -397,6 +463,27 @@ func (m *Metrics) IncTenantPlanValidationFailures() {
 	}
 }
 
+// IncOvertimeCreated increments the total overtime entries recorded counter
+func (m *Metrics) IncOvertimeCreated() {
+	if m != nil && m.overtimeCreatedTotal != nil {
+		m.overtimeCreatedTotal.Inc()
+	}
+}
+
+// IncEmployeeAdvancesCreated increments the total employee advances recorded counter
+func (m *Metrics) IncEmployeeAdvancesCreated() {
+	if m != nil && m.employeeAdvancesCreatedTotal != nil {
+		m.employeeAdvancesCreatedTotal.Inc()
+	}
+}
+
+// IncSalaryPayments increments the total salary disbursements counter
+func (m *Metrics) IncSalaryPayments() {
+	if m != nil && m.salaryPaymentsTotal != nil {
+		m.salaryPaymentsTotal.Inc()
+	}
+}
+
 // RecordSalesPayment records a successful sales payment collection
 func (m *Metrics) RecordSalesPayment(method string, amount float64) {
 	if m == nil {
@@ -419,6 +506,31 @@ func (m *Metrics) RecordSalesPayment(method string, amount float64) {
 func (m *Metrics) RecordSalesPaymentFailed(reason string) {
 	if m != nil && m.salesPaymentFailedTotal != nil {
 		m.salesPaymentFailedTotal.WithLabelValues(reason).Inc()
+	}
+}
+
+// RecordPurchasePayment records a successful purchase/supplier payment disbursement
+func (m *Metrics) RecordPurchasePayment(method string, amount float64) {
+	if m == nil {
+		return
+	}
+	if m.purchasePaymentCreatedTotal != nil {
+		m.purchasePaymentCreatedTotal.WithLabelValues(method).Inc()
+	}
+	if m.purchasePaymentAmount != nil && amount > 0 {
+		m.purchasePaymentAmount.WithLabelValues(method).Add(amount)
+	}
+	if method == "cash" && m.cashPaymentCreatedTotal != nil {
+		m.cashPaymentCreatedTotal.Inc()
+	} else if (method == "bank" || method == "upi" || method == "online") && m.bankPaymentCreatedTotal != nil {
+		m.bankPaymentCreatedTotal.Inc()
+	}
+}
+
+// RecordPurchasePaymentFailed records a rejected purchase/supplier payment
+func (m *Metrics) RecordPurchasePaymentFailed(reason string) {
+	if m != nil && m.purchasePaymentFailedTotal != nil {
+		m.purchasePaymentFailedTotal.WithLabelValues(reason).Inc()
 	}
 }
 

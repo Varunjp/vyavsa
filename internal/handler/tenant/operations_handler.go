@@ -400,13 +400,61 @@ func (h *OperationsHandler) GetCustomerByID(c *gin.Context) {
 		return
 	}
 
-	cust, err := h.svc.GetCustomerByID(c.Request.Context(), tenantID, id)
+	detailResp, err := h.svc.GetCustomerDetails(c.Request.Context(), tenantID, id)
 	if err != nil {
 		response.Error(c, err)
 		return
 	}
 
-	response.Success(c, dto.ToCustomerResponse(cust), "customer retrieved")
+	response.Success(c, detailResp, "customer retrieved")
+}
+
+func (h *OperationsHandler) GetCustomerStatement(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	id, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	stmt, err := h.svc.GetCustomerStatement(c.Request.Context(), tenantID, id)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, stmt, "customer statement retrieved")
+}
+
+func (h *OperationsHandler) RecordSupplierPayment(c *gin.Context) {
+	tenantID, _, role, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	var req dto.RecordSupplierPaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, appErrors.NewBadRequest("invalid payment payload: "+err.Error()))
+		return
+	}
+
+	if id, err := parseUUID(c, "id"); err == nil && id != uuid.Nil {
+		req.CustomerID = &id
+	}
+
+	resp, err := h.svc.RecordSupplierPayment(c.Request.Context(), tenantID, role, &req)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, resp, "supplier payment recorded successfully")
 }
 
 func (h *OperationsHandler) GetCustomerBalance(c *gin.Context) {
@@ -448,13 +496,8 @@ func (h *OperationsHandler) ListCustomers(c *gin.Context) {
 		return
 	}
 
-	resp := make([]dto.CustomerResponse, len(customers))
-	for i := range customers {
-		resp[i] = dto.ToCustomerResponse(&customers[i])
-	}
-
 	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
-	response.Paginated(c, resp, response.Pagination{
+	response.Paginated(c, customers, response.Pagination{
 		Page:       page,
 		PageSize:   pageSize,
 		TotalItems: total,
@@ -1065,8 +1108,14 @@ func (h *OperationsHandler) ListPurchases(c *gin.Context) {
 	page, pageSize := parsePagination(c)
 	date := c.Query("date")
 	search := c.Query("search")
+	var customerID *uuid.UUID
+	if cid := c.Query("customer_id"); cid != "" {
+		if id, err := uuid.Parse(cid); err == nil && id != uuid.Nil {
+			customerID = &id
+		}
+	}
 
-	purchases, total, err := h.svc.ListPurchases(c.Request.Context(), tenantID, role, page, pageSize, date, search)
+	purchases, total, err := h.svc.ListPurchases(c.Request.Context(), tenantID, role, page, pageSize, date, customerID, search)
 	if err != nil {
 		response.Error(c, err)
 		return
@@ -1079,6 +1128,32 @@ func (h *OperationsHandler) ListPurchases(c *gin.Context) {
 		TotalItems: total,
 		TotalPages: totalPages,
 	}, "purchases listed")
+}
+
+func (h *OperationsHandler) RecordPurchaseSettlementPayment(c *gin.Context) {
+	tenantID, _, role, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	var req dto.RecordSupplierPaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, appErrors.NewBadRequest("invalid payment payload: "+err.Error()))
+		return
+	}
+
+	if id, err := parseUUID(c, "id"); err == nil && id != uuid.Nil {
+		req.PurchaseID = &id
+	}
+
+	resp, err := h.svc.RecordSupplierPayment(c.Request.Context(), tenantID, role, &req)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, resp, "purchase settlement payment recorded successfully")
 }
 
 // ==========================================
@@ -1513,6 +1588,220 @@ func (h *OperationsHandler) ListSalaryPayments(c *gin.Context) {
 		TotalItems: total,
 		TotalPages: totalPages,
 	}, "salary payments listed")
+}
+
+func (h *OperationsHandler) GetSalaryStatement(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	empID, err := parseUUID(c, "employee_id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	statement, err := h.svc.GetSalaryStatement(c.Request.Context(), tenantID, empID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, statement, "salary statement retrieved successfully")
+}
+
+func (h *OperationsHandler) ListEmployeeAdvances(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	page, pageSize := parsePagination(c)
+	date := c.Query("date")
+	var empID *uuid.UUID
+	if raw := c.Param("id"); raw != "" {
+		if parsed, err := uuid.Parse(raw); err == nil {
+			empID = &parsed
+		}
+	} else if raw := c.Query("employee_id"); raw != "" {
+		if parsed, err := uuid.Parse(raw); err == nil {
+			empID = &parsed
+		}
+	}
+
+	advances, total, err := h.svc.ListEmployeeAdvances(c.Request.Context(), tenantID, page, pageSize, empID, date)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+	response.Paginated(c, advances, response.Pagination{
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: total,
+		TotalPages: totalPages,
+	}, "employee advances listed")
+}
+
+func (h *OperationsHandler) ListEmployeeOvertime(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	page, pageSize := parsePagination(c)
+	date := c.Query("date")
+	var empID *uuid.UUID
+	if raw := c.Param("id"); raw != "" {
+		if parsed, err := uuid.Parse(raw); err == nil {
+			empID = &parsed
+		}
+	} else if raw := c.Query("employee_id"); raw != "" {
+		if parsed, err := uuid.Parse(raw); err == nil {
+			empID = &parsed
+		}
+	}
+
+	overtimes, total, err := h.svc.ListEmployeeOvertime(c.Request.Context(), tenantID, page, pageSize, empID, date)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+	response.Paginated(c, overtimes, response.Pagination{
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: total,
+		TotalPages: totalPages,
+	}, "employee overtime records listed")
+}
+
+func (h *OperationsHandler) ListPurchasePayments(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	purchaseID, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	payments, err := h.svc.ListPurchasePaymentsByPurchaseID(c.Request.Context(), tenantID, purchaseID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, payments, "purchase payments retrieved successfully")
+}
+
+func (h *OperationsHandler) RecordLineSalePayment(c *gin.Context) {
+	tenantID, _, role, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	saleID, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	var req dto.RecordSalePaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, validationErr(err))
+		return
+	}
+
+	payment, err := h.svc.RecordLineSalePayment(c.Request.Context(), tenantID, saleID, role, &req)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Created(c, payment, "line sale payment recorded successfully")
+}
+
+func (h *OperationsHandler) ListLineSalePayments(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	saleID, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	payments, err := h.svc.ListLineSalePayments(c.Request.Context(), tenantID, saleID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, payments, "line sale payments retrieved successfully")
+}
+
+func (h *OperationsHandler) RecordCounterSalePayment(c *gin.Context) {
+	tenantID, _, role, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	saleID, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	var req dto.RecordSalePaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, validationErr(err))
+		return
+	}
+
+	payment, err := h.svc.RecordCounterSalePayment(c.Request.Context(), tenantID, saleID, role, &req)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Created(c, payment, "counter sale payment recorded successfully")
+}
+
+func (h *OperationsHandler) ListCounterSalePayments(c *gin.Context) {
+	tenantID, _, _, err := getTenantContext(c)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	saleID, err := parseUUID(c, "id")
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	payments, err := h.svc.ListCounterSalePayments(c.Request.Context(), tenantID, saleID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, payments, "counter sale payments retrieved successfully")
 }
 
 // ==========================================

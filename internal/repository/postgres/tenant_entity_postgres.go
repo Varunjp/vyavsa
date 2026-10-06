@@ -243,6 +243,35 @@ func (r *TenantCustomerPostgres) GetByID(ctx context.Context, tenantID, id uuid.
 	return &c, nil
 }
 
+func (r *TenantCustomerPostgres) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantCustomer, error) {
+	query := `
+		SELECT id, tenant_id, customer_name, phone, opening_balance, current_balance, status, created_at, updated_at
+		FROM tenant_customer
+		WHERE tenant_id = $1 AND id = $2
+		FOR UPDATE
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var c domain.TenantCustomer
+	err := exec.QueryRow(ctx, query, tenantID, id).Scan(
+		&c.ID,
+		&c.TenantID,
+		&c.CustomerName,
+		&c.Phone,
+		&c.OpeningBalance,
+		&c.CurrentBalance,
+		&c.Status,
+		&c.CreatedAt,
+		&c.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("customer not found within tenant")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get customer for update: %w", err))
+	}
+	return &c, nil
+}
+
 func (r *TenantCustomerPostgres) Update(ctx context.Context, cust *domain.TenantCustomer) error {
 	query := `
 		UPDATE tenant_customer

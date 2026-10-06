@@ -14,6 +14,9 @@ const Operations = (() => {
   let lineSaleCustomerBalance = null;
   let lineSaleBankRowCount = 0;
   let counterSaleBankRowCount = 0;
+  let purchaseBankRowCount = 0;
+  let activeStatementCustomerID = null;
+  let supplierPaymentTarget = { customerId: null, purchaseId: null, pending: 0, customerName: '', item: '' };
 
   function formatCurrency(amount) {
     if (amount === null || amount === undefined || amount === '') return '₹0.00';
@@ -131,7 +134,16 @@ const Operations = (() => {
       } else if (modalId === 'modal-add-purchase') {
         const balBox = document.getElementById('purch-customer-balance-box');
         if (balBox) balBox.style.display = 'none';
+        const bankContainer = document.getElementById('purch-bank-payments-container');
+        if (bankContainer) bankContainer.innerHTML = '';
+        const warn = document.getElementById('purch-bank-duplicate-warning');
+        if (warn) warn.style.display = 'none';
         purchaseCustomerBalance = null;
+        calcPurchaseBalance();
+      } else if (modalId === 'modal-make-supplier-payment') {
+        supplierPaymentTarget = { customerId: null, purchaseId: null, pending: 0, customerName: '', item: '' };
+        const warn = document.getElementById('supp-pay-warning');
+        if (warn) warn.style.display = 'none';
       }
     }
   }
@@ -304,6 +316,11 @@ const Operations = (() => {
     if (elReceivables) elReceivables.textContent = formatCurrency(m.total_receivable);
     if (elPayables) elPayables.textContent = formatCurrency(m.net_dues || m.total_payable);
     if (elPendingSalary) elPendingSalary.textContent = formatCurrency(m.pending_salary);
+
+    const elTodayPayable = document.getElementById('overview-outstanding-payable-val');
+    if (elTodayPayable && (!m.today_overview || m.today_overview.outstanding_payable === undefined)) {
+      elTodayPayable.textContent = formatCurrency(m.total_payable || 0);
+    }
 
     // Update Cash & Bank and Receivables/Dues tab summaries
     const cbCash = document.getElementById('cb-cash-balance');
@@ -534,6 +551,28 @@ const Operations = (() => {
         itemBadge.textContent = 'No Items';
       }
     }
+
+    // 6. Outstanding Payable
+    const elPayableVal = document.getElementById('overview-outstanding-payable-val');
+    const elPayableTrend = document.getElementById('overview-outstanding-payable-trend');
+    const elPayableBadge = document.getElementById('overview-payable-badge');
+    if (elPayableVal) {
+      const payableAmount = overview.outstanding_payable !== undefined ? overview.outstanding_payable : 0;
+      elPayableVal.textContent = formatCurrency(payableAmount);
+      const payableNum = parseFloat(payableAmount) || 0;
+      if (elPayableTrend) {
+        elPayableTrend.textContent = payableNum > 0 ? 'Total pending payables across suppliers' : 'All supplier dues settled';
+      }
+      if (elPayableBadge) {
+        if (payableNum > 0) {
+          elPayableBadge.className = 'status-badge pending';
+          elPayableBadge.textContent = 'Supplier Dues';
+        } else {
+          elPayableBadge.className = 'status-badge cleared';
+          elPayableBadge.textContent = 'All Settled';
+        }
+      }
+    }
   }
 
   // 1B. Dynamic Recent Activity Stream (fetches real backend records)
@@ -683,6 +722,7 @@ const Operations = (() => {
           <td style="color:${balance > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)'};font-weight:600;">${formatCurrency(s.balance)}</td>
           <td style="text-align:right;">
             <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.showLineSalePaymentHistory('${s.id}', '${escapeHTML(s.customer_name || 'Customer')}', ${s.total_amount || 0}, ${s.total_cash_in || 0}, ${s.balance || 0})" title="View Payment History">History</button>
               <button class="btn btn-sm btn-secondary" onclick="Operations.viewLineSale('${s.id}')">View</button>
               ${isAdmin ? `
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openEditLineSale('${s.id}')">Edit</button>
@@ -731,6 +771,7 @@ const Operations = (() => {
           <td style="color:var(--color-primary);font-weight:600;">${formatCurrency(s.account)}</td>
           <td style="text-align:right;">
             <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.showCounterSalePaymentHistory('${s.id}', '${escapeHTML(s.item || 'Counter Sale')}', ${s.total_amount || 0})" title="View Payment History">History</button>
               <button class="btn btn-sm btn-secondary" onclick="Operations.viewCounterSale('${s.id}')">View</button>
               ${isAdmin ? `
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openEditCounterSale('${s.id}')">Edit</button>
@@ -776,7 +817,7 @@ const Operations = (() => {
           <td><strong>${escapeHTML(a.employee_name || 'Staff')}</strong></td>
           <td>${formatDate(a.date)}</td>
           <td><span class="status-badge ${badgeCls}">${escapeHTML(a.status.toUpperCase())}</span></td>
-          <td>${parseFloat(a.ot) > 0 ? a.ot + ' hrs' : '—'}</td>
+          <td style="color:${parseFloat(a.ot_amount) > 0 ? 'var(--color-success)' : 'inherit'};font-weight:600;">${parseFloat(a.ot_amount) > 0 ? formatCurrency(a.ot_amount) : (parseFloat(a.ot) > 0 ? a.ot + ' hrs' : '—')}</td>
           <td style="color:${parseFloat(a.advance) > 0 ? 'var(--color-error)' : 'inherit'};font-weight:600;">${parseFloat(a.advance) > 0 ? formatCurrency(a.advance) : '—'}</td>
           <td style="text-align:right;">
             <button class="btn btn-sm btn-secondary" onclick="Operations.openEditAttendance('${a.id}')">Edit</button>
@@ -797,7 +838,7 @@ const Operations = (() => {
     if (!res.ok || !Array.isArray(res.data) || res.data.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="8">
+          <td colspan="9">
             <div class="empty-state-box">
               <div class="empty-state-icon">📦</div>
               <div class="empty-state-title">No purchase records found</div>
@@ -813,6 +854,14 @@ const Operations = (() => {
     tbody.innerHTML = res.data.map(p => {
       const pending = parseFloat(p.total_pending) || 0;
       const isAdmin = currentRole === 'admin';
+
+      let statusBadge = '<span class="status-badge danger">UNPAID</span>';
+      if (p.payment_status === 'PAID' || pending <= 0) {
+        statusBadge = '<span class="status-badge paid">PAID</span>';
+      } else if (p.payment_status === 'PARTIALLY_PAID' || (parseFloat(p.total_paid) > 0 && pending > 0)) {
+        statusBadge = '<span class="status-badge pending">PARTIALLY PAID</span>';
+      }
+
       return `
         <tr>
           <td><strong>${escapeHTML(p.item || 'Item')}</strong></td>
@@ -822,8 +871,13 @@ const Operations = (() => {
           <td style="font-weight:700;">${formatCurrency(p.total_amount)}</td>
           <td style="color:var(--color-success);font-weight:600;">${formatCurrency(p.total_paid)}</td>
           <td style="color:${pending > 0 ? 'var(--color-error)' : 'var(--color-text-muted)'};font-weight:600;">${formatCurrency(p.total_pending)}</td>
+          <td>${statusBadge}</td>
           <td style="text-align:right;">
-            <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+            <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;align-items:center;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.showPurchasePaymentHistory('${p.id}', '${escapeHTML(p.item || 'Purchase')}', ${p.total_amount || 0})" title="View Payment History" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">History</button>
+              ${pending > 0 ? `
+                <button class="btn btn-sm btn-primary" onclick="Operations.openMakePaymentModal({purchaseId: '${p.id}', customerId: '${p.customer_id || ''}', customerName: '${escapeHTML(p.customer_name || 'Direct Vendor')}', pending: ${pending}, item: '${escapeHTML(p.item || '')}'})" title="Pay outstanding for this purchase" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">Pay</button>
+              ` : ''}
               ${isAdmin ? `
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openEditPurchase('${p.id}')">Edit</button>
                 <button class="btn btn-sm btn-secondary" onclick="Operations.deletePurchase('${p.id}')" style="color:var(--color-error);">Delete</button>
@@ -861,9 +915,13 @@ const Operations = (() => {
 
     tbody.innerHTML = res.data.map(e => {
       const isAdmin = currentRole === 'admin';
+      const isAdvance = e.category === 'employee_advance';
       return `
         <tr>
-          <td><strong>${escapeHTML(e.item || 'Expense')}</strong></td>
+          <td>
+            <strong>${escapeHTML(e.item || 'Expense')}</strong>
+            ${isAdvance ? `<span class="badge" style="margin-left: 0.375rem; font-size: 0.7rem; background: rgba(239, 68, 68, 0.1); color: var(--color-error); font-weight: 700;">${escapeHTML(e.employee_name ? 'STAFF ADVANCE: ' + e.employee_name : 'STAFF ADVANCE')}</span>` : (e.category && e.category !== 'general' ? `<span class="badge" style="margin-left: 0.375rem; font-size: 0.7rem; background: rgba(99, 102, 241, 0.1); color: #6366f1;">${escapeHTML(e.category.replace('_', ' ').toUpperCase())}</span>` : '')}
+          </td>
           <td>${formatDate(e.created_at)}</td>
           <td style="font-weight:700;color:var(--color-error);">${formatCurrency(e.total_amount)}</td>
           <td style="text-align:right;">
@@ -991,23 +1049,32 @@ const Operations = (() => {
     cachedCustomers = res.data;
     populateSelectDropdowns();
 
-    tbody.innerHTML = res.data.map(c => `
-      <tr>
-        <td><strong>${escapeHTML(c.customer_name)}</strong></td>
-        <td>${escapeHTML(c.phone || '—')}</td>
-        <td>${formatCurrency(c.opening_balance)}</td>
-        <td style="font-weight:700;color:${parseFloat(c.current_balance) > 0 ? 'var(--color-warning)' : 'inherit'};">${formatCurrency(c.current_balance)}</td>
-        <td><span class="status-badge ${c.status === 'active' ? 'paid' : 'pending'}">${escapeHTML(c.status)}</span></td>
-        <td style="text-align:right;">
-          <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
-            <button class="btn btn-sm btn-secondary" onclick="Operations.viewCustomer('${c.id}')">View</button>
-            <button class="btn btn-sm btn-primary" onclick="Operations.openAdjustCustomerBalance('${c.id}')" title="Adjust Balance">Adjust</button>
-            <button class="btn btn-sm btn-secondary" onclick="Operations.openEditCustomer('${c.id}')">Edit</button>
-            <button class="btn btn-sm btn-secondary" onclick="Operations.deleteCustomer('${c.id}')" style="color:var(--color-error);">Delete</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = res.data.map(c => {
+      const recv = parseFloat(c.current_balance) || 0;
+      const payable = parseFloat(c.outstanding_payable) || 0;
+
+      return `
+        <tr>
+          <td><strong>${escapeHTML(c.customer_name)}</strong></td>
+          <td>${escapeHTML(c.phone || '—')}</td>
+          <td style="font-weight:700;color:${recv > 0 ? 'var(--color-warning)' : 'inherit'};">${formatCurrency(c.current_balance)}</td>
+          <td style="font-weight:700;color:${payable > 0 ? 'var(--color-error)' : 'var(--color-text-muted)'};">${formatCurrency(c.outstanding_payable || 0)}</td>
+          <td><span class="status-badge ${c.status === 'active' ? 'paid' : 'pending'}">${escapeHTML(c.status)}</span></td>
+          <td style="text-align:right;">
+            <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;align-items:center;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.openCustomerStatement('${c.id}')" title="View Customer Account Statement">Statement</button>
+              ${payable > 0 ? `
+                <button class="btn btn-sm btn-primary" onclick="Operations.openMakePaymentModal({customerId: '${c.id}', customerName: '${escapeHTML(c.customer_name)}', pending: ${payable}})" title="Pay outstanding payable" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">Pay</button>
+              ` : ''}
+              <button class="btn btn-sm btn-secondary" onclick="Operations.viewCustomer('${c.id}')">View</button>
+              <button class="btn btn-sm btn-secondary" onclick="Operations.openAdjustCustomerBalance('${c.id}')" title="Adjust Balance">Adjust</button>
+              <button class="btn btn-sm btn-secondary" onclick="Operations.openEditCustomer('${c.id}')">Edit</button>
+              <button class="btn btn-sm btn-secondary" onclick="Operations.deleteCustomer('${c.id}')" style="color:var(--color-error);">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
 
   // 12. Banks
@@ -1061,17 +1128,24 @@ const Operations = (() => {
     const pendingTbody = document.getElementById('pending-salaries-table-body');
     if (pendingTbody) {
       if (!pendingRes.ok || !Array.isArray(pendingRes.data) || pendingRes.data.length === 0) {
-        pendingTbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff members have pending accrued salary balances.</td></tr>`;
+        pendingTbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff members have pending accrued salary balances.</td></tr>`;
       } else {
         pendingTbody.innerHTML = pendingRes.data.map(ps => `
           <tr>
             <td><strong>${escapeHTML(ps.employee_name || 'Staff')}</strong></td>
             <td>${formatCurrency(ps.salary_rate)}</td>
+            <td style="color:var(--color-success);font-weight:600;">+${formatCurrency(ps.total_overtime || 0)}</td>
+            <td style="font-weight:600;">${formatCurrency(ps.gross_salary || ps.salary_rate)}</td>
+            <td style="color:var(--color-error);font-weight:600;">-${formatCurrency(ps.total_advances || 0)}</td>
+            <td style="color:var(--color-text-muted);font-weight:600;">-${formatCurrency(ps.total_paid || 0)}</td>
             <td style="font-weight:700;color:var(--color-warning);">${formatCurrency(ps.balance)}</td>
             <td style="text-align:right;">
-              <button class="btn btn-sm btn-primary" onclick="Operations.openPaySalary('${ps.employee_id}', '${escapeHTML(ps.employee_name)}', '${ps.balance}')">
-                Disburse Payout →
-              </button>
+              <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+                <button class="btn btn-sm btn-secondary" onclick="Operations.openSalaryStatement('${ps.employee_id}', '${escapeHTML(ps.employee_name)}')">Statement</button>
+                <button class="btn btn-sm btn-primary" onclick="Operations.openPaySalary('${ps.employee_id}', '${escapeHTML(ps.employee_name)}', '${ps.balance}')">
+                  Disburse Payout →
+                </button>
+              </div>
             </td>
           </tr>
         `).join('');
@@ -1083,16 +1157,20 @@ const Operations = (() => {
     const allTbody = document.getElementById('salaries-table-body');
     if (allTbody) {
       if (!allRes.ok || !Array.isArray(allRes.data) || allRes.data.length === 0) {
-        allTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff payroll ledgers found.</td></tr>`;
+        allTbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--color-text-muted);padding:1.5rem;">No staff payroll ledgers found.</td></tr>`;
       } else {
         allTbody.innerHTML = allRes.data.map(s => `
           <tr>
             <td><strong>${escapeHTML(s.employee_name || 'Staff')}</strong></td>
             <td>${formatCurrency(s.salary_rate)}</td>
-            <td>${formatCurrency(s.ot_rate)}/hr</td>
-            <td style="font-weight:700;">${formatCurrency(s.balance)}</td>
+            <td style="color:var(--color-success);font-weight:600;">+${formatCurrency(s.total_overtime || 0)}</td>
+            <td style="font-weight:600;">${formatCurrency(s.gross_salary || s.salary_rate)}</td>
+            <td style="color:var(--color-error);font-weight:600;">-${formatCurrency(s.total_advances || 0)}</td>
+            <td style="color:var(--color-text-muted);font-weight:600;">-${formatCurrency(s.total_paid || 0)}</td>
+            <td style="font-weight:700;color:${parseFloat(s.balance) > 0 ? 'var(--color-warning)' : 'inherit'};">${formatCurrency(s.balance)}</td>
             <td style="text-align:right;">
               <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+                <button class="btn btn-sm btn-secondary" onclick="Operations.openSalaryStatement('${s.employee_id}', '${escapeHTML(s.employee_name)}')">Statement</button>
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openPaySalary('${s.employee_id}', '${escapeHTML(s.employee_name)}', '${s.balance}')">Pay</button>
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openAdjustSalary('${s.employee_id}', '${escapeHTML(s.employee_name)}', '${s.balance}')">Adjust Rate</button>
               </div>
@@ -2415,7 +2493,60 @@ const Operations = (() => {
     loadDashboardMetrics();
   }
 
-  // Purchase: Customer Balance & Handlers
+  // Purchase: Multi-Bank Helpers & Live Balance Calculation
+  function addPurchaseBankRow(bankId = '', amount = '') {
+    const container = document.getElementById('purch-bank-payments-container');
+    if (!container) return;
+    purchaseBankRowCount++;
+    const rowId = `purch-bank-row-${purchaseBankRowCount}`;
+
+    const row = document.createElement('div');
+    row.id = rowId;
+    row.className = 'bank-payment-row';
+    row.innerHTML = `
+      <select class="form-control select-bank purch-bank-select" required onchange="Operations.validatePurchaseBanks(); Operations.calcPurchaseBalance();">
+        ${renderBankSelectOptions(bankId)}
+      </select>
+      <input type="number" step="0.01" class="form-control bank-amount-input purch-bank-amount" min="0.01" required placeholder="Amount (₹)" value="${amount}" oninput="Operations.calcPurchaseBalance();">
+      <button type="button" class="btn-remove-bank" title="Remove Bank Payment" onclick="Operations.removePurchaseBankRow('${rowId}')">✕</button>
+    `;
+    container.appendChild(row);
+    validatePurchaseBanks();
+    calcPurchaseBalance();
+  }
+
+  function removePurchaseBankRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) row.remove();
+    validatePurchaseBanks();
+    calcPurchaseBalance();
+  }
+
+  function validatePurchaseBanks() {
+    const selects = document.querySelectorAll('#purch-bank-payments-container .purch-bank-select');
+    const warning = document.getElementById('purch-bank-duplicate-warning');
+    const selected = [];
+    let hasDuplicate = false;
+
+    selects.forEach(s => {
+      const val = s.value;
+      if (val) {
+        if (selected.includes(val)) {
+          hasDuplicate = true;
+          s.style.borderColor = 'var(--color-error)';
+        } else {
+          selected.push(val);
+          s.style.borderColor = '';
+        }
+      } else {
+        s.style.borderColor = '';
+      }
+    });
+
+    if (warning) warning.style.display = hasDuplicate ? 'block' : 'none';
+    return !hasDuplicate;
+  }
+
   async function handlePurchaseCustomerChange() {
     const sel = document.getElementById('purch-form-customer');
     const custId = sel ? sel.value : null;
@@ -2424,6 +2555,7 @@ const Operations = (() => {
     if (!custId) {
       purchaseCustomerBalance = null;
       if (box) box.style.display = 'none';
+      calcPurchaseBalance();
       return;
     }
 
@@ -2437,47 +2569,82 @@ const Operations = (() => {
     const res = await window.API.get(`/tenant/customers/${custId}/balance`);
     if (!res.ok || !res.data) {
       const cached = cachedCustomers.find(c => c.id === custId);
-      purchaseCustomerBalance = cached ? parseFloat(cached.current_balance) || 0 : 0;
+      purchaseCustomerBalance = cached ? parseFloat(cached.outstanding_payable || cached.current_balance) || 0 : 0;
     } else {
-      purchaseCustomerBalance = parseFloat(res.data.current_balance) || 0;
+      purchaseCustomerBalance = parseFloat(res.data.outstanding_payable) || 0;
     }
 
     calcPurchaseBalance();
   }
 
   function calcPurchaseBalance() {
-    if (purchaseCustomerBalance === null) return;
     const total = parseFloat(document.getElementById('purch-form-total')?.value) || 0;
-    const paid = parseFloat(document.getElementById('purch-form-paid')?.value) || 0;
-    const pendingDue = Math.max(0, total - paid);
+    const cash = parseFloat(document.getElementById('purch-form-cash')?.value) || 0;
 
-    const badge = document.getElementById('purch-cust-balance-badge');
-    const elBillDue = document.getElementById('purch-cust-bill-due');
-    const elResulting = document.getElementById('purch-cust-resulting-balance');
+    let bankTotal = 0;
+    document.querySelectorAll('#purch-bank-payments-container .purch-bank-amount').forEach(inp => {
+      const v = parseFloat(inp.value) || 0;
+      if (v > 0) bankTotal += v;
+    });
 
-    const bal = purchaseCustomerBalance;
-    if (badge) {
-      if (bal > 0) {
-        badge.textContent = `${formatCurrency(bal)} (Outstanding Due)`;
-        badge.style.cssText = 'background: rgba(245, 158, 11, 0.15); color: #d97706; font-weight: 700;';
-      } else if (bal < 0) {
-        badge.textContent = `${formatCurrency(Math.abs(bal))} (Credit / Advance)`;
-        badge.style.cssText = 'background: rgba(59, 130, 246, 0.15); color: #2563eb; font-weight: 700;';
+    const totalPaid = cash + bankTotal;
+    const pendingDue = Math.max(0, total - totalPaid);
+
+    const elCash = document.getElementById('purch-calc-cash');
+    const elBank = document.getElementById('purch-calc-bank');
+    const elPaid = document.getElementById('purch-calc-paid');
+    const elDue = document.getElementById('purch-calc-due');
+    const statusBadge = document.getElementById('purch-calc-status-badge');
+    const warn = document.getElementById('purch-calc-warning');
+
+    if (elCash) elCash.textContent = formatCurrency(cash);
+    if (elBank) elBank.textContent = formatCurrency(bankTotal);
+    if (elPaid) elPaid.textContent = formatCurrency(totalPaid);
+    if (elDue) elDue.textContent = formatCurrency(pendingDue);
+
+    if (warn) {
+      warn.style.display = totalPaid > total && total > 0 ? 'block' : 'none';
+    }
+
+    if (statusBadge) {
+      if (totalPaid >= total && total > 0) {
+        statusBadge.className = 'status-badge paid';
+        statusBadge.textContent = 'PAID';
+      } else if (totalPaid > 0 && totalPaid < total) {
+        statusBadge.className = 'status-badge pending';
+        statusBadge.textContent = 'PARTIALLY PAID';
       } else {
-        badge.textContent = '₹0.00 (No Outstanding)';
-        badge.style.cssText = 'background: rgba(16, 185, 129, 0.15); color: #059669; font-weight: 700;';
+        statusBadge.className = 'status-badge danger';
+        statusBadge.textContent = 'UNPAID';
       }
     }
 
-    if (elBillDue) {
-      elBillDue.textContent = formatCurrency(pendingDue);
-    }
+    // Update customer live balance preview if selected
+    if (purchaseCustomerBalance !== null) {
+      const badge = document.getElementById('purch-cust-balance-badge');
+      const elBillDue = document.getElementById('purch-cust-bill-due');
+      const elResulting = document.getElementById('purch-cust-resulting-balance');
 
-    if (elResulting) {
-      // In business trade with customer/vendor, pending purchase bill due is added
-      const resulting = bal + pendingDue;
-      elResulting.textContent = formatCurrency(resulting);
-      elResulting.style.color = resulting > 0 ? 'var(--color-warning)' : resulting < 0 ? '#2563eb' : 'var(--color-success)';
+      const bal = purchaseCustomerBalance;
+      if (badge) {
+        if (bal > 0) {
+          badge.textContent = `${formatCurrency(bal)} (Outstanding Payable)`;
+          badge.style.cssText = 'background: rgba(239, 68, 68, 0.15); color: #dc2626; font-weight: 700;';
+        } else {
+          badge.textContent = '₹0.00 (No Outstanding)';
+          badge.style.cssText = 'background: rgba(16, 185, 129, 0.15); color: #059669; font-weight: 700;';
+        }
+      }
+
+      if (elBillDue) {
+        elBillDue.textContent = formatCurrency(pendingDue);
+      }
+
+      if (elResulting) {
+        const resulting = bal + pendingDue;
+        elResulting.textContent = formatCurrency(resulting);
+        elResulting.style.color = resulting > 0 ? 'var(--color-error)' : 'var(--color-success)';
+      }
     }
   }
 
@@ -2485,31 +2652,50 @@ const Operations = (() => {
   async function submitAddPurchase(e) {
     e.preventDefault();
     const btn = document.getElementById('btn-submit-purchase');
-    setButtonLoading(btn, true);
+
+    if (!validatePurchaseBanks()) {
+      showToast('Each bank account can only be selected once per purchase', 'error');
+      return;
+    }
 
     const customerID = document.getElementById('purch-form-customer')?.value || null;
+    const item = document.getElementById('purch-form-item').value.trim();
+    const quantity = parseInt(document.getElementById('purch-form-quantity').value) || 1;
     const total = parseFloat(document.getElementById('purch-form-total').value) || 0;
-    const paid = parseFloat(document.getElementById('purch-form-paid').value) || 0;
-    const method = document.getElementById('purch-form-method').value;
-    const bankID = document.getElementById('purch-form-bank').value || null;
+    const cash = parseFloat(document.getElementById('purch-form-cash')?.value) || 0;
 
-    const payments = [];
-    if (paid > 0) {
-      payments.push({
-        payment_method: method,
-        bank_id: bankID,
-        amount: paid,
-        note: 'Initial procurement payment'
-      });
+    const bankPayments = [];
+    let bankTotal = 0;
+    document.querySelectorAll('#purch-bank-payments-container .bank-payment-row').forEach(row => {
+      const select = row.querySelector('.purch-bank-select');
+      const amountInp = row.querySelector('.purch-bank-amount');
+      const bankId = select ? select.value : '';
+      const amt = amountInp ? parseFloat(amountInp.value) || 0 : 0;
+      if (bankId && amt > 0) {
+        bankPayments.push({
+          bank_id: bankId,
+          amount: amt
+        });
+        bankTotal += amt;
+      }
+    });
+
+    const totalPaid = cash + bankTotal;
+    if (totalPaid > total && total > 0) {
+      showToast('Total paid cannot exceed purchase bill amount', 'error');
+      return;
     }
+
+    setButtonLoading(btn, true);
 
     const payload = {
       customer_id: customerID && customerID.trim() !== '' ? customerID : null,
-      item: document.getElementById('purch-form-item').value.trim(),
-      quantity: parseInt(document.getElementById('purch-form-quantity').value) || 1,
+      item: item,
+      quantity: quantity,
       total_amount: total,
-      total_paid: paid,
-      payments: payments
+      total_paid: totalPaid,
+      cash_amount: cash > 0 ? cash : null,
+      bank_payments: bankPayments
     };
 
     const res = await window.API.post('/tenant/purchases', payload);
@@ -2525,6 +2711,7 @@ const Operations = (() => {
     loadPurchases();
     loadDashboardMetrics();
     loadCustomers();
+    loadCashBank();
   }
 
   // Purchase: Edit
@@ -2579,6 +2766,23 @@ const Operations = (() => {
     loadCustomers();
   }
 
+  // Expense: Category Change Handler
+  function handleExpenseCategoryChange(val) {
+    const empGroup = document.getElementById('exp-form-emp-group');
+    const empSelect = document.getElementById('exp-form-emp');
+    const itemInput = document.getElementById('exp-form-item');
+    if (val === 'employee_advance') {
+      if (empGroup) empGroup.style.display = 'block';
+      if (empSelect) empSelect.required = true;
+      if (itemInput && (!itemInput.value || itemInput.value === 'Shop rent' || itemInput.value === 'Electricity bill')) {
+        itemInput.value = 'Staff Advance Payment';
+      }
+    } else {
+      if (empGroup) empGroup.style.display = 'none';
+      if (empSelect) empSelect.required = false;
+    }
+  }
+
   // Expense: Create
   async function submitAddExpense(e) {
     e.preventDefault();
@@ -2588,9 +2792,23 @@ const Operations = (() => {
     const amount = parseFloat(document.getElementById('exp-form-amount').value) || 0;
     const method = document.getElementById('exp-form-method').value;
     const bankID = document.getElementById('exp-form-bank').value || null;
+    const category = document.getElementById('exp-form-category')?.value || 'general';
+    const employeeID = (category === 'employee_advance') ? (document.getElementById('exp-form-emp')?.value || null) : null;
+    const refID = document.getElementById('exp-form-ref')?.value?.trim() || null;
+    const date = document.getElementById('exp-form-date')?.value || null;
+
+    if (category === 'employee_advance' && !employeeID) {
+      setButtonLoading(btn, false);
+      showModalError('modal-add-expense', 'Please select a staff member for the advance payment.');
+      return;
+    }
 
     const payload = {
       item: document.getElementById('exp-form-item').value.trim(),
+      category: category,
+      employee_id: employeeID,
+      reference_id: refID,
+      payment_date: date,
       total_amount: amount,
       payment_method: method,
       bank_id: bankID
@@ -2607,6 +2825,8 @@ const Operations = (() => {
     closeModal('modal-add-expense');
     showToast('Expense recorded successfully');
     loadExpenses();
+    loadSalaries();
+    loadAttendance();
     loadDashboardMetrics();
   }
 
@@ -2657,11 +2877,13 @@ const Operations = (() => {
     const btn = document.getElementById('btn-submit-attendance');
     setButtonLoading(btn, true);
 
+    const ot = parseFloat(document.getElementById('att-form-ot').value) || 0;
     const payload = {
       employee_id: document.getElementById('att-form-emp').value,
       date: document.getElementById('att-form-date').value || getTodayString(),
       status: document.getElementById('att-form-status').value,
-      ot: parseFloat(document.getElementById('att-form-ot').value) || 0,
+      ot: ot,
+      ot_amount: ot,
       advance: parseFloat(document.getElementById('att-form-advance').value) || 0
     };
 
@@ -2690,7 +2912,7 @@ const Operations = (() => {
     document.getElementById('edit-att-id').value = a.id;
     document.getElementById('edit-att-empname').textContent = a.employee_name || 'Staff Member';
     document.getElementById('edit-att-status').value = a.status || 'present';
-    document.getElementById('edit-att-ot').value = a.ot || '0';
+    document.getElementById('edit-att-ot').value = (parseFloat(a.ot_amount) > 0 ? a.ot_amount : (a.ot || '0'));
     document.getElementById('edit-att-advance').value = a.advance || '0';
     openModal('modal-edit-attendance');
   }
@@ -2707,6 +2929,7 @@ const Operations = (() => {
     const payload = {
       status: document.getElementById('edit-att-status').value,
       ot: ot,
+      ot_amount: ot,
       advance: advance
     };
 
@@ -2730,10 +2953,19 @@ const Operations = (() => {
     const btn = document.getElementById('btn-submit-ot');
     setButtonLoading(btn, true);
 
+    const amount = parseFloat(document.getElementById('ot-form-amount').value) || 0;
+    if (amount <= 0) {
+      setButtonLoading(btn, false);
+      showModalError('modal-record-ot', 'Overtime amount must be greater than zero.');
+      return;
+    }
+
     const payload = {
       employee_id: document.getElementById('ot-form-emp').value,
       date: document.getElementById('ot-form-date').value || getTodayString(),
-      ot: parseFloat(document.getElementById('ot-form-hours').value) || 0
+      amount: amount,
+      reference_id: document.getElementById('ot-form-ref')?.value?.trim() || '',
+      note: document.getElementById('ot-form-note')?.value?.trim() || ''
     };
 
     const res = await window.API.post('/tenant/overtime', payload);
@@ -2745,8 +2977,10 @@ const Operations = (() => {
     }
 
     closeModal('modal-record-ot');
-    showToast('Overtime hours recorded successfully');
+    showToast('Overtime amount recorded successfully');
     loadAttendance();
+    loadSalaries();
+    loadDashboardMetrics();
   }
 
   // Advance: Record
@@ -2755,11 +2989,20 @@ const Operations = (() => {
     const btn = document.getElementById('btn-submit-advance');
     setButtonLoading(btn, true);
 
+    const amount = parseFloat(document.getElementById('adv-form-amount').value) || 0;
+    if (amount <= 0) {
+      setButtonLoading(btn, false);
+      showModalError('modal-record-advance', 'Advance amount must be greater than zero.');
+      return;
+    }
+
     const payload = {
       employee_id: document.getElementById('adv-form-emp').value,
       date: document.getElementById('adv-form-date').value || getTodayString(),
-      amount: parseFloat(document.getElementById('adv-form-amount').value) || 0,
-      payment_method: document.getElementById('adv-form-method').value
+      amount: amount,
+      payment_method: document.getElementById('adv-form-method').value,
+      reference_id: document.getElementById('adv-form-ref')?.value?.trim() || '',
+      note: document.getElementById('adv-form-note')?.value?.trim() || ''
     };
 
     const res = await window.API.post('/tenant/advances', payload);
@@ -2773,6 +3016,7 @@ const Operations = (() => {
     closeModal('modal-record-advance');
     showToast('Staff advance payment recorded');
     loadAttendance();
+    loadSalaries();
     loadDashboardMetrics();
   }
 
@@ -2782,6 +3026,8 @@ const Operations = (() => {
     document.getElementById('pay-salary-empname').textContent = empName;
     document.getElementById('pay-salary-pending').textContent = formatCurrency(balance);
     document.getElementById('pay-salary-amount').value = Math.max(0, parseFloat(balance) || 0);
+    const dateInput = document.getElementById('pay-salary-date');
+    if (dateInput) dateInput.value = getTodayString();
     openModal('modal-pay-salary');
   }
 
@@ -2795,6 +3041,8 @@ const Operations = (() => {
       amount: parseFloat(document.getElementById('pay-salary-amount').value) || 0,
       payment_method: document.getElementById('pay-salary-method').value,
       bank_id: document.getElementById('pay-salary-bank').value || null,
+      reference_id: document.getElementById('pay-salary-ref')?.value?.trim() || '',
+      payment_date: document.getElementById('pay-salary-date')?.value || null,
       note: document.getElementById('pay-salary-note').value.trim()
     };
 
@@ -2810,6 +3058,244 @@ const Operations = (() => {
     showToast('Salary disbursed successfully');
     loadSalaries();
     loadDashboardMetrics();
+  }
+
+  // Salary Statement / Ledger
+  let currentSalaryStatement = null;
+
+  async function openSalaryStatement(empId, empName) {
+    const res = await window.API.get(`/tenant/salaries/${empId}/statement`);
+    if (!res.ok || !res.data) {
+      showToast(res.error || 'Failed to load employee salary statement', 'error');
+      return;
+    }
+
+    const s = res.data;
+    currentSalaryStatement = s;
+
+    document.getElementById('stmt-salary-empname').textContent = `${s.employee_name || empName || 'Staff Member'} — Salary Ledger`;
+    document.getElementById('stmt-salary-base').textContent = formatCurrency(s.base_salary);
+    document.getElementById('stmt-salary-ot').textContent = formatCurrency(s.total_overtime);
+    document.getElementById('stmt-salary-gross').textContent = formatCurrency(s.gross_salary);
+    document.getElementById('stmt-salary-advances').textContent = formatCurrency(s.total_advances);
+    document.getElementById('stmt-salary-paid').textContent = formatCurrency(s.total_paid);
+    document.getElementById('stmt-salary-net').textContent = formatCurrency(s.net_payable);
+
+    // Overtime entries
+    const otTbody = document.getElementById('stmt-salary-ot-tbody');
+    const otCount = document.getElementById('stmt-salary-ot-count');
+    if (otTbody) {
+      if (Array.isArray(s.overtimes) && s.overtimes.length > 0) {
+        if (otCount) otCount.textContent = `${s.overtimes.length} entries`;
+        otTbody.innerHTML = s.overtimes.map(o => `
+          <tr>
+            <td>${formatDate(o.overtime_date || o.created_at)}</td>
+            <td style="color:var(--color-success);font-weight:600;">+${formatCurrency(o.amount)}</td>
+            <td>${escapeHTML(o.reference_id || '—')}</td>
+            <td>${escapeHTML(o.notes || '—')}</td>
+          </tr>
+        `).join('');
+      } else {
+        if (otCount) otCount.textContent = '0 entries';
+        otTbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:1rem;">No overtime records.</td></tr>`;
+      }
+    }
+
+    // Advances entries
+    const advTbody = document.getElementById('stmt-salary-adv-tbody');
+    const advCount = document.getElementById('stmt-salary-adv-count');
+    if (advTbody) {
+      if (Array.isArray(s.advances) && s.advances.length > 0) {
+        if (advCount) advCount.textContent = `${s.advances.length} entries`;
+        advTbody.innerHTML = s.advances.map(a => `
+          <tr>
+            <td>${formatDate(a.advance_date || a.created_at)}</td>
+            <td style="color:var(--color-error);font-weight:600;">-${formatCurrency(a.amount)}</td>
+            <td><span class="badge">${escapeHTML((a.payment_method || 'cash').toUpperCase())}</span></td>
+            <td>${escapeHTML(a.reference_id || '—')}</td>
+            <td>${escapeHTML(a.notes || '—')}</td>
+          </tr>
+        `).join('');
+      } else {
+        if (advCount) advCount.textContent = '0 entries';
+        advTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:1rem;">No advance records.</td></tr>`;
+      }
+    }
+
+    // Payout entries
+    const payTbody = document.getElementById('stmt-salary-pay-tbody');
+    const payCount = document.getElementById('stmt-salary-pay-count');
+    if (payTbody) {
+      if (Array.isArray(s.payments) && s.payments.length > 0) {
+        if (payCount) payCount.textContent = `${s.payments.length} entries`;
+        payTbody.innerHTML = s.payments.map(p => `
+          <tr>
+            <td>${formatDate(p.payment_date || p.created_at)}</td>
+            <td style="color:#3b82f6;font-weight:600;">-${formatCurrency(p.amount)}</td>
+            <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+            <td>${escapeHTML(p.reference_id || p.id ? p.id.substring(0, 8) : '—')}</td>
+            <td>${escapeHTML(p.note || '—')}</td>
+          </tr>
+        `).join('');
+      } else {
+        if (payCount) payCount.textContent = '0 entries';
+        payTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:1rem;">No payment records.</td></tr>`;
+      }
+    }
+
+    openModal('modal-salary-statement');
+  }
+
+  function openPaySalaryFromStatement() {
+    if (!currentSalaryStatement) return;
+    const s = currentSalaryStatement;
+    closeModal('modal-salary-statement');
+    openPaySalary(s.employee_id, s.employee_name, s.net_payable);
+  }
+
+  // Payment History Inspector
+  async function showPurchasePaymentHistory(purchaseId, itemName, totalAmount) {
+    document.getElementById('pmt-hist-title').textContent = 'Purchase Payment History';
+    document.getElementById('pmt-hist-subtitle').textContent = `Procurement Item: ${itemName}`;
+    document.getElementById('pmt-hist-total').textContent = formatCurrency(totalAmount);
+
+    const tbody = document.getElementById('pmt-hist-tbody');
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">Loading payment records...</td></tr>`;
+    openModal('modal-payment-history');
+
+    const res = await window.API.get(`/tenant/purchases/${purchaseId}/payments`);
+    if (!res.ok || !Array.isArray(res.data)) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-error);padding:1.5rem;">Failed to load payment history.</td></tr>`;
+      return;
+    }
+
+    const payments = res.data;
+    let paidSum = 0;
+    payments.forEach(p => { paidSum += parseFloat(p.amount) || 0; });
+    const pending = Math.max(0, totalAmount - paidSum);
+
+    document.getElementById('pmt-hist-paid').textContent = formatCurrency(paidSum);
+    document.getElementById('pmt-hist-pending').textContent = formatCurrency(pending);
+
+    let statusHtml = '<span class="status-badge danger">UNPAID</span>';
+    if (pending <= 0 && totalAmount > 0) {
+      statusHtml = '<span class="status-badge paid">PAID</span>';
+    } else if (paidSum > 0) {
+      statusHtml = '<span class="status-badge pending">PARTIALLY PAID</span>';
+    }
+    document.getElementById('pmt-hist-status').innerHTML = statusHtml;
+
+    if (payments.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">No payment transactions recorded yet.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = payments.map(p => `
+      <tr>
+        <td><strong>${escapeHTML(p.reference_id || (p.id ? p.id.substring(0, 8) : 'PAY'))}</strong></td>
+        <td>${formatDate(p.payment_date || p.created_at)}</td>
+        <td style="font-weight:700;color:var(--color-success);">${formatCurrency(p.amount)}</td>
+        <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+        <td><span class="status-badge ${p.status === 'completed' || !p.status ? 'paid' : 'pending'}">${escapeHTML((p.status || 'completed').toUpperCase())}</span></td>
+        <td>${escapeHTML(p.notes || '—')}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function showLineSalePaymentHistory(saleId, customerName, totalAmount, totalCashIn, balance) {
+    document.getElementById('pmt-hist-title').textContent = 'Line Sale Payment History';
+    document.getElementById('pmt-hist-subtitle').textContent = `Customer: ${customerName}`;
+    document.getElementById('pmt-hist-total').textContent = formatCurrency(totalAmount);
+
+    const tbody = document.getElementById('pmt-hist-tbody');
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">Loading payment records...</td></tr>`;
+    openModal('modal-payment-history');
+
+    const res = await window.API.get(`/tenant/line-sales/${saleId}/payments`);
+    if (!res.ok || !Array.isArray(res.data)) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-error);padding:1.5rem;">Failed to load payment history.</td></tr>`;
+      return;
+    }
+
+    const payments = res.data;
+    let paidSum = 0;
+    payments.forEach(p => { paidSum += parseFloat(p.amount) || 0; });
+    const pending = Math.max(0, (parseFloat(balance) || (totalAmount - paidSum)));
+
+    document.getElementById('pmt-hist-paid').textContent = formatCurrency(paidSum > 0 ? paidSum : totalCashIn);
+    document.getElementById('pmt-hist-pending').textContent = formatCurrency(pending);
+
+    let statusHtml = '<span class="status-badge danger">UNPAID</span>';
+    if (pending <= 0) {
+      statusHtml = '<span class="status-badge paid">PAID</span>';
+    } else if (paidSum > 0 || totalCashIn > 0) {
+      statusHtml = '<span class="status-badge pending">PARTIALLY PAID</span>';
+    }
+    document.getElementById('pmt-hist-status').innerHTML = statusHtml;
+
+    if (payments.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">No payment records found. (Initial cash in: ${formatCurrency(totalCashIn)})</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = payments.map(p => `
+      <tr>
+        <td><strong>${escapeHTML(p.reference_id || (p.id ? p.id.substring(0, 8) : 'PAY'))}</strong></td>
+        <td>${formatDate(p.payment_date || p.created_at)}</td>
+        <td style="font-weight:700;color:var(--color-success);">${formatCurrency(p.amount)}</td>
+        <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+        <td><span class="status-badge ${p.status === 'completed' || !p.status ? 'paid' : 'pending'}">${escapeHTML((p.status || 'completed').toUpperCase())}</span></td>
+        <td>${escapeHTML(p.notes || '—')}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function showCounterSalePaymentHistory(saleId, itemName, totalAmount) {
+    document.getElementById('pmt-hist-title').textContent = 'Counter Sale Payment History';
+    document.getElementById('pmt-hist-subtitle').textContent = `Item: ${itemName}`;
+    document.getElementById('pmt-hist-total').textContent = formatCurrency(totalAmount);
+
+    const tbody = document.getElementById('pmt-hist-tbody');
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">Loading payment records...</td></tr>`;
+    openModal('modal-payment-history');
+
+    const res = await window.API.get(`/tenant/counter-sales/${saleId}/payments`);
+    if (!res.ok || !Array.isArray(res.data)) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-error);padding:1.5rem;">Failed to load payment history.</td></tr>`;
+      return;
+    }
+
+    const payments = res.data;
+    let paidSum = 0;
+    payments.forEach(p => { paidSum += parseFloat(p.amount) || 0; });
+    const pending = Math.max(0, totalAmount - paidSum);
+
+    document.getElementById('pmt-hist-paid').textContent = formatCurrency(paidSum);
+    document.getElementById('pmt-hist-pending').textContent = formatCurrency(pending);
+
+    let statusHtml = '<span class="status-badge danger">UNPAID</span>';
+    if (pending <= 0) {
+      statusHtml = '<span class="status-badge paid">PAID</span>';
+    } else if (paidSum > 0) {
+      statusHtml = '<span class="status-badge pending">PARTIALLY PAID</span>';
+    }
+    document.getElementById('pmt-hist-status').innerHTML = statusHtml;
+
+    if (payments.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--color-text-muted);">No payment records found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = payments.map(p => `
+      <tr>
+        <td><strong>${escapeHTML(p.reference_id || (p.id ? p.id.substring(0, 8) : 'PAY'))}</strong></td>
+        <td>${formatDate(p.payment_date || p.created_at)}</td>
+        <td style="font-weight:700;color:var(--color-success);">${formatCurrency(p.amount)}</td>
+        <td><span class="badge">${escapeHTML((p.payment_method || 'cash').toUpperCase())}</span></td>
+        <td><span class="status-badge ${p.status === 'completed' || !p.status ? 'paid' : 'pending'}">${escapeHTML((p.status || 'completed').toUpperCase())}</span></td>
+        <td>${escapeHTML(p.notes || '—')}</td>
+      </tr>
+    `).join('');
   }
 
   // Salary: Adjust Balance
@@ -2933,19 +3419,301 @@ const Operations = (() => {
       return;
     }
     const c = res.data;
-    document.getElementById('view-details-title').textContent = `Customer Ledger - ${c.customer_name}`;
+    const recv = parseFloat(c.current_balance) || 0;
+    const payable = parseFloat(c.outstanding_payable) || 0;
+    const purchases = parseFloat(c.total_purchases) || 0;
+    const paid = parseFloat(c.total_paid) || 0;
+
+    document.getElementById('view-details-title').textContent = `Customer / Supplier Profile - ${c.customer_name}`;
     document.getElementById('view-details-content').innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:0.75rem;font-size:0.875rem;">
-        <div><strong>Customer / Business:</strong> ${escapeHTML(c.customer_name)}</div>
-        <div><strong>Contact Phone:</strong> ${escapeHTML(c.phone || '—')}</div>
-        <div><strong>Opening Credit Balance:</strong> ${formatCurrency(c.opening_balance)}</div>
-        <div style="font-size:1.125rem;font-weight:700;margin-top:0.5rem;">
-          Current Outstanding Dues: <span style="color:var(--color-warning);">${formatCurrency(c.current_balance)}</span>
-        </div>
+      <div style="display:flex;flex-direction:column;gap:0.875rem;font-size:0.875rem;">
+        <div><strong>Business / Contact:</strong> ${escapeHTML(c.customer_name)}</div>
+        <div><strong>Phone:</strong> ${escapeHTML(c.phone || '—')}</div>
         <div><strong>Account Status:</strong> <span class="status-badge ${c.status === 'active' ? 'paid' : 'pending'}">${escapeHTML(c.status)}</span></div>
+        
+        <div style="background:var(--color-surface-hover);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:0.75rem 1rem;margin-top:0.25rem;">
+          <div style="font-size:0.75rem;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:0.25rem;">Customer Sales Balance</div>
+          <div style="font-size:1.125rem;font-weight:700;color:${recv > 0 ? 'var(--color-warning)' : 'inherit'};">
+            ${formatCurrency(recv)} <span style="font-size:0.75rem;font-weight:400;color:var(--color-text-muted);">(Receivable Due)</span>
+          </div>
+        </div>
+
+        <div style="background:rgba(239, 68, 68, 0.05);border:1px solid rgba(239, 68, 68, 0.2);border-radius:var(--radius-sm);padding:0.75rem 1rem;">
+          <div style="font-size:0.75rem;font-weight:700;color:var(--color-error);text-transform:uppercase;margin-bottom:0.25rem;">Supplier Procurement Account</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">
+            <span style="color:var(--color-text-muted);">Total Purchases:</span>
+            <strong>${formatCurrency(purchases)}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
+            <span style="color:var(--color-text-muted);">Total Payments Made:</span>
+            <strong style="color:var(--color-success);">${formatCurrency(paid)}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:0.35rem;border-top:1px dashed rgba(239,68,68,0.3);font-size:1.0625rem;font-weight:700;color:var(--color-error);">
+            <span>Outstanding Payable:</span>
+            <span>${formatCurrency(payable)}</span>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="Operations.closeModal('modal-view-details'); Operations.openCustomerStatement('${c.id}');" style="flex:1;">
+            View Statement →
+          </button>
+          ${payable > 0 ? `
+            <button type="button" class="btn btn-primary btn-sm" onclick="Operations.closeModal('modal-view-details'); Operations.openMakePaymentModal({customerId: '${c.id}', customerName: '${escapeHTML(c.customer_name)}', pending: ${payable}});" style="flex:1;">
+              Make Payment
+            </button>
+          ` : ''}
+        </div>
       </div>
     `;
     openModal('modal-view-details');
+  }
+
+  // ==========================================
+  // Customer Statement & Supplier Payment Logic
+  // ==========================================
+
+  async function openCustomerStatement(customerId) {
+    activeStatementCustomerID = customerId;
+    const titleEl = document.getElementById('stmt-customer-name');
+    const subEl = document.getElementById('stmt-customer-sub');
+    const totalPurchEl = document.getElementById('stmt-total-purchases');
+    const totalPaidEl = document.getElementById('stmt-total-paid');
+    const outstandingEl = document.getElementById('stmt-outstanding-payable');
+    const tbody = document.getElementById('stmt-table-body');
+    const btnPay = document.getElementById('btn-stmt-make-payment');
+
+    if (titleEl) titleEl.textContent = 'Customer Account Statement';
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--color-text-muted);">Loading account statement...</td></tr>`;
+
+    openModal('modal-customer-statement');
+
+    const res = await window.API.get(`/tenant/customers/${customerId}/statement`);
+    if (!res.ok || !res.data) {
+      showToast(res.error || 'Failed to fetch customer statement', 'error');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--color-error);padding:2rem;">Failed to load statement: ${escapeHTML(res.error || 'Unknown error')}</td></tr>`;
+      return;
+    }
+
+    const stmt = res.data;
+    if (titleEl) titleEl.textContent = `${stmt.customer_name} - Statement`;
+    if (subEl) subEl.textContent = `Phone: ${stmt.phone || '—'} | Ledger Statement`;
+    if (totalPurchEl) totalPurchEl.textContent = formatCurrency(stmt.total_purchases);
+    if (totalPaidEl) totalPaidEl.textContent = formatCurrency(stmt.total_paid);
+    if (outstandingEl) outstandingEl.textContent = formatCurrency(stmt.outstanding_payable);
+
+    const pending = parseFloat(stmt.outstanding_payable) || 0;
+    if (btnPay) {
+      btnPay.style.display = pending > 0 ? 'inline-block' : 'none';
+    }
+
+    if (!Array.isArray(stmt.entries) || stmt.entries.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" style="text-align:center;padding:2.5rem;color:var(--color-text-muted);">
+            No procurement or settlement transactions recorded yet.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = stmt.entries.map(entry => {
+      const isPurchase = entry.entry_type === 'purchase';
+      const typeBadge = isPurchase
+        ? '<span class="status-badge cleared" style="font-size:0.7rem;">PURCHASE</span>'
+        : '<span class="status-badge paid" style="font-size:0.7rem;">SETTLEMENT</span>';
+
+      const purchaseAmt = parseFloat(entry.purchase_amount) || 0;
+      const paidAmt = parseFloat(entry.paid_amount) || 0;
+      const balAmt = parseFloat(entry.balance) || 0;
+
+      return `
+        <tr>
+          <td style="white-space:nowrap;">${entry.formatted_date || formatDate(entry.date)}</td>
+          <td><strong>${escapeHTML(entry.description)}</strong></td>
+          <td>${typeBadge}</td>
+          <td style="font-weight:600;font-family:var(--font-mono);">${purchaseAmt > 0 ? formatCurrency(purchaseAmt) : '—'}</td>
+          <td style="font-weight:600;color:var(--color-success);font-family:var(--font-mono);">${paidAmt > 0 ? formatCurrency(paidAmt) : '—'}</td>
+          <td style="font-weight:700;color:${balAmt > 0 ? 'var(--color-error)' : 'var(--color-success)'};font-family:var(--font-mono);">${formatCurrency(balAmt)}</td>
+          <td style="font-size:0.75rem;color:var(--color-text-muted);">
+            ${entry.payment_method ? escapeHTML(entry.payment_method.toUpperCase()) : '—'}
+            ${entry.bank_name ? `(${escapeHTML(entry.bank_name)})` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function openMakePaymentFromStatement() {
+    if (!activeStatementCustomerID) return;
+    const outstandingText = document.getElementById('stmt-outstanding-payable')?.textContent || '0';
+    const pendingVal = parseFloat(outstandingText.replace(/[^0-9.-]+/g, '')) || 0;
+    const title = document.getElementById('stmt-customer-name')?.textContent || 'Customer';
+    const cleanName = title.replace(' - Statement', '');
+
+    openMakePaymentModal({
+      customerId: activeStatementCustomerID,
+      customerName: cleanName,
+      pending: pendingVal
+    });
+  }
+
+  function openMakePaymentModal({customerId = null, purchaseId = null, customerName = '', pending = 0, item = ''}) {
+    supplierPaymentTarget = {
+      customerId: customerId,
+      purchaseId: purchaseId,
+      pending: parseFloat(pending) || 0,
+      customerName: customerName || 'Vendor',
+      item: item || ''
+    };
+
+    const targetNameEl = document.getElementById('supp-pay-target-name');
+    const purchaseInfoEl = document.getElementById('supp-pay-purchase-info');
+    const itemNameEl = document.getElementById('supp-pay-item-name');
+    const outstandingEl = document.getElementById('supp-pay-current-outstanding');
+    const custIdInput = document.getElementById('supp-pay-customer-id');
+    const purchIdInput = document.getElementById('supp-pay-purchase-id');
+    const amountInput = document.getElementById('supp-pay-amount');
+    const methodSelect = document.getElementById('supp-pay-method');
+    const noteInput = document.getElementById('supp-pay-note');
+    const bankGroup = document.getElementById('supp-pay-bank-group');
+    const bankSelect = document.getElementById('supp-pay-bank');
+
+    if (targetNameEl) targetNameEl.textContent = customerName || 'Vendor';
+    if (custIdInput) custIdInput.value = customerId || '';
+    if (purchIdInput) purchIdInput.value = purchaseId || '';
+
+    if (purchaseInfoEl && itemNameEl) {
+      if (purchaseId && item) {
+        purchaseInfoEl.style.display = 'flex';
+        itemNameEl.textContent = item;
+      } else {
+        purchaseInfoEl.style.display = 'none';
+      }
+    }
+
+    if (outstandingEl) {
+      outstandingEl.textContent = formatCurrency(supplierPaymentTarget.pending);
+    }
+
+    if (amountInput) {
+      amountInput.value = supplierPaymentTarget.pending > 0 ? supplierPaymentTarget.pending.toFixed(2) : '';
+      amountInput.max = supplierPaymentTarget.pending > 0 ? supplierPaymentTarget.pending.toString() : '';
+    }
+
+    if (methodSelect) methodSelect.value = 'cash';
+    if (bankGroup) bankGroup.style.display = 'none';
+    if (noteInput) noteInput.value = '';
+
+    if (bankSelect) {
+      bankSelect.innerHTML = renderBankSelectOptions();
+    }
+
+    calcSupplierPaymentRemaining();
+    openModal('modal-make-supplier-payment');
+  }
+
+  function handleSupplierPayMethodChange() {
+    const method = document.getElementById('supp-pay-method')?.value || 'cash';
+    const bankGroup = document.getElementById('supp-pay-bank-group');
+    if (bankGroup) {
+      bankGroup.style.display = method === 'bank' ? 'block' : 'none';
+    }
+  }
+
+  function calcSupplierPaymentRemaining() {
+    const cur = supplierPaymentTarget.pending;
+    const paying = parseFloat(document.getElementById('supp-pay-amount')?.value) || 0;
+    const remaining = Math.max(0, cur - paying);
+
+    const elCur = document.getElementById('supp-pay-calc-current');
+    const elPay = document.getElementById('supp-pay-calc-paying');
+    const elRem = document.getElementById('supp-pay-calc-remaining');
+    const warn = document.getElementById('supp-pay-warning');
+
+    if (elCur) elCur.textContent = formatCurrency(cur);
+    if (elPay) elPay.textContent = formatCurrency(paying);
+    if (elRem) elRem.textContent = formatCurrency(remaining);
+
+    if (warn) {
+      warn.style.display = paying > cur && cur > 0 ? 'block' : 'none';
+    }
+  }
+
+  async function submitSupplierPayment(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-submit-supplier-pay');
+    const paying = parseFloat(document.getElementById('supp-pay-amount')?.value) || 0;
+    const cur = supplierPaymentTarget.pending;
+
+    if (paying <= 0) {
+      showToast('Payment amount must be greater than zero', 'error');
+      return;
+    }
+    if (cur > 0 && paying > cur) {
+      showToast('Payment amount cannot exceed current outstanding payable balance', 'error');
+      return;
+    }
+
+    const method = document.getElementById('supp-pay-method')?.value || 'cash';
+    const bankID = document.getElementById('supp-pay-bank')?.value || null;
+    const note = document.getElementById('supp-pay-note')?.value?.trim() || '';
+
+    if (method === 'bank' && !bankID) {
+      showToast('Please select a bank account for bank payment', 'error');
+      return;
+    }
+
+    setButtonLoading(btn, true);
+
+    const custId = supplierPaymentTarget.customerId;
+    const purchId = supplierPaymentTarget.purchaseId;
+
+    let url = '';
+    const payload = {
+      amount: paying,
+      payment_method: method,
+      bank_id: method === 'bank' ? bankID : null,
+      note: note
+    };
+
+    if (purchId) {
+      url = `/tenant/purchases/${purchId}/payments`;
+      payload.purchase_id = purchId;
+      if (custId) payload.customer_id = custId;
+    } else if (custId) {
+      url = `/tenant/customers/${custId}/payments`;
+      payload.customer_id = custId;
+    } else {
+      showToast('Missing customer or purchase context for payment', 'error');
+      setButtonLoading(btn, false);
+      return;
+    }
+
+    const res = await window.API.post(url, payload);
+    setButtonLoading(btn, false);
+
+    if (!res.ok) {
+      showToast(res.error || 'Failed to record supplier payment', 'error');
+      return;
+    }
+
+    closeModal('modal-make-supplier-payment');
+    showToast(`Payment of ${formatCurrency(paying)} recorded successfully!`);
+
+    // Reload relevant views
+    loadPurchases();
+    loadCustomers();
+    loadCashBank();
+    loadReceivablesDues();
+    loadDashboardMetrics();
+
+    // If statement modal is open for this customer, refresh it immediately
+    const stmtModal = document.getElementById('modal-customer-statement');
+    if (stmtModal && stmtModal.style.display !== 'none' && activeStatementCustomerID) {
+      openCustomerStatement(activeStatementCustomerID);
+    }
   }
 
   // ==========================================
@@ -3392,6 +4160,21 @@ const Operations = (() => {
     filterCustomerDropdown,
     handlePurchaseCustomerChange,
     calcPurchaseBalance,
+    addPurchaseBankRow,
+    removePurchaseBankRow,
+    validatePurchaseBanks,
+    openCustomerStatement,
+    openMakePaymentFromStatement,
+    openMakePaymentModal,
+    handleSupplierPayMethodChange,
+    calcSupplierPaymentRemaining,
+    submitSupplierPayment,
+    handleExpenseCategoryChange,
+    openSalaryStatement,
+    openPaySalaryFromStatement,
+    showPurchasePaymentHistory,
+    showLineSalePaymentHistory,
+    showCounterSalePaymentHistory,
     handleLineSaleCustomerChange,
     addLineSaleBankRow,
     removeLineSaleBankRow,

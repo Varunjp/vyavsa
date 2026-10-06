@@ -28,10 +28,10 @@ func NewAttendancePostgres(pool *pgxpool.Pool) *AttendancePostgres {
 
 func (r *AttendancePostgres) Upsert(ctx context.Context, att *domain.Attendance) error {
 	query := `
-		INSERT INTO attendance (tenant_id, employee_id, date, status, daily_salary, ot, advance)
-		VALUES ($1, $2, $3::date, $4, $5, $6, $7)
+		INSERT INTO attendance (tenant_id, employee_id, date, status, daily_salary, ot, ot_amount, advance)
+		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8)
 		ON CONFLICT (tenant_id, employee_id, date)
-		DO UPDATE SET status = EXCLUDED.status, daily_salary = EXCLUDED.daily_salary, ot = EXCLUDED.ot, advance = EXCLUDED.advance, updated_at = NOW()
+		DO UPDATE SET status = EXCLUDED.status, daily_salary = EXCLUDED.daily_salary, ot = EXCLUDED.ot, ot_amount = EXCLUDED.ot_amount, advance = EXCLUDED.advance, updated_at = NOW()
 		RETURNING id, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -42,6 +42,7 @@ func (r *AttendancePostgres) Upsert(ctx context.Context, att *domain.Attendance)
 		att.Status,
 		att.DailySalary,
 		att.OT,
+		att.OTAmount,
 		att.Advance,
 	).Scan(&att.ID, &att.CreatedAt, &att.UpdatedAt)
 	if err != nil {
@@ -53,7 +54,7 @@ func (r *AttendancePostgres) Upsert(ctx context.Context, att *domain.Attendance)
 func (r *AttendancePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Attendance, error) {
 	query := `
 		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
-		       a.date::text, a.status, a.daily_salary, a.ot, a.advance, a.created_at, a.updated_at
+		       a.date::text, a.status, a.daily_salary, a.ot, a.ot_amount, a.advance, a.created_at, a.updated_at
 		FROM attendance a
 		LEFT JOIN tenant_employees e ON e.id = a.employee_id
 		WHERE a.tenant_id = $1 AND a.id = $2
@@ -69,6 +70,7 @@ func (r *AttendancePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID
 		&a.Status,
 		&a.DailySalary,
 		&a.OT,
+		&a.OTAmount,
 		&a.Advance,
 		&a.CreatedAt,
 		&a.UpdatedAt,
@@ -85,7 +87,7 @@ func (r *AttendancePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID
 func (r *AttendancePostgres) GetByEmployeeAndDate(ctx context.Context, tenantID, employeeID uuid.UUID, date string) (*domain.Attendance, error) {
 	query := `
 		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
-		       a.date::text, a.status, a.daily_salary, a.ot, a.advance, a.created_at, a.updated_at
+		       a.date::text, a.status, a.daily_salary, a.ot, a.ot_amount, a.advance, a.created_at, a.updated_at
 		FROM attendance a
 		LEFT JOIN tenant_employees e ON e.id = a.employee_id
 		WHERE a.tenant_id = $1 AND a.employee_id = $2 AND a.date = $3::date
@@ -101,6 +103,7 @@ func (r *AttendancePostgres) GetByEmployeeAndDate(ctx context.Context, tenantID,
 		&a.Status,
 		&a.DailySalary,
 		&a.OT,
+		&a.OTAmount,
 		&a.Advance,
 		&a.CreatedAt,
 		&a.UpdatedAt,
@@ -117,8 +120,8 @@ func (r *AttendancePostgres) GetByEmployeeAndDate(ctx context.Context, tenantID,
 func (r *AttendancePostgres) Update(ctx context.Context, att *domain.Attendance) error {
 	query := `
 		UPDATE attendance
-		SET status = $1, daily_salary = $2, ot = $3, advance = $4, updated_at = NOW()
-		WHERE tenant_id = $5 AND id = $6
+		SET status = $1, daily_salary = $2, ot = $3, ot_amount = $4, advance = $5, updated_at = NOW()
+		WHERE tenant_id = $6 AND id = $7
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -126,6 +129,7 @@ func (r *AttendancePostgres) Update(ctx context.Context, att *domain.Attendance)
 		att.Status,
 		att.DailySalary,
 		att.OT,
+		att.OTAmount,
 		att.Advance,
 		att.TenantID,
 		att.ID,
@@ -186,7 +190,7 @@ func (r *AttendancePostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 
 	listQuery := fmt.Sprintf(`
 		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
-		       a.date::text, a.status, a.daily_salary, a.ot, a.advance, a.created_at, a.updated_at
+		       a.date::text, a.status, a.daily_salary, a.ot, a.ot_amount, a.advance, a.created_at, a.updated_at
 		FROM attendance a
 		LEFT JOIN tenant_employees e ON e.id = a.employee_id
 		%s
@@ -213,6 +217,7 @@ func (r *AttendancePostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 			&a.Status,
 			&a.DailySalary,
 			&a.OT,
+			&a.OTAmount,
 			&a.Advance,
 			&a.CreatedAt,
 			&a.UpdatedAt,
@@ -241,6 +246,314 @@ func (r *AttendancePostgres) GetTodaySalaryEarned(ctx context.Context, tenantID 
 }
 
 // ==========================================
+// 1B. EmployeeAdvancePostgres
+// ==========================================
+
+type EmployeeAdvancePostgres struct {
+	pool *pgxpool.Pool
+}
+
+func NewEmployeeAdvancePostgres(pool *pgxpool.Pool) *EmployeeAdvancePostgres {
+	return &EmployeeAdvancePostgres{pool: pool}
+}
+
+func (r *EmployeeAdvancePostgres) Create(ctx context.Context, adv *domain.EmployeeAdvance) error {
+	query := `
+		INSERT INTO employee_advances (tenant_id, employee_id, expense_id, amount, payment_method, bank_id, bank_name, reference_id, advance_date, notes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10)
+		RETURNING id, created_at, updated_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, query,
+		adv.TenantID,
+		adv.EmployeeID,
+		adv.ExpenseID,
+		adv.Amount,
+		adv.PaymentMethod,
+		adv.BankID,
+		adv.BankName,
+		adv.ReferenceID,
+		adv.AdvanceDate,
+		adv.Notes,
+	).Scan(&adv.ID, &adv.CreatedAt, &adv.UpdatedAt)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to create employee advance: %w", err))
+	}
+	return nil
+}
+
+func (r *EmployeeAdvancePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.EmployeeAdvance, error) {
+	query := `
+		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
+		       a.expense_id, a.amount, a.payment_method, a.bank_id, a.bank_name,
+		       COALESCE(a.reference_id, '') as reference_id, a.advance_date::text,
+		       COALESCE(a.notes, '') as notes, a.created_at, a.updated_at
+		FROM employee_advances a
+		LEFT JOIN tenant_employees e ON e.id = a.employee_id
+		WHERE a.tenant_id = $1 AND a.id = $2
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var adv domain.EmployeeAdvance
+	err := exec.QueryRow(ctx, query, tenantID, id).Scan(
+		&adv.ID,
+		&adv.TenantID,
+		&adv.EmployeeID,
+		&adv.EmployeeName,
+		&adv.ExpenseID,
+		&adv.Amount,
+		&adv.PaymentMethod,
+		&adv.BankID,
+		&adv.BankName,
+		&adv.ReferenceID,
+		&adv.AdvanceDate,
+		&adv.Notes,
+		&adv.CreatedAt,
+		&adv.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("employee advance record not found")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get employee advance: %w", err))
+	}
+	return &adv, nil
+}
+
+func (r *EmployeeAdvancePostgres) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, employeeID *uuid.UUID, date string) ([]domain.EmployeeAdvance, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 50
+	}
+	offset := (page - 1) * pageSize
+
+	baseWhere := "WHERE a.tenant_id = $1"
+	args := []any{tenantID}
+	argIdx := 2
+
+	if employeeID != nil && *employeeID != uuid.Nil {
+		baseWhere += fmt.Sprintf(" AND a.employee_id = $%d", argIdx)
+		args = append(args, *employeeID)
+		argIdx++
+	}
+
+	if date != "" {
+		baseWhere += fmt.Sprintf(" AND a.advance_date = $%d::date", argIdx)
+		args = append(args, date)
+		argIdx++
+	}
+
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM employee_advances a %s", baseWhere)
+	exec := GetExecutor(ctx, r.pool)
+	var total int64
+	if err := exec.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count employee advances: %w", err))
+	}
+
+	listQuery := fmt.Sprintf(`
+		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
+		       a.expense_id, a.amount, a.payment_method, a.bank_id, a.bank_name,
+		       COALESCE(a.reference_id, '') as reference_id, a.advance_date::text,
+		       COALESCE(a.notes, '') as notes, a.created_at, a.updated_at
+		FROM employee_advances a
+		LEFT JOIN tenant_employees e ON e.id = a.employee_id
+		%s
+		ORDER BY a.advance_date DESC, a.created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, baseWhere, argIdx, argIdx+1)
+	args = append(args, pageSize, offset)
+
+	rows, err := exec.Query(ctx, listQuery, args...)
+	if err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list employee advances: %w", err))
+	}
+	defer rows.Close()
+
+	list := make([]domain.EmployeeAdvance, 0)
+	for rows.Next() {
+		var a domain.EmployeeAdvance
+		if err := rows.Scan(
+			&a.ID,
+			&a.TenantID,
+			&a.EmployeeID,
+			&a.EmployeeName,
+			&a.ExpenseID,
+			&a.Amount,
+			&a.PaymentMethod,
+			&a.BankID,
+			&a.BankName,
+			&a.ReferenceID,
+			&a.AdvanceDate,
+			&a.Notes,
+			&a.CreatedAt,
+			&a.UpdatedAt,
+		); err != nil {
+			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan employee advance: %w", err))
+		}
+		list = append(list, a)
+	}
+	return list, total, nil
+}
+
+func (r *EmployeeAdvancePostgres) GetTotalAdvancesByEmployee(ctx context.Context, tenantID, employeeID uuid.UUID) (decimal.Decimal, error) {
+	query := `SELECT COALESCE(SUM(amount), 0.00) FROM employee_advances WHERE tenant_id = $1 AND employee_id = $2`
+	exec := GetExecutor(ctx, r.pool)
+	var total decimal.Decimal
+	if err := exec.QueryRow(ctx, query, tenantID, employeeID).Scan(&total); err != nil {
+		return decimal.Zero, appErrors.NewDatabase(fmt.Errorf("failed to get total advances: %w", err))
+	}
+	return total, nil
+}
+
+// ==========================================
+// 1C. EmployeeOvertimePostgres
+// ==========================================
+
+type EmployeeOvertimePostgres struct {
+	pool *pgxpool.Pool
+}
+
+func NewEmployeeOvertimePostgres(pool *pgxpool.Pool) *EmployeeOvertimePostgres {
+	return &EmployeeOvertimePostgres{pool: pool}
+}
+
+func (r *EmployeeOvertimePostgres) Create(ctx context.Context, ot *domain.EmployeeOvertime) error {
+	query := `
+		INSERT INTO employee_overtime (tenant_id, employee_id, amount, overtime_date, reference_id, notes)
+		VALUES ($1, $2, $3, $4::date, $5, $6)
+		RETURNING id, created_at, updated_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, query,
+		ot.TenantID,
+		ot.EmployeeID,
+		ot.Amount,
+		ot.OvertimeDate,
+		ot.ReferenceID,
+		ot.Notes,
+	).Scan(&ot.ID, &ot.CreatedAt, &ot.UpdatedAt)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to create employee overtime: %w", err))
+	}
+	return nil
+}
+
+func (r *EmployeeOvertimePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.EmployeeOvertime, error) {
+	query := `
+		SELECT o.id, o.tenant_id, o.employee_id, COALESCE(e.name, '') as employee_name,
+		       o.amount, o.overtime_date::text, COALESCE(o.reference_id, '') as reference_id,
+		       COALESCE(o.notes, '') as notes, o.created_at, o.updated_at
+		FROM employee_overtime o
+		LEFT JOIN tenant_employees e ON e.id = o.employee_id
+		WHERE o.tenant_id = $1 AND o.id = $2
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var ot domain.EmployeeOvertime
+	err := exec.QueryRow(ctx, query, tenantID, id).Scan(
+		&ot.ID,
+		&ot.TenantID,
+		&ot.EmployeeID,
+		&ot.EmployeeName,
+		&ot.Amount,
+		&ot.OvertimeDate,
+		&ot.ReferenceID,
+		&ot.Notes,
+		&ot.CreatedAt,
+		&ot.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("employee overtime record not found")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get employee overtime: %w", err))
+	}
+	return &ot, nil
+}
+
+func (r *EmployeeOvertimePostgres) List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, employeeID *uuid.UUID, date string) ([]domain.EmployeeOvertime, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 50
+	}
+	offset := (page - 1) * pageSize
+
+	baseWhere := "WHERE o.tenant_id = $1"
+	args := []any{tenantID}
+	argIdx := 2
+
+	if employeeID != nil && *employeeID != uuid.Nil {
+		baseWhere += fmt.Sprintf(" AND o.employee_id = $%d", argIdx)
+		args = append(args, *employeeID)
+		argIdx++
+	}
+
+	if date != "" {
+		baseWhere += fmt.Sprintf(" AND o.overtime_date = $%d::date", argIdx)
+		args = append(args, date)
+		argIdx++
+	}
+
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM employee_overtime o %s", baseWhere)
+	exec := GetExecutor(ctx, r.pool)
+	var total int64
+	if err := exec.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to count employee overtime: %w", err))
+	}
+
+	listQuery := fmt.Sprintf(`
+		SELECT o.id, o.tenant_id, o.employee_id, COALESCE(e.name, '') as employee_name,
+		       o.amount, o.overtime_date::text, COALESCE(o.reference_id, '') as reference_id,
+		       COALESCE(o.notes, '') as notes, o.created_at, o.updated_at
+		FROM employee_overtime o
+		LEFT JOIN tenant_employees e ON e.id = o.employee_id
+		%s
+		ORDER BY o.overtime_date DESC, o.created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, baseWhere, argIdx, argIdx+1)
+	args = append(args, pageSize, offset)
+
+	rows, err := exec.Query(ctx, listQuery, args...)
+	if err != nil {
+		return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to list employee overtime: %w", err))
+	}
+	defer rows.Close()
+
+	list := make([]domain.EmployeeOvertime, 0)
+	for rows.Next() {
+		var o domain.EmployeeOvertime
+		if err := rows.Scan(
+			&o.ID,
+			&o.TenantID,
+			&o.EmployeeID,
+			&o.EmployeeName,
+			&o.Amount,
+			&o.OvertimeDate,
+			&o.ReferenceID,
+			&o.Notes,
+			&o.CreatedAt,
+			&o.UpdatedAt,
+		); err != nil {
+			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan employee overtime: %w", err))
+		}
+		list = append(list, o)
+	}
+	return list, total, nil
+}
+
+func (r *EmployeeOvertimePostgres) GetTotalOvertimeByEmployee(ctx context.Context, tenantID, employeeID uuid.UUID) (decimal.Decimal, error) {
+	query := `SELECT COALESCE(SUM(amount), 0.00) FROM employee_overtime WHERE tenant_id = $1 AND employee_id = $2`
+	exec := GetExecutor(ctx, r.pool)
+	var total decimal.Decimal
+	if err := exec.QueryRow(ctx, query, tenantID, employeeID).Scan(&total); err != nil {
+		return decimal.Zero, appErrors.NewDatabase(fmt.Errorf("failed to get total overtime: %w", err))
+	}
+	return total, nil
+}
+
+// ==========================================
 // 2. EmployeeSalaryPostgres
 // ==========================================
 
@@ -257,7 +570,11 @@ func (r *EmployeeSalaryPostgres) GetByEmployeeID(ctx context.Context, tenantID, 
 		SELECT COALESCE(s.id, gen_random_uuid()) as id,
 		       e.tenant_id, e.id as employee_id, e.name as employee_name,
 		       e.salary as salary_rate, e.ot_rate,
-		       COALESCE(s.balance, 0.00) as balance,
+		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
+		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
 		       COALESCE(s.created_at, NOW()) as created_at,
 		       COALESCE(s.updated_at, NOW()) as updated_at
 		FROM tenant_employees e
@@ -273,6 +590,10 @@ func (r *EmployeeSalaryPostgres) GetByEmployeeID(ctx context.Context, tenantID, 
 		&s.EmployeeName,
 		&s.SalaryRate,
 		&s.OTRate,
+		&s.TotalOvertime,
+		&s.GrossSalary,
+		&s.TotalAdvances,
+		&s.TotalPaid,
 		&s.Balance,
 		&s.CreatedAt,
 		&s.UpdatedAt,
@@ -282,6 +603,56 @@ func (r *EmployeeSalaryPostgres) GetByEmployeeID(ctx context.Context, tenantID, 
 			return nil, appErrors.NewNotFound("employee not found within tenant")
 		}
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get employee salary: %w", err))
+	}
+	return &s, nil
+}
+
+func (r *EmployeeSalaryPostgres) GetByEmployeeIDForUpdate(ctx context.Context, tenantID, employeeID uuid.UUID) (*domain.EmployeeSalary, error) {
+	exec := GetExecutor(ctx, r.pool)
+	initQuery := `
+		INSERT INTO employee_salary (tenant_id, employee_id, balance)
+		VALUES ($1, $2, 0.00)
+		ON CONFLICT (tenant_id, employee_id) DO NOTHING
+	`
+	if _, err := exec.Exec(ctx, initQuery, tenantID, employeeID); err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to initialize employee salary row: %w", err))
+	}
+
+	query := `
+		SELECT s.id, e.tenant_id, e.id as employee_id, e.name as employee_name,
+		       e.salary as salary_rate, e.ot_rate,
+		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
+		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
+		       s.created_at, s.updated_at
+		FROM tenant_employees e
+		JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
+		WHERE e.tenant_id = $1 AND e.id = $2
+		FOR UPDATE OF s
+	`
+	var s domain.EmployeeSalary
+	err := exec.QueryRow(ctx, query, tenantID, employeeID).Scan(
+		&s.ID,
+		&s.TenantID,
+		&s.EmployeeID,
+		&s.EmployeeName,
+		&s.SalaryRate,
+		&s.OTRate,
+		&s.TotalOvertime,
+		&s.GrossSalary,
+		&s.TotalAdvances,
+		&s.TotalPaid,
+		&s.Balance,
+		&s.CreatedAt,
+		&s.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("employee not found within tenant")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get employee salary for update: %w", err))
 	}
 	return &s, nil
 }
@@ -319,6 +690,32 @@ func (r *EmployeeSalaryPostgres) AdjustBalance(ctx context.Context, tenantID, em
 		return appErrors.NewDatabase(fmt.Errorf("failed to adjust employee salary balance: %w", err))
 	}
 	return nil
+}
+
+func (r *EmployeeSalaryPostgres) RecalculateBalance(ctx context.Context, tenantID, employeeID uuid.UUID) (*domain.EmployeeSalary, error) {
+	exec := GetExecutor(ctx, r.pool)
+	query := `
+		WITH calc AS (
+			SELECT
+				e.tenant_id,
+				e.id as employee_id,
+				(e.salary +
+				 COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+				 COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+				 COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)
+				) as new_balance
+			FROM tenant_employees e
+			WHERE e.tenant_id = $1 AND e.id = $2
+		)
+		INSERT INTO employee_salary (tenant_id, employee_id, balance)
+		SELECT tenant_id, employee_id, new_balance FROM calc
+		ON CONFLICT (tenant_id, employee_id)
+		DO UPDATE SET balance = EXCLUDED.balance, updated_at = NOW();
+	`
+	if _, err := exec.Exec(ctx, query, tenantID, employeeID); err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to recalculate employee salary balance: %w", err))
+	}
+	return r.GetByEmployeeID(ctx, tenantID, employeeID)
 }
 
 func (r *EmployeeSalaryPostgres) Delete(ctx context.Context, tenantID, employeeID uuid.UUID) error {
@@ -364,7 +761,11 @@ func (r *EmployeeSalaryPostgres) List(ctx context.Context, tenantID uuid.UUID, p
 		SELECT COALESCE(s.id, gen_random_uuid()) as id,
 		       e.tenant_id, e.id as employee_id, e.name as employee_name,
 		       e.salary as salary_rate, e.ot_rate,
-		       COALESCE(s.balance, 0.00) as balance,
+		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
+		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
 		       COALESCE(s.created_at, e.created_at) as created_at,
 		       COALESCE(s.updated_at, e.updated_at) as updated_at
 		FROM tenant_employees e
@@ -391,6 +792,10 @@ func (r *EmployeeSalaryPostgres) List(ctx context.Context, tenantID uuid.UUID, p
 			&s.EmployeeName,
 			&s.SalaryRate,
 			&s.OTRate,
+			&s.TotalOvertime,
+			&s.GrossSalary,
+			&s.TotalAdvances,
+			&s.TotalPaid,
 			&s.Balance,
 			&s.CreatedAt,
 			&s.UpdatedAt,
@@ -415,8 +820,8 @@ func (r *EmployeeSalaryPostgres) ListPending(ctx context.Context, tenantID uuid.
 	countQuery := `
 		SELECT COUNT(*)
 		FROM tenant_employees e
-		INNER JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
-		WHERE e.tenant_id = $1 AND s.balance > 0
+		LEFT JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
+		WHERE e.tenant_id = $1 AND (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) > 0
 	`
 	exec := GetExecutor(ctx, r.pool)
 	var total int64
@@ -425,12 +830,20 @@ func (r *EmployeeSalaryPostgres) ListPending(ctx context.Context, tenantID uuid.
 	}
 
 	listQuery := `
-		SELECT s.id, e.tenant_id, e.id as employee_id, e.name as employee_name,
-		       e.salary as salary_rate, e.ot_rate, s.balance, s.created_at, s.updated_at
+		SELECT COALESCE(s.id, gen_random_uuid()) as id,
+		       e.tenant_id, e.id as employee_id, e.name as employee_name,
+		       e.salary as salary_rate, e.ot_rate,
+		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
+		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
+		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
+		       COALESCE(s.created_at, e.created_at) as created_at,
+		       COALESCE(s.updated_at, e.updated_at) as updated_at
 		FROM tenant_employees e
-		INNER JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
-		WHERE e.tenant_id = $1 AND s.balance > 0
-		ORDER BY s.balance DESC, e.name ASC
+		LEFT JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
+		WHERE e.tenant_id = $1 AND (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) > 0
+		ORDER BY balance DESC, e.name ASC
 		LIMIT $2 OFFSET $3
 	`
 	rows, err := exec.Query(ctx, listQuery, tenantID, pageSize, offset)
@@ -449,6 +862,10 @@ func (r *EmployeeSalaryPostgres) ListPending(ctx context.Context, tenantID uuid.
 			&s.EmployeeName,
 			&s.SalaryRate,
 			&s.OTRate,
+			&s.TotalOvertime,
+			&s.GrossSalary,
+			&s.TotalAdvances,
+			&s.TotalPaid,
 			&s.Balance,
 			&s.CreatedAt,
 			&s.UpdatedAt,
@@ -462,10 +879,18 @@ func (r *EmployeeSalaryPostgres) ListPending(ctx context.Context, tenantID uuid.
 }
 
 func (r *EmployeeSalaryPostgres) CreatePayment(ctx context.Context, payment *domain.EmployeeSalaryPayment) error {
+	pDate := payment.PaymentDate
+	if pDate == "" {
+		pDate = time.Now().UTC().Format("2006-01-02")
+	}
+	pStatus := payment.Status
+	if pStatus == "" {
+		pStatus = "COMPLETED"
+	}
 	query := `
-		INSERT INTO employee_salary_payment (tenant_id, employee_id, payment_method, bank_id, bank_name, amount, note)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, created_at, updated_at
+		INSERT INTO employee_salary_payment (tenant_id, employee_id, payment_method, bank_id, bank_name, amount, payment_date, reference_id, status, note)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10)
+		RETURNING id, payment_date::text, reference_id, status, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, query,
@@ -475,8 +900,11 @@ func (r *EmployeeSalaryPostgres) CreatePayment(ctx context.Context, payment *dom
 		payment.BankID,
 		payment.BankName,
 		payment.Amount,
+		pDate,
+		payment.ReferenceID,
+		pStatus,
 		payment.Note,
-	).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt)
+	).Scan(&payment.ID, &payment.PaymentDate, &payment.ReferenceID, &payment.Status, &payment.CreatedAt, &payment.UpdatedAt)
 	if err != nil {
 		return appErrors.NewDatabase(fmt.Errorf("failed to create salary payment: %w", err))
 	}
@@ -511,11 +939,15 @@ func (r *EmployeeSalaryPostgres) ListPayments(ctx context.Context, tenantID uuid
 
 	listQuery := fmt.Sprintf(`
 		SELECT p.id, p.tenant_id, p.employee_id, COALESCE(e.name, '') as employee_name,
-		       p.payment_method, p.bank_id, p.bank_name, p.amount, p.note, p.created_at, p.updated_at
+		       p.payment_method, p.bank_id, p.bank_name, p.amount,
+		       COALESCE(p.payment_date::text, p.created_at::date::text) as payment_date,
+		       COALESCE(p.reference_id, '') as reference_id,
+		       COALESCE(p.status, 'COMPLETED') as status,
+		       p.note, p.created_at, p.updated_at
 		FROM employee_salary_payment p
 		LEFT JOIN tenant_employees e ON e.id = p.employee_id
 		%s
-		ORDER BY p.created_at DESC
+		ORDER BY COALESCE(p.payment_date, p.created_at::date) DESC, p.created_at DESC
 		LIMIT $%d OFFSET $%d
 	`, baseWhere, argIdx, argIdx+1)
 	args = append(args, pageSize, offset)
@@ -538,6 +970,9 @@ func (r *EmployeeSalaryPostgres) ListPayments(ctx context.Context, tenantID uuid
 			&p.BankID,
 			&p.BankName,
 			&p.Amount,
+			&p.PaymentDate,
+			&p.ReferenceID,
+			&p.Status,
 			&p.Note,
 			&p.CreatedAt,
 			&p.UpdatedAt,
@@ -548,6 +983,130 @@ func (r *EmployeeSalaryPostgres) ListPayments(ctx context.Context, tenantID uuid
 	}
 
 	return payments, total, nil
+}
+
+func (r *EmployeeSalaryPostgres) GetTotalPaymentsByEmployee(ctx context.Context, tenantID, employeeID uuid.UUID) (decimal.Decimal, error) {
+	query := `SELECT COALESCE(SUM(amount), 0.00) FROM employee_salary_payment WHERE tenant_id = $1 AND employee_id = $2`
+	exec := GetExecutor(ctx, r.pool)
+	var total decimal.Decimal
+	if err := exec.QueryRow(ctx, query, tenantID, employeeID).Scan(&total); err != nil {
+		return decimal.Zero, appErrors.NewDatabase(fmt.Errorf("failed to get total salary payments: %w", err))
+	}
+	return total, nil
+}
+
+func (r *EmployeeSalaryPostgres) GetStatement(ctx context.Context, tenantID, employeeID uuid.UUID) (*domain.EmployeeSalaryStatement, error) {
+	salary, err := r.GetByEmployeeID(ctx, tenantID, employeeID)
+	if err != nil {
+		return nil, err
+	}
+
+	exec := GetExecutor(ctx, r.pool)
+
+	// 1. Fetch overtimes
+	otQuery := `
+		SELECT o.id, o.tenant_id, o.employee_id, COALESCE(e.name, '') as employee_name,
+		       o.amount, o.overtime_date::text, COALESCE(o.reference_id, '') as reference_id,
+		       COALESCE(o.notes, '') as notes, o.created_at, o.updated_at
+		FROM employee_overtime o
+		LEFT JOIN tenant_employees e ON e.id = o.employee_id
+		WHERE o.tenant_id = $1 AND o.employee_id = $2
+		ORDER BY o.overtime_date ASC, o.created_at ASC
+	`
+	otRows, err := exec.Query(ctx, otQuery, tenantID, employeeID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to query employee overtimes for statement: %w", err))
+	}
+	defer otRows.Close()
+
+	overtimes := make([]domain.EmployeeOvertime, 0)
+	for otRows.Next() {
+		var o domain.EmployeeOvertime
+		if err := otRows.Scan(
+			&o.ID, &o.TenantID, &o.EmployeeID, &o.EmployeeName,
+			&o.Amount, &o.OvertimeDate, &o.ReferenceID, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan overtime for statement: %w", err))
+		}
+		overtimes = append(overtimes, o)
+	}
+
+	// 2. Fetch advances
+	advQuery := `
+		SELECT a.id, a.tenant_id, a.employee_id, COALESCE(e.name, '') as employee_name,
+		       a.expense_id, a.amount, a.payment_method, a.bank_id, a.bank_name,
+		       COALESCE(a.reference_id, '') as reference_id, a.advance_date::text,
+		       COALESCE(a.notes, '') as notes, a.created_at, a.updated_at
+		FROM employee_advances a
+		LEFT JOIN tenant_employees e ON e.id = a.employee_id
+		WHERE a.tenant_id = $1 AND a.employee_id = $2
+		ORDER BY a.advance_date ASC, a.created_at ASC
+	`
+	advRows, err := exec.Query(ctx, advQuery, tenantID, employeeID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to query employee advances for statement: %w", err))
+	}
+	defer advRows.Close()
+
+	advances := make([]domain.EmployeeAdvance, 0)
+	for advRows.Next() {
+		var a domain.EmployeeAdvance
+		if err := advRows.Scan(
+			&a.ID, &a.TenantID, &a.EmployeeID, &a.EmployeeName,
+			&a.ExpenseID, &a.Amount, &a.PaymentMethod, &a.BankID, &a.BankName,
+			&a.ReferenceID, &a.AdvanceDate, &a.Notes, &a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan advance for statement: %w", err))
+		}
+		advances = append(advances, a)
+	}
+
+	// 3. Fetch payments
+	pmQuery := `
+		SELECT p.id, p.tenant_id, p.employee_id, COALESCE(e.name, '') as employee_name,
+		       p.payment_method, p.bank_id, p.bank_name, p.amount,
+		       COALESCE(p.payment_date::text, p.created_at::date::text) as payment_date,
+		       COALESCE(p.reference_id, '') as reference_id,
+		       COALESCE(p.status, 'COMPLETED') as status,
+		       p.note, p.created_at, p.updated_at
+		FROM employee_salary_payment p
+		LEFT JOIN tenant_employees e ON e.id = p.employee_id
+		WHERE p.tenant_id = $1 AND p.employee_id = $2
+		ORDER BY COALESCE(p.payment_date, p.created_at::date) ASC, p.created_at ASC
+	`
+	pmRows, err := exec.Query(ctx, pmQuery, tenantID, employeeID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to query employee salary payments for statement: %w", err))
+	}
+	defer pmRows.Close()
+
+	payments := make([]domain.EmployeeSalaryPayment, 0)
+	for pmRows.Next() {
+		var p domain.EmployeeSalaryPayment
+		if err := pmRows.Scan(
+			&p.ID, &p.TenantID, &p.EmployeeID, &p.EmployeeName,
+			&p.PaymentMethod, &p.BankID, &p.BankName, &p.Amount,
+			&p.PaymentDate, &p.ReferenceID, &p.Status,
+			&p.Note, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan salary payment for statement: %w", err))
+		}
+		payments = append(payments, p)
+	}
+
+	return &domain.EmployeeSalaryStatement{
+		EmployeeID:    salary.EmployeeID,
+		EmployeeName:  salary.EmployeeName,
+		BaseSalary:    salary.SalaryRate,
+		TotalOvertime: salary.TotalOvertime,
+		GrossSalary:   salary.GrossSalary,
+		TotalAdvances: salary.TotalAdvances,
+		TotalPaid:     salary.TotalPaid,
+		NetPayable:    salary.Balance,
+		Overtimes:     overtimes,
+		Advances:      advances,
+		Payments:      payments,
+	}, nil
 }
 
 // ==========================================

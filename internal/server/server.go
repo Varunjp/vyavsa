@@ -209,6 +209,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	var attRepo repository.AttendanceRepository
 	var salaryRepo repository.EmployeeSalaryRepository
 	var statsRepo repository.TenantDailyStatsRepository
+	var advRepo repository.EmployeeAdvanceRepository
+	var otRepo repository.EmployeeOvertimeRepository
 
 	if s.db != nil && s.db.Pool != nil {
 		platformAdminRepo = postgresRepo.NewPlatformAdminPostgres(s.db.Pool)
@@ -228,6 +230,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		purchRepo = postgresRepo.NewTenantPurchasePostgres(s.db.Pool)
 		expRepo = postgresRepo.NewTenantExpensePostgres(s.db.Pool)
 		attRepo = postgresRepo.NewAttendancePostgres(s.db.Pool)
+		advRepo = postgresRepo.NewEmployeeAdvancePostgres(s.db.Pool)
+		otRepo = postgresRepo.NewEmployeeOvertimePostgres(s.db.Pool)
 		salaryRepo = postgresRepo.NewEmployeeSalaryPostgres(s.db.Pool)
 		statsRepo = postgresRepo.NewTenantDailyStatsPostgres(s.db.Pool)
 	}
@@ -295,6 +299,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		purchRepo,
 		expRepo,
 		attRepo,
+		advRepo,
+		otRepo,
 		salaryRepo,
 		statsRepo,
 		summaryRepo,
@@ -420,6 +426,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/line-sales/:id", opsHandler.GetLineSaleByID)
 			tenant.PUT("/line-sales/:id", opsHandler.UpdateLineSale)
 			tenant.DELETE("/line-sales/:id", opsHandler.DeleteLineSale)
+			tenant.GET("/line-sales/:id/payments", opsHandler.ListLineSalePayments)
+			tenant.POST("/line-sales/:id/payments", opsHandler.RecordLineSalePayment)
 
 			// Counter Sales (Admin & Tenant User)
 			tenant.POST("/counter-sales", opsHandler.CreateCounterSale)
@@ -427,6 +435,8 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/counter-sales/:id", opsHandler.GetCounterSaleByID)
 			tenant.PUT("/counter-sales/:id", opsHandler.UpdateCounterSale)
 			tenant.DELETE("/counter-sales/:id", opsHandler.DeleteCounterSale)
+			tenant.GET("/counter-sales/:id/payments", opsHandler.ListCounterSalePayments)
+			tenant.POST("/counter-sales/:id/payments", opsHandler.RecordCounterSalePayment)
 
 			// Purchases (Admin & Tenant User)
 			tenant.POST("/purchases", opsHandler.CreatePurchase)
@@ -434,9 +444,13 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/purchases/:id", opsHandler.GetPurchaseByID)
 			tenant.PUT("/purchases/:id", opsHandler.UpdatePurchase)
 			tenant.DELETE("/purchases/:id", opsHandler.DeletePurchase)
+			tenant.GET("/purchases/:id/payments", opsHandler.ListPurchasePayments)
+			tenant.POST("/purchases/:id/payments", opsHandler.RecordPurchaseSettlementPayment)
 
-			// Customer balance (accessible to all tenant staff for transactions)
+			// Customer balance, statement, and settlement payments
 			tenant.GET("/customers/:id/balance", opsHandler.GetCustomerBalance)
+			tenant.GET("/customers/:id/statement", opsHandler.GetCustomerStatement)
+			tenant.POST("/customers/:id/payments", opsHandler.RecordSupplierPayment)
 
 			// Expenses (Admin & Tenant User)
 			tenant.POST("/expenses", opsHandler.CreateExpense)
@@ -451,7 +465,11 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/attendance/:id", opsHandler.GetAttendanceByID)
 			tenant.PUT("/attendance/:id", opsHandler.UpdateAttendance)
 			tenant.POST("/overtime", opsHandler.RecordOvertime)
+			tenant.GET("/overtime", opsHandler.ListEmployeeOvertime)
+			tenant.GET("/employees/:id/overtime", opsHandler.ListEmployeeOvertime)
 			tenant.POST("/advances", opsHandler.RecordAdvance)
+			tenant.GET("/advances", opsHandler.ListEmployeeAdvances)
+			tenant.GET("/employees/:id/advances", opsHandler.ListEmployeeAdvances)
 
 			// Daily Stats & Dashboard Summary
 			tenant.GET("/daily-stats", opsHandler.GetDailyStats)
@@ -507,10 +525,10 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 				tenantAdmin.PUT("/banks/:id", opsHandler.UpdateBank)
 				tenantAdmin.DELETE("/banks/:id", opsHandler.DeleteBank)
 
-				// Employee Salaries Management
 				tenantAdmin.GET("/salaries", opsHandler.ListSalaries)
 				tenantAdmin.GET("/salaries/pending", opsHandler.ListPendingSalaries)
 				tenantAdmin.GET("/salaries/:employee_id", opsHandler.GetSalaryByEmployeeID)
+				tenantAdmin.GET("/salaries/:employee_id/statement", opsHandler.GetSalaryStatement)
 				tenantAdmin.PUT("/salaries/:employee_id", opsHandler.UpdateSalaryBalance)
 				tenantAdmin.POST("/salaries/:employee_id/pay", opsHandler.PaySalary)
 				tenantAdmin.GET("/salaries/:employee_id/payments", opsHandler.ListSalaryPayments)

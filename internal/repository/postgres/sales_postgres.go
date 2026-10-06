@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Varunjp/vyavsa/internal/domain"
 	appErrors "github.com/Varunjp/vyavsa/pkg/errors"
@@ -52,10 +53,18 @@ func (r *LineSalePostgres) Create(ctx context.Context, sale *domain.LineSale, pa
 		payment := &payments[i]
 		payment.TenantID = sale.TenantID
 		payment.LineSaleID = sale.ID
+		pDate := payment.PaymentDate
+		if pDate == "" {
+			pDate = sale.CreatedAt.Format("2006-01-02")
+		}
+		pStatus := payment.Status
+		if pStatus == "" {
+			pStatus = "COMPLETED"
+		}
 		pmQuery := `
-			INSERT INTO line_sale_payments (tenant_id, line_sale_id, payment_method, bank_id, bank_name, amount, note)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING id, created_at, updated_at
+			INSERT INTO line_sale_payments (tenant_id, line_sale_id, payment_method, bank_id, bank_name, amount, payment_date, reference_id, status, note)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10)
+			RETURNING id, payment_date::text, reference_id, status, created_at, updated_at
 		`
 		if err := exec.QueryRow(ctx, pmQuery,
 			payment.TenantID,
@@ -64,8 +73,11 @@ func (r *LineSalePostgres) Create(ctx context.Context, sale *domain.LineSale, pa
 			payment.BankID,
 			payment.BankName,
 			payment.Amount,
+			pDate,
+			payment.ReferenceID,
+			pStatus,
 			payment.Note,
-		).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
+		).Scan(&payment.ID, &payment.PaymentDate, &payment.ReferenceID, &payment.Status, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
 			return appErrors.NewDatabase(fmt.Errorf("failed to create line sale payment: %w", err))
 		}
 	}
@@ -106,10 +118,14 @@ func (r *LineSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) 
 	}
 
 	pmQuery := `
-		SELECT id, tenant_id, line_sale_id, payment_method, bank_id, bank_name, amount, note, created_at, updated_at
+		SELECT id, tenant_id, line_sale_id, payment_method, bank_id, bank_name, amount,
+		       COALESCE(payment_date::text, created_at::date::text) as payment_date,
+		       COALESCE(reference_id, '') as reference_id,
+		       COALESCE(status, 'COMPLETED') as status,
+		       note, created_at, updated_at
 		FROM line_sale_payments
 		WHERE tenant_id = $1 AND line_sale_id = $2
-		ORDER BY created_at ASC
+		ORDER BY COALESCE(payment_date, created_at::date) ASC, created_at ASC
 	`
 	rows, err := exec.Query(ctx, pmQuery, tenantID, id)
 	if err != nil {
@@ -128,6 +144,9 @@ func (r *LineSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) 
 			&p.BankID,
 			&p.BankName,
 			&p.Amount,
+			&p.PaymentDate,
+			&p.ReferenceID,
+			&p.Status,
 			&p.Note,
 			&p.CreatedAt,
 			&p.UpdatedAt,
@@ -138,6 +157,116 @@ func (r *LineSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) 
 	}
 
 	return &sale, nil
+}
+
+func (r *LineSalePostgres) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.LineSale, error) {
+	saleQuery := `
+		SELECT id, tenant_id, customer_id, customer_name, route, salesman, note, total_amount, total_cash_in, bank_amount, collected_amount, balance, created_at, updated_at
+		FROM line_sale
+		WHERE tenant_id = $1 AND id = $2
+		FOR UPDATE
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var sale domain.LineSale
+	err := exec.QueryRow(ctx, saleQuery, tenantID, id).Scan(
+		&sale.ID,
+		&sale.TenantID,
+		&sale.CustomerID,
+		&sale.CustomerName,
+		&sale.Route,
+		&sale.Salesman,
+		&sale.Note,
+		&sale.TotalAmount,
+		&sale.TotalCashIn,
+		&sale.BankAmount,
+		&sale.CollectedAmount,
+		&sale.Balance,
+		&sale.CreatedAt,
+		&sale.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("line sale not found within tenant")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get line sale for update: %w", err))
+	}
+	return &sale, nil
+}
+
+func (r *LineSalePostgres) CreatePayment(ctx context.Context, payment *domain.LineSalePayment) error {
+	pDate := payment.PaymentDate
+	if pDate == "" {
+		pDate = time.Now().UTC().Format("2006-01-02")
+	}
+	pStatus := payment.Status
+	if pStatus == "" {
+		pStatus = "COMPLETED"
+	}
+	pmQuery := `
+		INSERT INTO line_sale_payments (tenant_id, line_sale_id, payment_method, bank_id, bank_name, amount, payment_date, reference_id, status, note)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10)
+		RETURNING id, payment_date::text, reference_id, status, created_at, updated_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, pmQuery,
+		payment.TenantID,
+		payment.LineSaleID,
+		payment.PaymentMethod,
+		payment.BankID,
+		payment.BankName,
+		payment.Amount,
+		pDate,
+		payment.ReferenceID,
+		pStatus,
+		payment.Note,
+	).Scan(&payment.ID, &payment.PaymentDate, &payment.ReferenceID, &payment.Status, &payment.CreatedAt, &payment.UpdatedAt)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to create line sale payment: %w", err))
+	}
+	return nil
+}
+
+func (r *LineSalePostgres) ListPaymentsByLineSaleID(ctx context.Context, tenantID, lineSaleID uuid.UUID) ([]domain.LineSalePayment, error) {
+	pmQuery := `
+		SELECT id, tenant_id, line_sale_id, payment_method, bank_id, bank_name, amount,
+		       COALESCE(payment_date::text, created_at::date::text) as payment_date,
+		       COALESCE(reference_id, '') as reference_id,
+		       COALESCE(status, 'COMPLETED') as status,
+		       note, created_at, updated_at
+		FROM line_sale_payments
+		WHERE tenant_id = $1 AND line_sale_id = $2
+		ORDER BY COALESCE(payment_date, created_at::date) ASC, created_at ASC
+	`
+	exec := GetExecutor(ctx, r.pool)
+	rows, err := exec.Query(ctx, pmQuery, tenantID, lineSaleID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to list line sale payments: %w", err))
+	}
+	defer rows.Close()
+
+	payments := make([]domain.LineSalePayment, 0)
+	for rows.Next() {
+		var p domain.LineSalePayment
+		if err := rows.Scan(
+			&p.ID,
+			&p.TenantID,
+			&p.LineSaleID,
+			&p.PaymentMethod,
+			&p.BankID,
+			&p.BankName,
+			&p.Amount,
+			&p.PaymentDate,
+			&p.ReferenceID,
+			&p.Status,
+			&p.Note,
+			&p.CreatedAt,
+			&p.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan line sale payment: %w", err))
+		}
+		payments = append(payments, p)
+	}
+	return payments, nil
 }
 
 func (r *LineSalePostgres) Update(ctx context.Context, sale *domain.LineSale) error {
@@ -302,10 +431,18 @@ func (r *CounterSalePostgres) Create(ctx context.Context, sale *domain.CounterSa
 		payment := &payments[i]
 		payment.TenantID = sale.TenantID
 		payment.CounterSaleID = sale.ID
+		pDate := payment.PaymentDate
+		if pDate == "" {
+			pDate = time.Now().UTC().Format("2006-01-02")
+		}
+		pStatus := payment.Status
+		if pStatus == "" {
+			pStatus = "COMPLETED"
+		}
 		pmQuery := `
-			INSERT INTO counter_sale_payments (tenant_id, counter_sale_id, payment_method, bank_id, bank_name, amount, note)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING id, created_at, updated_at
+			INSERT INTO counter_sale_payments (tenant_id, counter_sale_id, payment_method, bank_id, bank_name, amount, payment_date, reference_id, status, note)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10)
+			RETURNING id, payment_date::text, reference_id, status, created_at, updated_at
 		`
 		if err := exec.QueryRow(ctx, pmQuery,
 			payment.TenantID,
@@ -314,8 +451,11 @@ func (r *CounterSalePostgres) Create(ctx context.Context, sale *domain.CounterSa
 			payment.BankID,
 			payment.BankName,
 			payment.Amount,
+			pDate,
+			payment.ReferenceID,
+			pStatus,
 			payment.Note,
-		).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
+		).Scan(&payment.ID, &payment.PaymentDate, &payment.ReferenceID, &payment.Status, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
 			return appErrors.NewDatabase(fmt.Errorf("failed to create counter sale payment: %w", err))
 		}
 	}
@@ -355,10 +495,14 @@ func (r *CounterSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUI
 	}
 
 	pmQuery := `
-		SELECT id, tenant_id, counter_sale_id, payment_method, bank_id, bank_name, amount, note, created_at, updated_at
+		SELECT id, tenant_id, counter_sale_id, payment_method, bank_id, bank_name, amount,
+		       COALESCE(payment_date::text, created_at::date::text) as payment_date,
+		       COALESCE(reference_id, '') as reference_id,
+		       COALESCE(status, 'COMPLETED') as status,
+		       note, created_at, updated_at
 		FROM counter_sale_payments
 		WHERE tenant_id = $1 AND counter_sale_id = $2
-		ORDER BY created_at ASC
+		ORDER BY COALESCE(payment_date, created_at::date) ASC, created_at ASC
 	`
 	rows, err := exec.Query(ctx, pmQuery, tenantID, id)
 	if err != nil {
@@ -377,6 +521,9 @@ func (r *CounterSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUI
 			&p.BankID,
 			&p.BankName,
 			&p.Amount,
+			&p.PaymentDate,
+			&p.ReferenceID,
+			&p.Status,
 			&p.Note,
 			&p.CreatedAt,
 			&p.UpdatedAt,
@@ -387,6 +534,116 @@ func (r *CounterSalePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUI
 	}
 
 	return &sale, nil
+}
+
+func (r *CounterSalePostgres) GetByIDForUpdate(ctx context.Context, tenantID, id uuid.UUID) (*domain.CounterSale, error) {
+	saleQuery := `
+		SELECT id, tenant_id, item, price, total_amount, payment_method, cash, bank_amount, bank_id, collected_amount, account, created_at, updated_at
+		FROM counter_sale
+		WHERE tenant_id = $1 AND id = $2
+		FOR UPDATE
+	`
+	exec := GetExecutor(ctx, r.pool)
+	var sale domain.CounterSale
+	err := exec.QueryRow(ctx, saleQuery, tenantID, id).Scan(
+		&sale.ID,
+		&sale.TenantID,
+		&sale.Item,
+		&sale.Price,
+		&sale.TotalAmount,
+		&sale.PaymentMethod,
+		&sale.Cash,
+		&sale.BankAmount,
+		&sale.BankID,
+		&sale.CollectedAmount,
+		&sale.Account,
+		&sale.CreatedAt,
+		&sale.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.NewNotFound("counter sale not found within tenant")
+		}
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to get counter sale for update: %w", err))
+	}
+	return &sale, nil
+}
+
+func (r *CounterSalePostgres) CreatePayment(ctx context.Context, payment *domain.CounterSalePayment) error {
+	pDate := payment.PaymentDate
+	if pDate == "" {
+		pDate = time.Now().UTC().Format("2006-01-02")
+	}
+	pStatus := payment.Status
+	if pStatus == "" {
+		pStatus = "COMPLETED"
+	}
+	pmQuery := `
+		INSERT INTO counter_sale_payments (tenant_id, counter_sale_id, payment_method, bank_id, bank_name, amount, payment_date, reference_id, status, note)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10)
+		RETURNING id, payment_date::text, reference_id, status, created_at, updated_at
+	`
+	exec := GetExecutor(ctx, r.pool)
+	err := exec.QueryRow(ctx, pmQuery,
+		payment.TenantID,
+		payment.CounterSaleID,
+		payment.PaymentMethod,
+		payment.BankID,
+		payment.BankName,
+		payment.Amount,
+		pDate,
+		payment.ReferenceID,
+		pStatus,
+		payment.Note,
+	).Scan(&payment.ID, &payment.PaymentDate, &payment.ReferenceID, &payment.Status, &payment.CreatedAt, &payment.UpdatedAt)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to create counter sale payment: %w", err))
+	}
+	return nil
+}
+
+func (r *CounterSalePostgres) ListPaymentsByCounterSaleID(ctx context.Context, tenantID, counterSaleID uuid.UUID) ([]domain.CounterSalePayment, error) {
+	pmQuery := `
+		SELECT id, tenant_id, counter_sale_id, payment_method, bank_id, bank_name, amount,
+		       COALESCE(payment_date::text, created_at::date::text) as payment_date,
+		       COALESCE(reference_id, '') as reference_id,
+		       COALESCE(status, 'COMPLETED') as status,
+		       note, created_at, updated_at
+		FROM counter_sale_payments
+		WHERE tenant_id = $1 AND counter_sale_id = $2
+		ORDER BY COALESCE(payment_date, created_at::date) ASC, created_at ASC
+	`
+	exec := GetExecutor(ctx, r.pool)
+	rows, err := exec.Query(ctx, pmQuery, tenantID, counterSaleID)
+	if err != nil {
+		return nil, appErrors.NewDatabase(fmt.Errorf("failed to list counter sale payments: %w", err))
+	}
+	defer rows.Close()
+
+	payments := make([]domain.CounterSalePayment, 0)
+	for rows.Next() {
+		var p domain.CounterSalePayment
+		if err := rows.Scan(
+			&p.ID,
+			&p.TenantID,
+			&p.CounterSaleID,
+			&p.PaymentMethod,
+			&p.BankID,
+			&p.BankName,
+			&p.Amount,
+			&p.PaymentDate,
+			&p.ReferenceID,
+			&p.Status,
+			&p.Note,
+			&p.CreatedAt,
+			&p.UpdatedAt,
+		); err != nil {
+			return nil, appErrors.NewDatabase(fmt.Errorf("failed to scan counter sale payment: %w", err))
+		}
+		payments = append(payments, p)
+	}
+
+	return payments, nil
 }
 
 func (r *CounterSalePostgres) Update(ctx context.Context, sale *domain.CounterSale) error {

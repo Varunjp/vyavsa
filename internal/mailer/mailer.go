@@ -2,8 +2,10 @@ package mailer
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/smtp"
 	"strings"
 	"time"
@@ -18,9 +20,22 @@ type Mailer interface {
 
 // NewMailer creates an appropriate Mailer implementation based on configuration
 func NewMailer(cfg config.MailerConfig, log *slog.Logger) Mailer {
+	cfg.Host = strings.TrimSpace(cfg.Host)
+	cfg.Username = strings.TrimSpace(cfg.Username)
+	cfg.Password = strings.TrimSpace(cfg.Password)
+	cfg.From = strings.Trim(strings.TrimSpace(cfg.From), "\"")
+	cfg.FromName = strings.Trim(strings.TrimSpace(cfg.FromName), "\"")
+
 	if cfg.Host != "" && cfg.Port > 0 {
+		log.Info("SMTP mailer active",
+			slog.String("host", cfg.Host),
+			slog.Int("port", cfg.Port),
+			slog.String("from", cfg.From),
+			slog.String("user", cfg.Username),
+		)
 		return NewSMTPMailer(cfg, log)
 	}
+	log.Warn("SMTP host or port not configured; fallback to simulated LogMailer (emails logged, not delivered)")
 	return NewLogMailer(log)
 }
 
@@ -147,13 +162,7 @@ func (m *SMTPMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp stri
 	msg.WriteString("\r\n\r\n")
 	msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
 
-	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
-	var auth smtp.Auth
-	if m.cfg.Username != "" && m.cfg.Password != "" {
-		auth = smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)
-	}
-
-	err := smtp.SendMail(addr, auth, from, []string{toEmail}, []byte(msg.String()))
+	err := m.sendMail(ctx, from, toEmail, []byte(msg.String()))
 	if err != nil {
 		m.log.ErrorContext(ctx, "failed to send password reset email via SMTP",
 			slog.String("to", toEmail),
@@ -166,5 +175,86 @@ func (m *SMTPMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp stri
 		slog.String("to", toEmail),
 	)
 
+	return nil
+}
+
+func (m *SMTPMailer) sendMail(ctx context.Context, from, toEmail string, msg []byte) error {
+	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
+
+	var auth smtp.Auth
+	if m.cfg.Username != "" && m.cfg.Password != "" {
+		auth = smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)
+	}
+
+	dialer := &net.Dialer{
+		Timeout: 15 * time.Second,
+	}
+
+	var conn net.Conn
+	var err error
+
+	if m.cfg.Port == 465 {
+		tlsConfig := &tls.Config{
+			ServerName: m.cfg.Host,
+			MinVersion: tls.VersionTLS12,
+		}
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to connect to SMTP server %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, m.cfg.Host)
+	if err != nil {
+		return fmt.Errorf("failed to create SMTP client: %w", err)
+	}
+	defer client.Close()
+
+	if m.cfg.Port != 465 {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			tlsConfig := &tls.Config{
+				ServerName: m.cfg.Host,
+				MinVersion: tls.VersionTLS12,
+			}
+			if err := client.StartTLS(tlsConfig); err != nil {
+				return fmt.Errorf("failed to start TLS: %w", err)
+			}
+		}
+	}
+
+	if auth != nil {
+		if ok, _ := client.Extension("AUTH"); ok {
+			if err := client.Auth(auth); err != nil {
+				return fmt.Errorf("SMTP authentication failed: %w", err)
+			}
+		}
+	}
+
+	if err := client.Mail(from); err != nil {
+		return fmt.Errorf("SMTP MAIL command failed: %w", err)
+	}
+
+	if err := client.Rcpt(toEmail); err != nil {
+		return fmt.Errorf("SMTP RCPT command failed for %s: %w", toEmail, err)
+	}
+
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("SMTP DATA command failed: %w", err)
+	}
+
+	if _, err := w.Write(msg); err != nil {
+		_ = w.Close()
+		return fmt.Errorf("failed to write email body: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("failed to finalize email message: %w", err)
+	}
+
+	_ = client.Quit()
 	return nil
 }

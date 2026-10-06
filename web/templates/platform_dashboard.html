@@ -1,19 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Platform Administration — Vyavsa</title>
-  <meta name="description" content="Superadministrator management console for Vyavsa SaaS multi-tenant oversight, billing plans, and telemetry.">
+  <meta name="description"
+    content="Superadministrator management console for Vyavsa SaaS multi-tenant oversight, billing plans, and telemetry.">
   <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="/static/css/main.css">
 
   <!-- Immediate Authentication & Authorization Guard -->
   <script>
-    (function() {
+    (function () {
       var token = localStorage.getItem('vyavsa_platform_access_token');
       var rf = localStorage.getItem('vyavsa_platform_refresh_token');
       if (!token && !rf) {
@@ -32,7 +36,7 @@
       }
     })();
 
-    window.addEventListener('pageshow', function(event) {
+    window.addEventListener('pageshow', function (event) {
       var token = localStorage.getItem('vyavsa_platform_access_token');
       var rf = localStorage.getItem('vyavsa_platform_refresh_token');
       if (!token && !rf) {
@@ -55,12 +59,14 @@
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
+
     .kpi-grid-3 {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 1.25rem;
       margin-bottom: 2rem;
     }
+
     .kpi-card {
       background: var(--color-surface);
       border: 1px solid var(--color-border);
@@ -71,10 +77,12 @@
       position: relative;
       overflow: hidden;
     }
+
     .kpi-card:hover {
       box-shadow: var(--shadow-md);
       border-color: #cbd5e1;
     }
+
     .kpi-card::before {
       content: '';
       position: absolute;
@@ -86,9 +94,11 @@
       opacity: 0;
       transition: opacity var(--transition-fast);
     }
+
     .kpi-card:hover::before {
       opacity: 1;
     }
+
     .kpi-label {
       font-size: 0.8125rem;
       font-weight: 600;
@@ -100,6 +110,7 @@
       justify-content: space-between;
       align-items: center;
     }
+
     .kpi-val {
       font-size: 2.15rem;
       font-weight: 800;
@@ -108,6 +119,7 @@
       font-family: var(--font-sans);
       letter-spacing: -0.02em;
     }
+
     .kpi-subtext {
       font-size: 0.8125rem;
       color: var(--color-text-muted);
@@ -126,6 +138,7 @@
       box-shadow: var(--shadow-xs);
       margin-bottom: 2rem;
     }
+
     .chart-header {
       display: flex;
       justify-content: space-between;
@@ -134,6 +147,7 @@
       flex-wrap: wrap;
       gap: 0.75rem;
     }
+
     .chart-title {
       font-size: 1.125rem;
       font-weight: 700;
@@ -142,11 +156,13 @@
       align-items: center;
       gap: 0.5rem;
     }
+
     .chart-wrapper {
       width: 100%;
       height: 280px;
       position: relative;
     }
+
     .chart-svg {
       width: 100%;
       height: 100%;
@@ -160,6 +176,7 @@
       gap: 1rem;
       margin-bottom: 2.5rem;
     }
+
     .quick-action-card {
       background: var(--color-surface);
       border: 1px solid var(--color-border);
@@ -173,12 +190,14 @@
       transition: all var(--transition-fast);
       cursor: pointer;
     }
+
     .quick-action-card:hover {
       background: var(--color-surface-hover);
       border-color: var(--color-primary-border);
       transform: translateY(-2px);
       box-shadow: var(--shadow-sm);
     }
+
     .quick-action-icon {
       width: 40px;
       height: 40px;
@@ -189,10 +208,12 @@
       align-items: center;
       justify-content: center;
     }
+
     .quick-action-title {
       font-weight: 700;
       font-size: 0.95rem;
     }
+
     .quick-action-desc {
       font-size: 0.8rem;
       color: var(--color-text-muted);
@@ -203,13 +224,22 @@
     .platform-view {
       display: none;
     }
+
     .platform-view.active {
       display: block;
       animation: fadeInView 150ms ease-out forwards;
     }
+
     @keyframes fadeInView {
-      from { opacity: 0; transform: translateY(4px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     /* Modal improvements */
@@ -219,11 +249,13 @@
       gap: 1.25rem;
       margin-bottom: 1.5rem;
     }
+
     .detail-item {
       display: flex;
       flex-direction: column;
       gap: 0.25rem;
     }
+
     .detail-label {
       font-size: 0.75rem;
       font-weight: 600;
@@ -231,6 +263,7 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+
     .detail-val {
       font-size: 0.95rem;
       font-weight: 600;
@@ -249,6 +282,7 @@
       max-width: 380px;
       pointer-events: none;
     }
+
     .platform-toast {
       pointer-events: auto;
       background: #0f172a;
@@ -264,16 +298,20 @@
       transform: translateY(10px);
       opacity: 0;
     }
+
     .platform-toast.show {
       transform: translateY(0);
       opacity: 1;
     }
+
     .platform-toast.toast-success {
       border-left: 4px solid var(--color-success);
     }
+
     .platform-toast.toast-error {
       border-left: 4px solid var(--color-error);
     }
+
     .platform-toast.toast-info {
       border-left: 4px solid var(--color-primary);
     }
@@ -289,41 +327,60 @@
       font-weight: 700;
       text-transform: capitalize;
     }
+
     .badge-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
     }
-    .badge-active, .badge-completed {
+
+    .badge-active,
+    .badge-completed {
       background: #ecfdf5;
       color: #065f46;
       border: 1px solid #a7f3d0;
     }
-    .badge-active .badge-dot, .badge-completed .badge-dot {
+
+    .badge-active .badge-dot,
+    .badge-completed .badge-dot {
       background: #10b981;
     }
-    .badge-inactive, .badge-archived, .badge-expired {
+
+    .badge-inactive,
+    .badge-archived,
+    .badge-expired {
       background: #f1f5f9;
       color: #475569;
       border: 1px solid #cbd5e1;
     }
-    .badge-inactive .badge-dot, .badge-archived .badge-dot, .badge-expired .badge-dot {
+
+    .badge-inactive .badge-dot,
+    .badge-archived .badge-dot,
+    .badge-expired .badge-dot {
       background: #94a3b8;
     }
-    .badge-suspended, .badge-failed {
+
+    .badge-suspended,
+    .badge-failed {
       background: #fef2f2;
       color: #991b1b;
       border: 1px solid #fecaca;
     }
-    .badge-suspended .badge-dot, .badge-failed .badge-dot {
+
+    .badge-suspended .badge-dot,
+    .badge-failed .badge-dot {
       background: #ef4444;
     }
-    .badge-pending, .badge-past_due {
+
+    .badge-pending,
+    .badge-past_due {
       background: #fffbeb;
       color: #92400e;
       border: 1px solid #fde68a;
     }
-    .badge-pending .badge-dot, .badge-past_due .badge-dot {
+
+    .badge-pending .badge-dot,
+    .badge-past_due .badge-dot {
       background: #f59e0b;
     }
 
@@ -333,6 +390,7 @@
       text-align: center;
       color: var(--color-text-muted);
     }
+
     .table-empty-icon {
       margin: 0 auto 1rem;
       color: var(--color-text-subtle);
@@ -356,6 +414,7 @@
       gap: 0.375rem;
       white-space: nowrap;
     }
+
     .table-actions .btn {
       padding: 0.3rem 0.65rem;
       font-size: 0.8125rem;
@@ -370,12 +429,14 @@
       font-size: 0.84375rem;
       display: none;
     }
+
     .modal-alert.show-error {
       background: var(--color-error-bg);
       border: 1px solid var(--color-error-border);
       color: var(--color-error-text);
       display: block;
     }
+
     .modal-alert.show-success {
       background: var(--color-success-bg);
       border: 1px solid var(--color-success-border);
@@ -387,6 +448,7 @@
     .modal-body .form-group {
       margin-bottom: 1.125rem;
     }
+
     .modal-body .form-group:last-child {
       margin-bottom: 0;
     }
@@ -399,15 +461,18 @@
       align-items: center;
       justify-content: space-between;
     }
+
     @media (max-width: 640px) {
       .filter-toolbar {
         flex-direction: column;
         align-items: stretch;
       }
-      .filter-toolbar > div {
+
+      .filter-toolbar>div {
         width: 100% !important;
         max-width: 100% !important;
       }
+
       .filter-toolbar input,
       .filter-toolbar select {
         width: 100% !important;
@@ -415,6 +480,7 @@
     }
   </style>
 </head>
+
 <body class="app-shell">
 
   <!-- ========================================================================= -->
@@ -425,7 +491,7 @@
       <!-- Mobile hamburger toggle -->
       <button type="button" class="sidebar-toggle-btn" id="platform-sidebar-toggle" aria-label="Toggle navigation menu">
         <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
 
@@ -473,11 +539,12 @@
         <div class="sidebar-brand-mobile">
           <img src="/static/images/favicon.svg" alt="Vyavsa" width="24" height="24">
           <span style="font-weight: 800; font-size: 1.15rem; color: var(--color-text-main);">Vyavsa</span>
-          <span class="platform-badge" style="display: inline-block !important; font-size: 0.65rem; padding: 0.15rem 0.5rem;">Superadmin</span>
+          <span class="platform-badge"
+            style="display: inline-block !important; font-size: 0.65rem; padding: 0.15rem 0.5rem;">Superadmin</span>
         </div>
         <button type="button" class="sidebar-close-btn" id="platform-sidebar-close" aria-label="Close navigation menu">
           <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
@@ -486,7 +553,8 @@
         <span class="sidebar-group-title">Telemetry</span>
         <a class="sidebar-link active" data-view="dashboard" href="/platform/dashboard" id="nav-dashboard">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
           <span>Dashboard</span>
         </a>
@@ -496,19 +564,22 @@
         <span class="sidebar-group-title">Tenant Management</span>
         <a class="sidebar-link" data-view="tenants" href="/platform/tenants" id="nav-tenants">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
           </svg>
           <span>Tenants</span>
         </a>
         <a class="sidebar-link" data-view="plans" href="/platform/plans" id="nav-plans">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
           </svg>
           <span>Plans</span>
         </a>
         <a class="sidebar-link" data-view="subscriptions" href="/platform/subscriptions" id="nav-subscriptions">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
           <span>Subscribed Tenants</span>
         </a>
@@ -518,28 +589,33 @@
         <span class="sidebar-group-title">Finance & Systems</span>
         <a class="sidebar-link" data-view="transactions" href="/platform/transactions" id="nav-transactions">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <span>Transactions</span>
         </a>
         <a class="sidebar-link" data-view="metrics" href="/platform/metrics" id="nav-metrics">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
           <span>Application Metrics</span>
         </a>
       </div>
 
-      <div class="sidebar-group" style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--color-border);">
+      <div class="sidebar-group"
+        style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--color-border);">
         <a href="/" class="sidebar-link" title="Visit Public Landing Page">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
           <span>Public Portal</span>
         </a>
         <a class="sidebar-link" id="sidebar-logout-btn" style="color: var(--color-error); cursor: pointer;">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
           <span>Sign Out</span>
         </a>
@@ -561,7 +637,8 @@
           <div class="header-actions">
             <button type="button" class="btn btn-secondary btn-sm" id="dashboard-refresh-btn">
               <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
               <span>Refresh</span>
             </button>
@@ -574,8 +651,10 @@
           <div class="kpi-card" id="card-active-tenants">
             <div class="kpi-label">
               <span>Active Tenants</span>
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-primary);">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="color: var(--color-primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
               </svg>
             </div>
             <div class="kpi-val" id="metric-active-tenants">—</div>
@@ -588,8 +667,10 @@
           <div class="kpi-card" id="card-monthly-income">
             <div class="kpi-label">
               <span>Monthly Received Income</span>
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-success);">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="color: var(--color-success);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div class="kpi-val" id="metric-monthly-income">—</div>
@@ -603,8 +684,10 @@
           <div class="kpi-card" id="card-new-tenants">
             <div class="kpi-label">
               <span>New Registrations</span>
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-warning);">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/>
+              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="color: var(--color-warning);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
               </svg>
             </div>
             <div class="kpi-val" id="metric-recent-registrations">—</div>
@@ -619,8 +702,10 @@
           <div class="chart-header">
             <div>
               <div class="chart-title">
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--color-primary);">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                  style="color: var(--color-primary);">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
                 </svg>
                 <span>Monthly Income & Revenue Trend</span>
               </div>
@@ -633,7 +718,8 @@
             </div>
           </div>
           <div class="chart-wrapper" id="revenue-chart-wrapper">
-            <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--color-text-muted);">
+            <div
+              style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--color-text-muted);">
               Loading revenue telemetry...
             </div>
           </div>
@@ -647,7 +733,8 @@
           <div class="quick-action-card" data-nav="/platform/tenants">
             <div class="quick-action-icon">
               <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
               </svg>
             </div>
             <div class="quick-action-title">Tenants</div>
@@ -657,7 +744,8 @@
           <div class="quick-action-card" data-nav="/platform/plans">
             <div class="quick-action-icon">
               <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
               </svg>
             </div>
             <div class="quick-action-title">Plans</div>
@@ -667,7 +755,8 @@
           <div class="quick-action-card" data-nav="/platform/subscriptions">
             <div class="quick-action-icon">
               <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
             </div>
             <div class="quick-action-title">Subscriptions</div>
@@ -677,7 +766,8 @@
           <div class="quick-action-card" data-nav="/platform/transactions">
             <div class="quick-action-icon">
               <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div class="quick-action-title">Transactions</div>
@@ -687,7 +777,8 @@
           <div class="quick-action-card" data-nav="/platform/metrics">
             <div class="quick-action-icon">
               <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </div>
             <div class="quick-action-title">Metrics / Grafana</div>
@@ -708,7 +799,7 @@
           <div class="header-actions">
             <button type="button" class="btn btn-primary" id="open-onboard-tenant-modal">
               <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
               <span>Onboard Tenant</span>
             </button>
@@ -719,10 +810,12 @@
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
           <div class="filter-toolbar">
             <div style="display: flex; gap: 0.75rem; flex: 1; max-width: 480px;">
-              <input type="text" id="tenants-search-input" class="form-control" placeholder="Search by organization name, email, or phone...">
+              <input type="text" id="tenants-search-input" class="form-control"
+                placeholder="Search by organization name, email, or phone...">
             </div>
             <div style="display: flex; gap: 0.75rem; align-items: center;">
-              <label for="tenants-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status:</label>
+              <label for="tenants-status-filter"
+                style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status:</label>
               <select id="tenants-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
                 <option value="all">All Statuses</option>
                 <option value="active">Active</option>
@@ -755,7 +848,8 @@
             </table>
           </div>
           <!-- Pagination Toolbar -->
-          <div class="card-footer" id="tenants-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
+          <div class="card-footer" id="tenants-pagination"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
             <span style="font-size: 0.8125rem; color: var(--color-text-muted);" id="tenants-page-info">—</span>
             <div style="display: flex; gap: 0.5rem;">
               <button type="button" class="btn btn-secondary btn-sm" id="tenants-prev-btn" disabled>Previous</button>
@@ -777,7 +871,7 @@
           <div class="header-actions">
             <button type="button" class="btn btn-primary" id="open-create-plan-modal">
               <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
               <span>Create Plan</span>
             </button>
@@ -788,7 +882,8 @@
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
           <div class="filter-toolbar">
             <div style="display: flex; gap: 0.75rem; align-items: center;">
-              <label for="plans-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status Filter:</label>
+              <label for="plans-status-filter"
+                style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Status Filter:</label>
               <select id="plans-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
                 <option value="all">All Plans</option>
                 <option value="active" selected>Active</option>
@@ -835,7 +930,8 @@
           <div class="header-actions">
             <button type="button" class="btn btn-secondary btn-sm" id="subscriptions-refresh-btn">
               <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
               <span>Refresh</span>
             </button>
@@ -846,7 +942,9 @@
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
           <div class="filter-toolbar">
             <div style="display: flex; gap: 0.75rem; align-items: center;">
-              <label for="subs-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Subscription Status:</label>
+              <label for="subs-status-filter"
+                style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Subscription
+                Status:</label>
               <select id="subs-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
                 <option value="all">All Subscriptions</option>
                 <option value="active">Active</option>
@@ -881,7 +979,8 @@
             </table>
           </div>
           <!-- Pagination Toolbar -->
-          <div class="card-footer" id="subs-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
+          <div class="card-footer" id="subs-pagination"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
             <span style="font-size: 0.8125rem; color: var(--color-text-muted);" id="subs-page-info">—</span>
             <div style="display: flex; gap: 0.5rem;">
               <button type="button" class="btn btn-secondary btn-sm" id="subs-prev-btn" disabled>Previous</button>
@@ -903,7 +1002,8 @@
           <div class="header-actions">
             <button type="button" class="btn btn-secondary btn-sm" id="transactions-refresh-btn">
               <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
               <span>Refresh</span>
             </button>
@@ -914,7 +1014,9 @@
         <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem;">
           <div class="filter-toolbar">
             <div style="display: flex; gap: 0.75rem; align-items: center;">
-              <label for="txns-status-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Transaction Status:</label>
+              <label for="txns-status-filter"
+                style="font-size: 0.8125rem; font-weight: 600; color: var(--color-text-muted);">Transaction
+                Status:</label>
               <select id="txns-status-filter" class="form-control" style="width: auto; padding-right: 2rem;">
                 <option value="all">All Transactions</option>
                 <option value="completed">Completed</option>
@@ -950,7 +1052,8 @@
             </table>
           </div>
           <!-- Pagination Toolbar -->
-          <div class="card-footer" id="txns-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
+          <div class="card-footer" id="txns-pagination"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1.25rem;">
             <span style="font-size: 0.8125rem; color: var(--color-text-muted);" id="txns-page-info">—</span>
             <div style="display: flex; gap: 0.5rem;">
               <button type="button" class="btn btn-secondary btn-sm" id="txns-prev-btn" disabled>Previous</button>
@@ -973,24 +1076,29 @@
 
         <!-- Grafana Launch Card -->
         <div class="card" style="margin-bottom: 2rem; border-left: 4px solid #f97316; padding: 2rem;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
+          <div
+            style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.5rem;">
             <div>
               <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
                 <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--color-text-main); margin: 0;">
                   Grafana Observability Suite
                 </h2>
               </div>
               <p style="color: var(--color-text-muted); max-width: 650px; line-height: 1.5; font-size: 0.925rem;">
-                Vyavsa has pre-provisioned dashboards configured for real-time API latency percentiles, HTTP throughput, database connection pool statistics, and Redis cache health.
+                Vyavsa has pre-provisioned dashboards configured for real-time API latency percentiles, HTTP throughput,
+                database connection pool statistics, and Redis cache health.
               </p>
             </div>
             <div>
-              <a id="open-grafana-btn" href="http://localhost:3000" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background: #f97316; border-color: #ea580c; font-size: 0.95rem; padding: 0.75rem 1.5rem;">
+              <a id="open-grafana-btn" href="http://localhost:3000" target="_blank" rel="noopener noreferrer"
+                class="btn btn-primary"
+                style="background: #f97316; border-color: #ea580c; font-size: 0.95rem; padding: 0.75rem 1.5rem;">
                 <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
                 <span>Launch Grafana Dashboard</span>
               </a>
@@ -1004,14 +1112,16 @@
             <div class="kpi-label">
               <span>Prometheus Telemetry</span>
               <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
               </svg>
             </div>
             <div style="font-weight: 700; margin-bottom: 0.5rem;">Native Metric Exporter</div>
             <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-bottom: 1rem;">
               Direct standard Prometheus scrape target format at <code class="mono-code">/metrics</code>.
             </p>
-            <a href="/metrics" target="_blank" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+            <a href="/metrics" target="_blank" class="btn btn-secondary btn-sm"
+              style="width: 100%; justify-content: center;">
               Open /metrics Feed
             </a>
           </div>
@@ -1020,15 +1130,17 @@
             <div class="kpi-label">
               <span>Health Diagnostics</span>
               <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div style="font-weight: 700; margin-bottom: 0.5rem;">Readiness & Liveness</div>
             <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-bottom: 1rem;">
               Database pool ping and Redis heartbeat verification endpoints.
             </p>
-            <a href="/healthz" target="_blank" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
-              Check /healthz Status
+            <a href="/health" target="_blank" class="btn btn-secondary btn-sm"
+              style="width: 100%; justify-content: center;">
+              Check /health Status
             </a>
           </div>
 
@@ -1036,7 +1148,8 @@
             <div class="kpi-label">
               <span>Default Credentials</span>
               <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
             </div>
             <div style="font-weight: 700; margin-bottom: 0.5rem;">Local Observability Login</div>
@@ -1061,7 +1174,8 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title" id="tenant-detail-title">Tenant Organization Details</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="tenant-detail-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="tenant-detail-modal"
+            aria-label="Close modal">×</button>
         </div>
         <div class="modal-body" id="tenant-detail-body">
           <div style="padding: 2rem; text-align: center; color: var(--color-text-muted);">
@@ -1081,7 +1195,8 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Onboard New Tenant Organization</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="onboard-tenant-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="onboard-tenant-modal"
+            aria-label="Close modal">×</button>
         </div>
         <form id="onboard-tenant-form">
           <div class="modal-body">
@@ -1099,7 +1214,8 @@
             </div>
             <div class="form-group">
               <label for="onboard-password" class="form-label">Initial Tenant Administrator Password *</label>
-              <input type="password" id="onboard-password" class="form-control" placeholder="Minimum 6 characters" minlength="6" required>
+              <input type="password" id="onboard-password" class="form-control" placeholder="Minimum 6 characters"
+                minlength="6" required>
             </div>
             <div class="form-group">
               <label for="onboard-plan" class="form-label">Initial Subscription Plan *</label>
@@ -1123,7 +1239,8 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Update Tenant Organization</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="edit-tenant-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="edit-tenant-modal"
+            aria-label="Close modal">×</button>
         </div>
         <form id="edit-tenant-form">
           <input type="hidden" id="edit-tenant-id">
@@ -1164,13 +1281,15 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Change Tenant Status</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="tenant-status-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="tenant-status-modal"
+            aria-label="Close modal">×</button>
         </div>
         <form id="tenant-status-form">
           <input type="hidden" id="status-tenant-id">
           <div class="modal-body">
             <p style="font-size: 0.875rem; color: var(--color-text-muted); margin-bottom: 1rem;">
-              Updating the status will immediately alter access privileges for this tenant organization and all its users.
+              Updating the status will immediately alter access privileges for this tenant organization and all its
+              users.
             </p>
             <div class="form-group">
               <label class="form-label">Lifecycle Status</label>
@@ -1196,7 +1315,8 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Change Subscription Plan</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="tenant-plan-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="tenant-plan-modal"
+            aria-label="Close modal">×</button>
         </div>
         <form id="tenant-plan-form">
           <input type="hidden" id="plan-tenant-id">
@@ -1226,21 +1346,25 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Create Subscription Plan</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="create-plan-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="create-plan-modal"
+            aria-label="Close modal">×</button>
         </div>
         <form id="create-plan-form">
           <div class="modal-body">
             <div class="form-group">
               <label for="plan-name" class="form-label">Plan Name *</label>
-              <input type="text" id="plan-name" class="form-control" placeholder="e.g. Enterprise Tier" required minlength="2">
+              <input type="text" id="plan-name" class="form-control" placeholder="e.g. Enterprise Tier" required
+                minlength="2">
             </div>
             <div class="form-group">
               <label for="plan-price" class="form-label">Monthly Price *</label>
-              <input type="number" id="plan-price" class="form-control" placeholder="e.g. 2999.00" step="0.01" min="0" required>
+              <input type="number" id="plan-price" class="form-control" placeholder="e.g. 2999.00" step="0.01" min="0"
+                required>
             </div>
             <div class="form-group">
               <label for="plan-note" class="form-label">Plan Notes / Entitlements</label>
-              <textarea id="plan-note" class="form-control" rows="3" placeholder="Included features, user limits, or entitlements..."></textarea>
+              <textarea id="plan-note" class="form-control" rows="3"
+                placeholder="Included features, user limits, or entitlements..."></textarea>
             </div>
             <div class="form-group">
               <label for="plan-status" class="form-label">Status</label>
@@ -1265,7 +1389,8 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Update Subscription Plan</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="edit-plan-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="edit-plan-modal"
+            aria-label="Close modal">×</button>
         </div>
         <form id="edit-plan-form">
           <input type="hidden" id="edit-plan-id">
@@ -1306,7 +1431,8 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title" id="confirm-modal-title">Confirm Action</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="confirm-action-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="confirm-action-modal"
+            aria-label="Close modal">×</button>
         </div>
         <div class="modal-body" id="confirm-modal-message">
           Are you sure you want to proceed?
@@ -1325,7 +1451,8 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Change Subscription Status</h2>
-          <button type="button" class="modal-close-btn" data-close-modal="sub-status-modal" aria-label="Close modal">×</button>
+          <button type="button" class="modal-close-btn" data-close-modal="sub-status-modal"
+            aria-label="Close modal">×</button>
         </div>
         <form id="sub-status-form">
           <input type="hidden" id="status-sub-tenant-id">
@@ -1360,4 +1487,5 @@
   <script src="/static/js/auth.js"></script>
   <script src="/static/js/platform_admin.js"></script>
 </body>
+
 </html>
