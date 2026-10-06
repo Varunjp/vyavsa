@@ -53,6 +53,19 @@ type Metrics struct {
 	overtimeCreatedTotal         prometheus.Counter
 	employeeAdvancesCreatedTotal prometheus.Counter
 	salaryPaymentsTotal          prometheus.Counter
+
+	// Database & Transaction Performance Metrics
+	financialTxDuration *prometheus.HistogramVec
+	financialTxFailures *prometheus.CounterVec
+	dbTxDuration        prometheus.Histogram
+	dbConnectionWait    prometheus.Histogram
+
+	// Background Worker Metrics
+	dailyStatsWorkerJobsTotal     prometheus.Counter
+	dailyStatsWorkerFailuresTotal prometheus.Counter
+	emailWorkerJobsTotal          prometheus.Counter
+	emailWorkerFailuresTotal      prometheus.Counter
+	emailWorkerRetryTotal         prometheus.Counter
 }
 
 // New initializes application metrics and registers them with a custom Prometheus registry
@@ -329,6 +342,74 @@ func New() *Metrics {
 				Help:      "Total count of salary disbursements made",
 			},
 		),
+		financialTxDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "billbook",
+				Name:      "financial_transaction_duration_seconds",
+				Help:      "Duration of financial transactions in seconds",
+				Buckets:   []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
+			},
+			[]string{"operation"},
+		),
+		financialTxFailures: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Name:      "financial_transaction_failures_total",
+				Help:      "Total count of failed financial transactions",
+			},
+			[]string{"operation"},
+		),
+		dbTxDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "billbook",
+				Name:      "db_transaction_duration_seconds",
+				Help:      "Duration of raw database transactions in seconds",
+				Buckets:   []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+			},
+		),
+		dbConnectionWait: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "billbook",
+				Name:      "db_connection_wait_seconds",
+				Help:      "Time spent waiting to acquire a database connection in seconds",
+				Buckets:   []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5},
+			},
+		),
+		dailyStatsWorkerJobsTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Name:      "daily_stats_worker_jobs_total",
+				Help:      "Total daily stats background worker jobs processed",
+			},
+		),
+		dailyStatsWorkerFailuresTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Name:      "daily_stats_worker_failures_total",
+				Help:      "Total daily stats background worker failures",
+			},
+		),
+		emailWorkerJobsTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Name:      "email_worker_jobs_total",
+				Help:      "Total email background worker jobs processed",
+			},
+		),
+		emailWorkerFailuresTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Name:      "email_worker_failures_total",
+				Help:      "Total email background worker failures",
+			},
+		),
+		emailWorkerRetryTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Name:      "email_worker_retry_total",
+				Help:      "Total email background worker retries",
+			},
+		),
 	}
 
 	reg.MustRegister(
@@ -361,6 +442,15 @@ func New() *Metrics {
 		m.overtimeCreatedTotal,
 		m.employeeAdvancesCreatedTotal,
 		m.salaryPaymentsTotal,
+		m.financialTxDuration,
+		m.financialTxFailures,
+		m.dbTxDuration,
+		m.dbConnectionWait,
+		m.dailyStatsWorkerJobsTotal,
+		m.dailyStatsWorkerFailuresTotal,
+		m.emailWorkerJobsTotal,
+		m.emailWorkerFailuresTotal,
+		m.emailWorkerRetryTotal,
 	)
 
 	return m
@@ -669,4 +759,67 @@ func (c *redisPoolCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(descRedisTotalConns, prometheus.GaugeValue, float64(stat.TotalConns))
 	ch <- prometheus.MustNewConstMetric(descRedisIdleConns, prometheus.GaugeValue, float64(stat.IdleConns))
 	ch <- prometheus.MustNewConstMetric(descRedisStaleConns, prometheus.CounterValue, float64(stat.StaleConns))
+}
+
+// RecordFinancialTxDuration records latency for a financial transaction
+func (m *Metrics) RecordFinancialTxDuration(operation string, d time.Duration) {
+	if m != nil && m.financialTxDuration != nil {
+		m.financialTxDuration.WithLabelValues(operation).Observe(d.Seconds())
+	}
+}
+
+// IncFinancialTxFailures increments the financial transaction failure counter
+func (m *Metrics) IncFinancialTxFailures(operation string) {
+	if m != nil && m.financialTxFailures != nil {
+		m.financialTxFailures.WithLabelValues(operation).Inc()
+	}
+}
+
+// RecordDBTxDuration records latency of a raw database transaction
+func (m *Metrics) RecordDBTxDuration(d time.Duration) {
+	if m != nil && m.dbTxDuration != nil {
+		m.dbTxDuration.Observe(d.Seconds())
+	}
+}
+
+// RecordDBConnectionWait records latency of acquiring a DB connection
+func (m *Metrics) RecordDBConnectionWait(d time.Duration) {
+	if m != nil && m.dbConnectionWait != nil {
+		m.dbConnectionWait.Observe(d.Seconds())
+	}
+}
+
+// IncDailyStatsWorkerJob increments processed daily stats worker jobs
+func (m *Metrics) IncDailyStatsWorkerJob() {
+	if m != nil && m.dailyStatsWorkerJobsTotal != nil {
+		m.dailyStatsWorkerJobsTotal.Inc()
+	}
+}
+
+// IncDailyStatsWorkerFailure increments failed daily stats worker jobs
+func (m *Metrics) IncDailyStatsWorkerFailure() {
+	if m != nil && m.dailyStatsWorkerFailuresTotal != nil {
+		m.dailyStatsWorkerFailuresTotal.Inc()
+	}
+}
+
+// IncEmailWorkerJob increments processed email worker jobs
+func (m *Metrics) IncEmailWorkerJob() {
+	if m != nil && m.emailWorkerJobsTotal != nil {
+		m.emailWorkerJobsTotal.Inc()
+	}
+}
+
+// IncEmailWorkerFailure increments failed email worker jobs
+func (m *Metrics) IncEmailWorkerFailure() {
+	if m != nil && m.emailWorkerFailuresTotal != nil {
+		m.emailWorkerFailuresTotal.Inc()
+	}
+}
+
+// IncEmailWorkerRetry increments email worker retries
+func (m *Metrics) IncEmailWorkerRetry() {
+	if m != nil && m.emailWorkerRetryTotal != nil {
+		m.emailWorkerRetryTotal.Inc()
+	}
 }

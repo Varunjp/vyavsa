@@ -1298,6 +1298,11 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 		date = time.Now().UTC().Format("2006-01-02")
 	}
 
+	startOfDay, startOfNextDay, err := ParseDateRangeUTC(date)
+	if err != nil {
+		return nil, appErrors.NewBadRequest(fmt.Sprintf("invalid date format %q: expected YYYY-MM-DD", date))
+	}
+
 	exec := GetExecutor(ctx, r.pool)
 
 	// 1. Line Sales Aggregations
@@ -1305,9 +1310,9 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 	lineQuery := `
 		SELECT COALESCE(SUM(total_amount), 0), COALESCE(SUM(total_cash_in), 0), COALESCE(SUM(balance), 0)
 		FROM line_sale
-		WHERE tenant_id = $1 AND created_at::date = $2::date
+		WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3
 	`
-	if err := exec.QueryRow(ctx, lineQuery, tenantID, date).Scan(&lineSaleAmount, &lineCashIn, &lineCredit); err != nil {
+	if err := exec.QueryRow(ctx, lineQuery, tenantID, startOfDay, startOfNextDay).Scan(&lineSaleAmount, &lineCashIn, &lineCredit); err != nil {
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating line sales: %w", err))
 	}
 
@@ -1316,9 +1321,9 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 	counterQuery := `
 		SELECT COALESCE(SUM(total_amount), 0), COALESCE(SUM(cash), 0), COALESCE(SUM(account), 0)
 		FROM counter_sale
-		WHERE tenant_id = $1 AND created_at::date = $2::date
+		WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3
 	`
-	if err := exec.QueryRow(ctx, counterQuery, tenantID, date).Scan(&counterSaleAmount, &counterCash, &counterAccount); err != nil {
+	if err := exec.QueryRow(ctx, counterQuery, tenantID, startOfDay, startOfNextDay).Scan(&counterSaleAmount, &counterCash, &counterAccount); err != nil {
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating counter sales: %w", err))
 	}
 
@@ -1327,9 +1332,9 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 	cpQuery := `
 		SELECT COALESCE(SUM(p.amount), 0)
 		FROM counter_sale_payments p
-		WHERE p.tenant_id = $1 AND p.created_at::date = $2::date
+		WHERE p.tenant_id = $1 AND p.created_at >= $2 AND p.created_at < $3
 	`
-	if err := exec.QueryRow(ctx, cpQuery, tenantID, date).Scan(&counterPaymentsBank); err != nil {
+	if err := exec.QueryRow(ctx, cpQuery, tenantID, startOfDay, startOfNextDay).Scan(&counterPaymentsBank); err != nil {
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating counter sale payments: %w", err))
 	}
 
@@ -1338,9 +1343,9 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 	purchQuery := `
 		SELECT COALESCE(SUM(total_amount), 0), COALESCE(SUM(total_paid), 0)
 		FROM tenant_purchase
-		WHERE tenant_id = $1 AND created_at::date = $2::date
+		WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3
 	`
-	if err := exec.QueryRow(ctx, purchQuery, tenantID, date).Scan(&purchaseAmount, &purchasePaid); err != nil {
+	if err := exec.QueryRow(ctx, purchQuery, tenantID, startOfDay, startOfNextDay).Scan(&purchaseAmount, &purchasePaid); err != nil {
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating purchases: %w", err))
 	}
 
@@ -1349,9 +1354,9 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 	expQuery := `
 		SELECT COALESCE(SUM(total_amount), 0)
 		FROM tenant_expense
-		WHERE tenant_id = $1 AND created_at::date = $2::date
+		WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3
 	`
-	if err := exec.QueryRow(ctx, expQuery, tenantID, date).Scan(&expenseAmount); err != nil {
+	if err := exec.QueryRow(ctx, expQuery, tenantID, startOfDay, startOfNextDay).Scan(&expenseAmount); err != nil {
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating expenses: %w", err))
 	}
 
@@ -1360,9 +1365,9 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 	wagesQuery := `
 		SELECT COALESCE(SUM(amount), 0)
 		FROM employee_salary_payment
-		WHERE tenant_id = $1 AND created_at::date = $2::date
+		WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3
 	`
-	if err := exec.QueryRow(ctx, wagesQuery, tenantID, date).Scan(&wagesAmount); err != nil {
+	if err := exec.QueryRow(ctx, wagesQuery, tenantID, startOfDay, startOfNextDay).Scan(&wagesAmount); err != nil {
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating wages: %w", err))
 	}
 

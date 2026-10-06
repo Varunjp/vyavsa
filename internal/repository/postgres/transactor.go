@@ -3,7 +3,9 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/Varunjp/vyavsa/internal/metrics"
 	appErrors "github.com/Varunjp/vyavsa/pkg/errors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -21,12 +23,18 @@ type QueryExecutor interface {
 
 // PostgresTransactor implements repository.Transactor
 type PostgresTransactor struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	metrics *metrics.Metrics
 }
 
 // NewPostgresTransactor creates a new PostgresTransactor
 func NewPostgresTransactor(pool *pgxpool.Pool) *PostgresTransactor {
 	return &PostgresTransactor{pool: pool}
+}
+
+// SetMetrics configures Prometheus metrics reporting for transactions
+func (t *PostgresTransactor) SetMetrics(m *metrics.Metrics) {
+	t.metrics = m
 }
 
 // WithinTransaction executes a closure inside an atomic PostgreSQL transaction
@@ -36,11 +44,16 @@ func (t *PostgresTransactor) WithinTransaction(ctx context.Context, fn func(ctx 
 		return fn(ctx)
 	}
 
+	acquireStart := time.Now()
 	tx, err := t.pool.Begin(ctx)
+	if t.metrics != nil {
+		t.metrics.RecordDBConnectionWait(time.Since(acquireStart))
+	}
 	if err != nil {
 		return appErrors.NewDatabase(fmt.Errorf("failed to begin transaction: %w", err))
 	}
 
+	txStart := time.Now()
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
@@ -52,6 +65,10 @@ func (t *PostgresTransactor) WithinTransaction(ctx context.Context, fn func(ctx 
 
 	if err := tx.Commit(ctx); err != nil {
 		return appErrors.NewDatabase(fmt.Errorf("failed to commit transaction: %w", err))
+	}
+
+	if t.metrics != nil {
+		t.metrics.RecordDBTxDuration(time.Since(txStart))
 	}
 
 	return nil

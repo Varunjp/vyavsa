@@ -304,9 +304,15 @@ func (r *TenantPurchasePostgres) List(ctx context.Context, tenantID uuid.UUID, p
 	argIdx := 2
 
 	if date != "" {
-		baseWhere += fmt.Sprintf(" AND created_at::date = $%d", argIdx)
-		args = append(args, date)
-		argIdx++
+		if start, end, err := ParseDateRangeUTC(date); err == nil {
+			baseWhere += fmt.Sprintf(" AND created_at >= $%d AND created_at < $%d", argIdx, argIdx+1)
+			args = append(args, start, end)
+			argIdx += 2
+		} else {
+			baseWhere += fmt.Sprintf(" AND created_at::date = $%d", argIdx)
+			args = append(args, date)
+			argIdx++
+		}
 	}
 
 	if customerID != nil && *customerID != uuid.Nil {
@@ -730,9 +736,15 @@ func (r *TenantExpensePostgres) List(ctx context.Context, tenantID uuid.UUID, pa
 	argIdx := 2
 
 	if date != "" {
-		baseWhere += fmt.Sprintf(" AND e.created_at::date = $%d", argIdx)
-		args = append(args, date)
-		argIdx++
+		if start, end, err := ParseDateRangeUTC(date); err == nil {
+			baseWhere += fmt.Sprintf(" AND e.created_at >= $%d AND e.created_at < $%d", argIdx, argIdx+1)
+			args = append(args, start, end)
+			argIdx += 2
+		} else {
+			baseWhere += fmt.Sprintf(" AND e.created_at::date = $%d", argIdx)
+			args = append(args, date)
+			argIdx++
+		}
 	}
 
 	if search != "" {

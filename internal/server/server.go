@@ -31,6 +31,7 @@ import (
 	postgresRepo "github.com/Varunjp/vyavsa/internal/repository/postgres"
 	redisRepo "github.com/Varunjp/vyavsa/internal/repository/redis"
 	"github.com/Varunjp/vyavsa/internal/service"
+	"github.com/Varunjp/vyavsa/internal/worker"
 	"github.com/Varunjp/vyavsa/pkg/response"
 	"github.com/Varunjp/vyavsa/web"
 	"github.com/gin-gonic/gin"
@@ -38,13 +39,15 @@ import (
 
 // Server coordinates the HTTP server, routing, dependencies, and lifecycle
 type Server struct {
-	cfg     *config.Config
-	log     *logger.Logger
-	db      *database.Postgres
-	redis   *cache.Redis
-	metrics *metrics.Metrics
-	router  *gin.Engine
-	httpSrv *http.Server
+	cfg              *config.Config
+	log              *logger.Logger
+	db               *database.Postgres
+	redis            *cache.Redis
+	metrics          *metrics.Metrics
+	router           *gin.Engine
+	httpSrv          *http.Server
+	emailWorker      *worker.EmailWorker
+	dailyStatsWorker *worker.DailyStatsWorker
 }
 
 // New creates and configures a new Server instance
@@ -219,8 +222,11 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		tenantRepo = postgresRepo.NewTenantPostgres(s.db.Pool)
 		summaryRepo = postgresRepo.NewTenantFinancialSummaryPostgres(s.db.Pool)
 		subRepo = postgresRepo.NewPlatformSubscriptionPostgres(s.db.Pool)
-		txnRepo = postgresRepo.NewPlatformPlanTransactionPostgres(s.db.Pool)
-		transactor = postgresRepo.NewPostgresTransactor(s.db.Pool)
+		pgTransactor := postgresRepo.NewPostgresTransactor(s.db.Pool)
+		if s.metrics != nil {
+			pgTransactor.SetMetrics(s.metrics)
+		}
+		transactor = pgTransactor
 
 		empRepo = postgresRepo.NewTenantEmployeePostgres(s.db.Pool)
 		custRepo = postgresRepo.NewTenantCustomerPostgres(s.db.Pool)
@@ -245,7 +251,9 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		planCache = redisRepo.NewTenantPlanCacheRedis(s.redis)
 	}
 
-	appMailer := mailer.NewMailer(s.cfg.Mailer, s.log.Logger)
+	rawMailer := mailer.NewMailer(s.cfg.Mailer, s.log.Logger)
+	s.emailWorker = worker.NewEmailWorker(rawMailer, s.redis, s.metrics, s.log.Logger, 3)
+	appMailer := mailer.NewAsyncMailer(s.emailWorker)
 
 	// Services
 	authService := service.NewAuthService(
@@ -308,6 +316,9 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		hasher,
 		s.log.Logger,
 	)
+	s.dailyStatsWorker = worker.NewDailyStatsWorker(statsRepo, s.redis, s.metrics, s.log.Logger, 3)
+	opsService.SetDailyStatsWorker(s.dailyStatsWorker)
+
 	if s.metrics != nil {
 		opsService.SetMetrics(s.metrics)
 	}
@@ -538,8 +549,30 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	}
 }
 
+// StartWorkers starts the background asynchronous workers
+func (s *Server) StartWorkers(ctx context.Context) {
+	if s.emailWorker != nil {
+		s.emailWorker.Start(ctx)
+	}
+	if s.dailyStatsWorker != nil {
+		s.dailyStatsWorker.Start(ctx)
+	}
+}
+
+// StopWorkers gracefully stops all background workers
+func (s *Server) StopWorkers() {
+	if s.dailyStatsWorker != nil {
+		s.dailyStatsWorker.Stop()
+	}
+	if s.emailWorker != nil {
+		s.emailWorker.Stop()
+	}
+}
+
 // Run starts the HTTP server and blocks until an interrupt signal is received for graceful shutdown
 func (s *Server) Run() error {
+	s.StartWorkers(context.Background())
+
 	shutdownErr := make(chan error, 1)
 
 	go func() {
@@ -560,14 +593,18 @@ func (s *Server) Run() error {
 			errs = append(errs, fmt.Errorf("http server shutdown: %w", err))
 		}
 
-		// Step 2: Close Redis client
+		// Step 2: Stop background workers
+		s.log.Info("stopping background workers")
+		s.StopWorkers()
+
+		// Step 3: Close Redis client
 		if s.redis != nil {
 			if err := s.redis.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("redis close: %w", err))
 			}
 		}
 
-		// Step 3: Close Postgres connection pool
+		// Step 4: Close Postgres connection pool
 		if s.db != nil {
 			s.db.Close()
 		}

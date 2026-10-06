@@ -36,6 +36,8 @@ func NewPostgres(ctx context.Context, cfg config.DatabaseConfig, log *slog.Logge
 		slog.String("database", cfg.Name),
 		slog.Int("max_conns", int(cfg.MaxConns)),
 		slog.Int("min_conns", int(cfg.MinConns)),
+		slog.Duration("max_conn_lifetime", cfg.MaxConnLifetime),
+		slog.Duration("max_conn_idle_time", cfg.MaxConnIdleTime),
 	)
 
 	// Attempt connection with timeout

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -110,6 +111,7 @@ func (m *mockTenantRepo) CountSince(ctx context.Context, since time.Time) (int64
 
 // Mock FinancialSummaryRepo
 type mockFinancialSummaryRepo struct {
+	mu        sync.RWMutex
 	summaries map[uuid.UUID]*domain.TenantFinancialSummary
 }
 
@@ -118,6 +120,8 @@ func newMockFinancialSummaryRepo() *mockFinancialSummaryRepo {
 }
 
 func (m *mockFinancialSummaryRepo) Create(ctx context.Context, s *domain.TenantFinancialSummary) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	s.ID = uuid.New()
 	s.CreatedAt = time.Now().UTC()
 	s.UpdatedAt = time.Now().UTC()
@@ -126,6 +130,8 @@ func (m *mockFinancialSummaryRepo) Create(ctx context.Context, s *domain.TenantF
 }
 
 func (m *mockFinancialSummaryRepo) GetByTenantID(ctx context.Context, tenantID uuid.UUID) (*domain.TenantFinancialSummary, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	s, ok := m.summaries[tenantID]
 	if !ok {
 		return nil, appErrors.NewNotFound("summary not found")
@@ -142,8 +148,31 @@ func (m *mockFinancialSummaryRepo) SyncFromSourceRecords(ctx context.Context, te
 }
 
 func (m *mockFinancialSummaryRepo) Update(ctx context.Context, s *domain.TenantFinancialSummary) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	s.UpdatedAt = time.Now().UTC()
 	m.summaries[s.TenantID] = s
+	return nil
+}
+
+func (m *mockFinancialSummaryRepo) AdjustBalances(ctx context.Context, tenantID uuid.UUID, cashDelta, bankDelta, receivableDelta, payableDelta decimal.Decimal) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.summaries[tenantID]
+	if !ok {
+		s = &domain.TenantFinancialSummary{
+			ID:        uuid.New(),
+			TenantID:  tenantID,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		}
+		m.summaries[tenantID] = s
+	}
+	s.CashBalance = s.CashBalance.Add(cashDelta)
+	s.BankBalance = s.BankBalance.Add(bankDelta)
+	s.TotalReceivable = s.TotalReceivable.Add(receivableDelta)
+	s.TotalPayable = s.TotalPayable.Add(payableDelta)
+	s.UpdatedAt = time.Now().UTC()
 	return nil
 }
 
