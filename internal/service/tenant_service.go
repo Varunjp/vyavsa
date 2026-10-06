@@ -828,16 +828,21 @@ func (s *tenantService) GetPlatformDashboardMetrics(ctx context.Context) (*dto.P
 		return nil, err
 	}
 
-	monthlyIncome, err := s.txnRepo.GetMonthlyReceivedIncome(ctx, startOfMonth)
-	if err != nil {
-		s.log.ErrorContext(ctx, "failed to get monthly received income", slog.String("error", err.Error()))
-		return nil, err
-	}
+	var monthlyIncome decimal.Decimal
+	var rawTrend []repository.MonthlyRevenueAggregate
+	if s.txnRepo != nil {
+		var err error
+		monthlyIncome, err = s.txnRepo.GetMonthlyReceivedIncome(ctx, startOfMonth)
+		if err != nil {
+			s.log.ErrorContext(ctx, "failed to get monthly received income", slog.String("error", err.Error()))
+			return nil, err
+		}
 
-	rawTrend, err := s.txnRepo.GetMonthlyRevenueTrend(ctx, sixMonthsAgo)
-	if err != nil {
-		s.log.ErrorContext(ctx, "failed to get monthly revenue trend", slog.String("error", err.Error()))
-		return nil, err
+		rawTrend, err = s.txnRepo.GetMonthlyRevenueTrend(ctx, sixMonthsAgo)
+		if err != nil {
+			s.log.ErrorContext(ctx, "failed to get monthly revenue trend", slog.String("error", err.Error()))
+			return nil, err
+		}
 	}
 
 	trendMap := make(map[string]repository.MonthlyRevenueAggregate, len(rawTrend))
