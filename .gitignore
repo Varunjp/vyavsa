@@ -7,3 +7,7 @@ agent.md
 
 # Binaries
 /bin/
+
+# Load Testing synthetic runtime datasets
+load-tests/data/*.json
+!load-tests/data/.gitkeep

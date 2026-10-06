@@ -222,6 +222,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		tenantRepo = postgresRepo.NewTenantPostgres(s.db.Pool)
 		summaryRepo = postgresRepo.NewTenantFinancialSummaryPostgres(s.db.Pool)
 		subRepo = postgresRepo.NewPlatformSubscriptionPostgres(s.db.Pool)
+		txnRepo = postgresRepo.NewPlatformPlanTransactionPostgres(s.db.Pool)
 		pgTransactor := postgresRepo.NewPostgresTransactor(s.db.Pool)
 		if s.metrics != nil {
 			pgTransactor.SetMetrics(s.metrics)
