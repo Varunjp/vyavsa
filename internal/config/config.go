@@ -179,8 +179,8 @@ func Load() (*Config, error) {
 			SSLMode:         getEnv("DATABASE_SSLMODE", "disable"),
 			MaxConns:        getInt32Env("DATABASE_MAX_CONNS", 25),
 			MinConns:        getInt32Env("DATABASE_MIN_CONNS", 5),
-			MaxConnLifetime: getDurationEnv("DATABASE_MAX_CONN_LIFETIME", 30*time.Minute),
-			MaxConnIdleTime: getDurationEnv("DATABASE_MAX_CONN_IDLE_TIME", 5*time.Minute),
+			MaxConnLifetime: getDurationWithFallbackEnv("DATABASE_MAX_CONN_LIFETIME", "DATABASE_MAX_LIFETIME", 30*time.Minute),
+			MaxConnIdleTime: getDurationWithFallbackEnv("DATABASE_MAX_CONN_IDLE_TIME", "DATABASE_MAX_IDLE_TIME", 5*time.Minute),
 			AutoMigrate:     getBoolEnv("DATABASE_AUTO_MIGRATE", true),
 		},
 		Redis: RedisConfig{
@@ -324,6 +324,20 @@ func getBoolEnv(key string, fallback bool) bool {
 
 func getDurationEnv(key string, fallback time.Duration) time.Duration {
 	if val := os.Getenv(key); val != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
+			return d
+		}
+	}
+	return fallback
+}
+
+func getDurationWithFallbackEnv(primaryKey, secondaryKey string, fallback time.Duration) time.Duration {
+	if val := os.Getenv(primaryKey); val != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
+			return d
+		}
+	}
+	if val := os.Getenv(secondaryKey); val != "" {
 		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
 			return d
 		}

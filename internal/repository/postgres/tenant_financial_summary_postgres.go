@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 // TenantFinancialSummaryPostgres implements repository.TenantFinancialSummaryRepository using pgxpool
@@ -157,4 +158,28 @@ func (r *TenantFinancialSummaryPostgres) SyncFromSourceRecords(ctx context.Conte
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed to sync financial summary from source records: %w", err))
 	}
 	return &s, nil
+}
+
+// AdjustBalances applies atomic arithmetic updates to a tenant's financial summary.
+// If the summary row does not exist yet, it is initialized with the given values.
+func (r *TenantFinancialSummaryPostgres) AdjustBalances(ctx context.Context, tenantID uuid.UUID, cashDelta, bankDelta, receivableDelta, payableDelta decimal.Decimal) error {
+	query := `
+		INSERT INTO tenant_financial_summary (
+			tenant_id, cash_balance, bank_balance, total_receivable, total_payable, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+		ON CONFLICT (tenant_id) DO UPDATE
+		SET
+			cash_balance = tenant_financial_summary.cash_balance + EXCLUDED.cash_balance,
+			bank_balance = tenant_financial_summary.bank_balance + EXCLUDED.bank_balance,
+			total_receivable = tenant_financial_summary.total_receivable + EXCLUDED.total_receivable,
+			total_payable = tenant_financial_summary.total_payable + EXCLUDED.total_payable,
+			updated_at = NOW()
+	`
+	exec := GetExecutor(ctx, r.pool)
+	_, err := exec.Exec(ctx, query, tenantID, cashDelta, bankDelta, receivableDelta, payableDelta)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to adjust tenant financial summary atomically: %w", err))
+	}
+	return nil
 }

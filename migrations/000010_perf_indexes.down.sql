@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_counter_sale_payments_tenant_created;
