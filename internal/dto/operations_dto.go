@@ -320,6 +320,25 @@ type UpdatePurchaseRequest struct {
 // 8. Expense DTOs
 // ==========================================
 
+// BankPaymentSplitDTO represents a bank payment split within an expense request
+type BankPaymentSplitDTO struct {
+	BankAccountID uuid.UUID       `json:"bank_account_id"`
+	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
+	BankName      string          `json:"bank_name,omitempty"`
+	Amount        decimal.Decimal `json:"amount"`
+	Note          string          `json:"note,omitempty"`
+}
+
+func (b *BankPaymentSplitDTO) GetBankID() uuid.UUID {
+	if b.BankAccountID != uuid.Nil {
+		return b.BankAccountID
+	}
+	if b.BankID != nil {
+		return *b.BankID
+	}
+	return uuid.Nil
+}
+
 type ExpensePaymentRequest struct {
 	PaymentMethod string          `json:"payment_method" binding:"required"`
 	BankID        *uuid.UUID      `json:"bank_id,omitempty"`
@@ -334,19 +353,42 @@ type CreateExpenseRequest struct {
 	Item          string                  `json:"item" binding:"required,min=1,max=255"`
 	Category      string                  `json:"category" binding:"omitempty"`
 	EmployeeID    *uuid.UUID              `json:"employee_id,omitempty"`
-	TotalAmount   decimal.Decimal         `json:"total_amount" binding:"required"`
+	TotalAmount   decimal.Decimal         `json:"total_amount" binding:"omitempty"`
+	Amount        *decimal.Decimal        `json:"amount,omitempty"`
 	PaymentMethod string                  `json:"payment_method" binding:"omitempty"`
+	CashAmount    *decimal.Decimal        `json:"cash_amount,omitempty"`
+	BankPayments  []BankPaymentSplitDTO   `json:"bank_payments,omitempty"`
 	BankID        *uuid.UUID              `json:"bank_id,omitempty"`
 	BankName      string                  `json:"bank_name,omitempty"`
 	ReferenceID   string                  `json:"reference_id,omitempty"`
+	PaymentDate   string                  `json:"payment_date,omitempty"`
 	Payments      []ExpensePaymentRequest `json:"payments,omitempty"`
 }
 
+func (r *CreateExpenseRequest) GetTotalAmount() decimal.Decimal {
+	if r.Amount != nil && !r.Amount.IsZero() {
+		return *r.Amount
+	}
+	return r.TotalAmount
+}
+
 type UpdateExpenseRequest struct {
-	Item        string           `json:"item" binding:"omitempty"`
-	Category    string           `json:"category" binding:"omitempty"`
-	EmployeeID  *uuid.UUID       `json:"employee_id" binding:"omitempty"`
-	TotalAmount *decimal.Decimal `json:"total_amount" binding:"omitempty"`
+	Item          string                  `json:"item" binding:"omitempty"`
+	Category      string                  `json:"category" binding:"omitempty"`
+	EmployeeID    *uuid.UUID              `json:"employee_id" binding:"omitempty"`
+	TotalAmount   *decimal.Decimal        `json:"total_amount" binding:"omitempty"`
+	Amount        *decimal.Decimal        `json:"amount,omitempty"`
+	PaymentMethod string                  `json:"payment_method" binding:"omitempty"`
+	CashAmount    *decimal.Decimal        `json:"cash_amount,omitempty"`
+	BankPayments  []BankPaymentSplitDTO   `json:"bank_payments,omitempty"`
+	Payments      []ExpensePaymentRequest `json:"payments,omitempty"`
+}
+
+func (r *UpdateExpenseRequest) GetTotalAmount() *decimal.Decimal {
+	if r.Amount != nil {
+		return r.Amount
+	}
+	return r.TotalAmount
 }
 
 // ==========================================

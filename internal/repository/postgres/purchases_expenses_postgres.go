@@ -575,10 +575,14 @@ func (r *TenantExpensePostgres) Create(ctx context.Context, expense *domain.Tena
 	if cat == "" {
 		cat = "general"
 	}
+	pm := expense.PaymentMethod
+	if pm == "" {
+		pm = "cash"
+	}
 	eQuery := `
-		INSERT INTO tenant_expense (tenant_id, item, total_amount, category, employee_id)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, category, created_at, updated_at
+		INSERT INTO tenant_expense (tenant_id, item, total_amount, category, employee_id, payment_method)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, category, payment_method, created_at, updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
 	err := exec.QueryRow(ctx, eQuery,
@@ -587,7 +591,8 @@ func (r *TenantExpensePostgres) Create(ctx context.Context, expense *domain.Tena
 		expense.TotalAmount,
 		cat,
 		expense.EmployeeID,
-	).Scan(&expense.ID, &expense.Category, &expense.CreatedAt, &expense.UpdatedAt)
+		pm,
+	).Scan(&expense.ID, &expense.Category, &expense.PaymentMethod, &expense.CreatedAt, &expense.UpdatedAt)
 	if err != nil {
 		return appErrors.NewDatabase(fmt.Errorf("failed to create expense: %w", err))
 	}
@@ -614,13 +619,14 @@ func (r *TenantExpensePostgres) Create(ctx context.Context, expense *domain.Tena
 		}
 	}
 	expense.Payments = payments
+	expense.BuildPaymentBreakdown()
 
 	return nil
 }
 
 func (r *TenantExpensePostgres) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantExpense, error) {
 	eQuery := `
-		SELECT e.id, e.tenant_id, e.item, e.total_amount, COALESCE(e.category, 'general'), e.employee_id, COALESCE(emp.name, ''), e.created_at, e.updated_at
+		SELECT e.id, e.tenant_id, e.item, e.total_amount, COALESCE(e.category, 'general'), e.employee_id, COALESCE(emp.name, ''), COALESCE(e.payment_method, 'cash'), e.created_at, e.updated_at
 		FROM tenant_expense e
 		LEFT JOIN tenant_employees emp ON emp.id = e.employee_id
 		WHERE e.tenant_id = $1 AND e.id = $2
@@ -635,6 +641,7 @@ func (r *TenantExpensePostgres) GetByID(ctx context.Context, tenantID, id uuid.U
 		&e.Category,
 		&e.EmployeeID,
 		&e.EmployeeName,
+		&e.PaymentMethod,
 		&e.CreatedAt,
 		&e.UpdatedAt,
 	)
@@ -677,6 +684,7 @@ func (r *TenantExpensePostgres) GetByID(ctx context.Context, tenantID, id uuid.U
 		e.Payments = append(e.Payments, pm)
 	}
 
+	e.BuildPaymentBreakdown()
 	return &e, nil
 }
 
@@ -685,10 +693,14 @@ func (r *TenantExpensePostgres) Update(ctx context.Context, expense *domain.Tena
 	if cat == "" {
 		cat = "general"
 	}
+	pm := expense.PaymentMethod
+	if pm == "" {
+		pm = "cash"
+	}
 	query := `
 		UPDATE tenant_expense
-		SET item = $1, total_amount = $2, category = $3, employee_id = $4, updated_at = NOW()
-		WHERE tenant_id = $5 AND id = $6
+		SET item = $1, total_amount = $2, category = $3, employee_id = $4, payment_method = $5, updated_at = NOW()
+		WHERE tenant_id = $6 AND id = $7
 		RETURNING updated_at
 	`
 	exec := GetExecutor(ctx, r.pool)
@@ -697,6 +709,7 @@ func (r *TenantExpensePostgres) Update(ctx context.Context, expense *domain.Tena
 		expense.TotalAmount,
 		cat,
 		expense.EmployeeID,
+		pm,
 		expense.TenantID,
 		expense.ID,
 	).Scan(&expense.UpdatedAt)
@@ -706,6 +719,72 @@ func (r *TenantExpensePostgres) Update(ctx context.Context, expense *domain.Tena
 		}
 		return appErrors.NewDatabase(fmt.Errorf("failed to update expense: %w", err))
 	}
+	return nil
+}
+
+func (r *TenantExpensePostgres) UpdateWithPayments(ctx context.Context, expense *domain.TenantExpense, payments []domain.TenantExpensePayment) error {
+	cat := expense.Category
+	if cat == "" {
+		cat = "general"
+	}
+	pm := expense.PaymentMethod
+	if pm == "" {
+		pm = "cash"
+	}
+	exec := GetExecutor(ctx, r.pool)
+	query := `
+		UPDATE tenant_expense
+		SET item = $1, total_amount = $2, category = $3, employee_id = $4, payment_method = $5, updated_at = NOW()
+		WHERE tenant_id = $6 AND id = $7
+		RETURNING updated_at
+	`
+	err := exec.QueryRow(ctx, query,
+		expense.Item,
+		expense.TotalAmount,
+		cat,
+		expense.EmployeeID,
+		pm,
+		expense.TenantID,
+		expense.ID,
+	).Scan(&expense.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return appErrors.NewNotFound("expense not found within tenant")
+		}
+		return appErrors.NewDatabase(fmt.Errorf("failed to update expense: %w", err))
+	}
+
+	// Remove previous payments
+	delQuery := `DELETE FROM tenant_expense_payment WHERE tenant_id = $1 AND expense_id = $2`
+	if _, err := exec.Exec(ctx, delQuery, expense.TenantID, expense.ID); err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to delete previous expense payments: %w", err))
+	}
+
+	// Insert updated payments
+	for i := range payments {
+		payment := &payments[i]
+		payment.TenantID = expense.TenantID
+		payment.ExpenseID = expense.ID
+		pmQuery := `
+			INSERT INTO tenant_expense_payment (tenant_id, expense_id, payment_method, bank_id, bank_name, amount, note)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING id, created_at, updated_at
+		`
+		if err := exec.QueryRow(ctx, pmQuery,
+			payment.TenantID,
+			payment.ExpenseID,
+			payment.PaymentMethod,
+			payment.BankID,
+			payment.BankName,
+			payment.Amount,
+			payment.Note,
+		).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
+			return appErrors.NewDatabase(fmt.Errorf("failed to create updated expense payment: %w", err))
+		}
+	}
+
+	expense.Payments = payments
+	expense.BuildPaymentBreakdown()
 	return nil
 }
 
@@ -766,7 +845,7 @@ func (r *TenantExpensePostgres) List(ctx context.Context, tenantID uuid.UUID, pa
 	}
 
 	listQuery := fmt.Sprintf(`
-		SELECT e.id, e.tenant_id, e.item, e.total_amount, COALESCE(e.category, 'general'), e.employee_id, COALESCE(emp.name, ''), e.created_at, e.updated_at
+		SELECT e.id, e.tenant_id, e.item, e.total_amount, COALESCE(e.category, 'general'), e.employee_id, COALESCE(emp.name, ''), COALESCE(e.payment_method, 'cash'), e.created_at, e.updated_at
 		FROM tenant_expense e
 		LEFT JOIN tenant_employees emp ON emp.id = e.employee_id
 		%s
@@ -782,6 +861,7 @@ func (r *TenantExpensePostgres) List(ctx context.Context, tenantID uuid.UUID, pa
 	defer rows.Close()
 
 	expenses := make([]domain.TenantExpense, 0)
+	expenseIDs := make([]uuid.UUID, 0)
 	for rows.Next() {
 		var e domain.TenantExpense
 		if err := rows.Scan(
@@ -792,12 +872,53 @@ func (r *TenantExpensePostgres) List(ctx context.Context, tenantID uuid.UUID, pa
 			&e.Category,
 			&e.EmployeeID,
 			&e.EmployeeName,
+			&e.PaymentMethod,
 			&e.CreatedAt,
 			&e.UpdatedAt,
 		); err != nil {
 			return nil, 0, appErrors.NewDatabase(fmt.Errorf("failed to scan expense: %w", err))
 		}
 		expenses = append(expenses, e)
+		expenseIDs = append(expenseIDs, e.ID)
+	}
+	rows.Close()
+
+	// Batch load payments for all fetched expenses to populate payment breakdown
+	if len(expenseIDs) > 0 {
+		pmQuery := `
+			SELECT id, tenant_id, expense_id, payment_method, bank_id, bank_name, amount, note, created_at, updated_at
+			FROM tenant_expense_payment
+			WHERE tenant_id = $1 AND expense_id = ANY($2)
+			ORDER BY created_at ASC
+		`
+		pmRows, err := exec.Query(ctx, pmQuery, tenantID, expenseIDs)
+		if err == nil {
+			defer pmRows.Close()
+			pmMap := make(map[uuid.UUID][]domain.TenantExpensePayment)
+			for pmRows.Next() {
+				var pm domain.TenantExpensePayment
+				if scanErr := pmRows.Scan(
+					&pm.ID,
+					&pm.TenantID,
+					&pm.ExpenseID,
+					&pm.PaymentMethod,
+					&pm.BankID,
+					&pm.BankName,
+					&pm.Amount,
+					&pm.Note,
+					&pm.CreatedAt,
+					&pm.UpdatedAt,
+				); scanErr == nil {
+					pmMap[pm.ExpenseID] = append(pmMap[pm.ExpenseID], pm)
+				}
+			}
+			for i := range expenses {
+				if pList, ok := pmMap[expenses[i].ID]; ok {
+					expenses[i].Payments = pList
+				}
+				expenses[i].BuildPaymentBreakdown()
+			}
+		}
 	}
 
 	return expenses, total, nil

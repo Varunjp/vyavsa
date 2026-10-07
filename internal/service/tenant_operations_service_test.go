@@ -223,6 +223,18 @@ func (m *mockOpBankRepo) ListTransactions(ctx context.Context, tenantID, bankID 
 	return list, int64(len(list)), nil
 }
 
+func (m *mockOpBankRepo) DeleteTransactionsBySaleID(ctx context.Context, tenantID, saleID uuid.UUID) error {
+	filtered := make([]domain.BankTransaction, 0)
+	for _, tx := range m.transactions {
+		if tx.TenantID == tenantID && tx.SaleID != nil && *tx.SaleID == saleID {
+			continue
+		}
+		filtered = append(filtered, tx)
+	}
+	m.transactions = filtered
+	return nil
+}
+
 func (m *mockOpBankRepo) Delete(ctx context.Context, tenantID, id uuid.UUID) error {
 	delete(m.banks, id)
 	return nil
@@ -530,6 +542,12 @@ func (m *mockOpExpenseRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID)
 }
 
 func (m *mockOpExpenseRepo) Update(ctx context.Context, e *domain.TenantExpense) error {
+	m.expenses[e.ID] = e
+	return nil
+}
+
+func (m *mockOpExpenseRepo) UpdateWithPayments(ctx context.Context, e *domain.TenantExpense, payments []domain.TenantExpensePayment) error {
+	e.Payments = payments
 	m.expenses[e.ID] = e
 	return nil
 }
@@ -3195,4 +3213,396 @@ func TestOperationsService_PaymentHistory_PurchasesAndSales(t *testing.T) {
 	assert.Equal(t, "PAY-001", payments[0].ReferenceID)
 	assert.True(t, payments[1].Amount.Equal(decimal.NewFromFloat(6000.00)))
 	assert.Equal(t, "PAY-002", payments[1].ReferenceID)
+}
+
+func TestOperationsService_ExpensePaymentMethods_CashOnly(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, _, _, _, _, finSummary := setupTestOperationsServiceWithRepos()
+
+	// 1. Create Cash-only expense with explicit cash_amount
+	cashAmt := decimal.NewFromFloat(5000.00)
+	exp, err := svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Office Electricity Bill",
+		TotalAmount:   decimal.NewFromFloat(5000.00),
+		PaymentMethod: "cash",
+		CashAmount:    &cashAmt,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "cash", exp.PaymentMethod)
+	assert.True(t, exp.TotalAmount.Equal(decimal.NewFromFloat(5000.00)))
+	assert.True(t, exp.Amount.Equal(decimal.NewFromFloat(5000.00)))
+	require.NotNil(t, exp.PaymentBreakdown)
+	assert.True(t, exp.PaymentBreakdown.CashAmount.Equal(decimal.NewFromFloat(5000.00)))
+	assert.True(t, exp.PaymentBreakdown.BankAmount.IsZero())
+	assert.Empty(t, exp.PaymentBreakdown.Banks)
+
+	// Financial summary cash balance reduced by 5,000 (initial 50,000 - 5,000 = 45,000)
+	summary, err := finSummary.GetByTenantID(ctx, tenantID)
+	require.NoError(t, err)
+	assert.True(t, summary.CashBalance.Equal(decimal.NewFromFloat(45000.00)))
+
+	// 2. Create Cash-only expense without explicit cash_amount (should default to total amount)
+	exp2, err := svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Coffee and Snacks",
+		TotalAmount:   decimal.NewFromFloat(350.00),
+		PaymentMethod: "cash",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "cash", exp2.PaymentMethod)
+	require.NotNil(t, exp2.PaymentBreakdown)
+	assert.True(t, exp2.PaymentBreakdown.CashAmount.Equal(decimal.NewFromFloat(350.00)))
+}
+
+func TestOperationsService_ExpensePaymentMethods_BankOnly_SingleAndMultipleBanks(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, bankRepo, _, _, _, finSummary := setupTestOperationsServiceWithRepos()
+
+	// Setup 2 active bank accounts with initial balances
+	bank1, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "HDFC Bank",
+		AccountNumber:  "111122223333",
+		OpeningBalance: decimal.NewFromFloat(50000.00),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	bank2, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "State Bank of India",
+		AccountNumber:  "444455556666",
+		OpeningBalance: decimal.NewFromFloat(30000.00),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// 1. Single bank expense: ₹10,000 from HDFC
+	exp1, err := svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Office Internet Lease Line",
+		TotalAmount:   decimal.NewFromFloat(10000.00),
+		PaymentMethod: "bank",
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{
+				BankAccountID: bank1.ID,
+				Amount:        decimal.NewFromFloat(10000.00),
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "bank", exp1.PaymentMethod)
+	require.NotNil(t, exp1.PaymentBreakdown)
+	assert.True(t, exp1.PaymentBreakdown.CashAmount.IsZero())
+	assert.True(t, exp1.PaymentBreakdown.BankAmount.Equal(decimal.NewFromFloat(10000.00)))
+	require.Len(t, exp1.PaymentBreakdown.Banks, 1)
+	assert.Equal(t, bank1.ID, exp1.PaymentBreakdown.Banks[0].BankAccountID)
+	assert.Equal(t, "HDFC Bank", exp1.PaymentBreakdown.Banks[0].BankName)
+
+	// Verify HDFC balance debited by 10,000 (50k - 10k = 40k)
+	b1, err := bankRepo.GetByID(ctx, tenantID, bank1.ID)
+	require.NoError(t, err)
+	assert.True(t, b1.CurrentBalance.Equal(decimal.NewFromFloat(40000.00)))
+
+	// Verify debit transaction recorded
+	txs, totalTxs, err := bankRepo.ListTransactions(ctx, tenantID, bank1.ID, 1, 10)
+	require.NoError(t, err)
+	assert.True(t, totalTxs >= 1)
+	foundDebit := false
+	for _, tx := range txs {
+		if tx.SaleType == "expense" && tx.SaleID != nil && *tx.SaleID == exp1.ID {
+			foundDebit = true
+			assert.Equal(t, "debit", tx.TransactionType)
+			assert.True(t, tx.Amount.Equal(decimal.NewFromFloat(10000.00)))
+		}
+	}
+	assert.True(t, foundDebit, "bank debit transaction must be recorded for expense")
+
+	// 2. Multi-bank expense: ₹15,000 (HDFC ₹10,000 + SBI ₹5,000)
+	exp2, err := svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Quarterly Server Infrastructure",
+		TotalAmount:   decimal.NewFromFloat(15000.00),
+		PaymentMethod: "bank",
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{
+				BankAccountID: bank1.ID,
+				Amount:        decimal.NewFromFloat(10000.00),
+			},
+			{
+				BankAccountID: bank2.ID,
+				Amount:        decimal.NewFromFloat(5000.00),
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "bank", exp2.PaymentMethod)
+	require.NotNil(t, exp2.PaymentBreakdown)
+	assert.True(t, exp2.PaymentBreakdown.BankAmount.Equal(decimal.NewFromFloat(15000.00)))
+	require.Len(t, exp2.PaymentBreakdown.Banks, 2)
+
+	// HDFC balance: 40k - 10k = 30k
+	b1, _ = bankRepo.GetByID(ctx, tenantID, bank1.ID)
+	assert.True(t, b1.CurrentBalance.Equal(decimal.NewFromFloat(30000.00)))
+	// SBI balance: 30k - 5k = 25k
+	b2, _ := bankRepo.GetByID(ctx, tenantID, bank2.ID)
+	assert.True(t, b2.CurrentBalance.Equal(decimal.NewFromFloat(25000.00)))
+
+	// Financial summary bank balance: initial 100k + 50k (bank1) + 30k (bank2) - 10k - 15k = 155k
+	summary, err := finSummary.GetByTenantID(ctx, tenantID)
+	require.NoError(t, err)
+	assert.True(t, summary.BankBalance.Equal(decimal.NewFromFloat(155000.00)))
+}
+
+func TestOperationsService_ExpensePaymentMethods_CashAndBank(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, bankRepo, _, _, _, finSummary := setupTestOperationsServiceWithRepos()
+
+	bank, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "ICICI Bank",
+		AccountNumber:  "999988887777",
+		OpeningBalance: decimal.NewFromFloat(20000.00),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// Expense ₹7,000: Cash ₹2,000 + Bank ₹5,000
+	cashAmt := decimal.NewFromFloat(2000.00)
+	exp, err := svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Office Furniture & Repairs",
+		TotalAmount:   decimal.NewFromFloat(7000.00),
+		PaymentMethod: "cash_bank",
+		CashAmount:    &cashAmt,
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{
+				BankAccountID: bank.ID,
+				Amount:        decimal.NewFromFloat(5000.00),
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "cash_bank", exp.PaymentMethod)
+	require.NotNil(t, exp.PaymentBreakdown)
+	assert.True(t, exp.PaymentBreakdown.CashAmount.Equal(decimal.NewFromFloat(2000.00)))
+	assert.True(t, exp.PaymentBreakdown.BankAmount.Equal(decimal.NewFromFloat(5000.00)))
+	require.Len(t, exp.PaymentBreakdown.Banks, 1)
+
+	// ICICI debited by 5,000 -> 15,000
+	b, err := bankRepo.GetByID(ctx, tenantID, bank.ID)
+	require.NoError(t, err)
+	assert.True(t, b.CurrentBalance.Equal(decimal.NewFromFloat(15000.00)))
+
+	// Financial summary: Cash 50,000 - 2,000 = 48,000; Bank 100,000 + 20,000 (opening) - 5,000 = 115,000
+	summary, err := finSummary.GetByTenantID(ctx, tenantID)
+	require.NoError(t, err)
+	assert.True(t, summary.CashBalance.Equal(decimal.NewFromFloat(48000.00)))
+	assert.True(t, summary.BankBalance.Equal(decimal.NewFromFloat(115000.00)))
+}
+
+func TestOperationsService_ExpensePaymentMethods_ValidationErrors(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, _, _, _, _, _ := setupTestOperationsServiceWithRepos()
+
+	bank, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "Axis Bank",
+		AccountNumber:  "123456789012",
+		OpeningBalance: decimal.NewFromFloat(10000.00),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	inactiveBank, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "Old Closed Bank",
+		AccountNumber:  "987654321098",
+		OpeningBalance: decimal.Zero,
+		Status:         "inactive",
+	})
+	require.NoError(t, err)
+
+	// 1. Amount mismatch (Cash + Bank doesn't equal Total)
+	cashMismatch := decimal.NewFromFloat(2000.00)
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Invalid Breakdown Test",
+		TotalAmount:   decimal.NewFromFloat(10000.00),
+		PaymentMethod: "cash_bank",
+		CashAmount:    &cashMismatch,
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: bank.ID, Amount: decimal.NewFromFloat(5000.00)},
+		}, // Total 7k != 10k
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrCodePaymentAmountMismatch)
+
+	// 2. Negative amount
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Negative Amount Test",
+		TotalAmount:   decimal.NewFromFloat(-500.00),
+		PaymentMethod: "cash",
+	})
+	require.Error(t, err)
+
+	// 3. Zero amount
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Zero Amount Test",
+		TotalAmount:   decimal.Zero,
+		PaymentMethod: "cash",
+	})
+	require.Error(t, err)
+
+	// 4. Invalid payment method
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Invalid Method Test",
+		TotalAmount:   decimal.NewFromFloat(1000.00),
+		PaymentMethod: "crypto",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrCodeInvalidPaymentMethod)
+
+	// 5. Cash only but provided bank payments
+	cashAmt := decimal.NewFromFloat(1000.00)
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Cash with Bank Test",
+		TotalAmount:   decimal.NewFromFloat(1000.00),
+		PaymentMethod: "cash",
+		CashAmount:    &cashAmt,
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: bank.ID, Amount: decimal.NewFromFloat(500.00)},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrCodeInvalidPaymentBreakdown)
+
+	// 6. Bank only but provided non-zero cash amount
+	cashNonZero := decimal.NewFromFloat(500.00)
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Bank with Cash Test",
+		TotalAmount:   decimal.NewFromFloat(1000.00),
+		PaymentMethod: "bank",
+		CashAmount:    &cashNonZero,
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: bank.ID, Amount: decimal.NewFromFloat(1000.00)},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrCodeInvalidPaymentBreakdown)
+
+	// 7. Missing / Non-existent bank account
+	fakeBankID := uuid.New()
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Non-existent Bank Test",
+		TotalAmount:   decimal.NewFromFloat(1000.00),
+		PaymentMethod: "bank",
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: fakeBankID, Amount: decimal.NewFromFloat(1000.00)},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrCodeBankAccountNotFound)
+
+	// 8. Inactive bank account
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Inactive Bank Test",
+		TotalAmount:   decimal.NewFromFloat(1000.00),
+		PaymentMethod: "bank",
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: inactiveBank.ID, Amount: decimal.NewFromFloat(1000.00)},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrCodeBankAccountNotActive)
+
+	// 9. Duplicate bank account in the same expense
+	_, err = svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Duplicate Bank Test",
+		TotalAmount:   decimal.NewFromFloat(2000.00),
+		PaymentMethod: "bank",
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: bank.ID, Amount: decimal.NewFromFloat(1000.00)},
+			{BankAccountID: bank.ID, Amount: decimal.NewFromFloat(1000.00)},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrCodeDuplicateBankAccount)
+}
+
+func TestOperationsService_ExpensePaymentMethods_UpdateAndReversal(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID, _, bankRepo, _, _, _, finSummary := setupTestOperationsServiceWithRepos()
+
+	bank1, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "Bank Alpha",
+		AccountNumber:  "1111",
+		OpeningBalance: decimal.NewFromFloat(20000.00),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	bank2, err := svc.CreateBank(ctx, tenantID, &dto.CreateBankRequest{
+		BankName:       "Bank Beta",
+		AccountNumber:  "2222",
+		OpeningBalance: decimal.NewFromFloat(20000.00),
+		Status:         "active",
+	})
+	require.NoError(t, err)
+
+	// 1. Create initial expense: Total ₹10,000 (Cash ₹2,000 + Bank1 ₹3,000 + Bank2 ₹5,000)
+	cashInitial := decimal.NewFromFloat(2000.00)
+	exp, err := svc.CreateExpense(ctx, tenantID, auth.RoleTenantAdmin, &dto.CreateExpenseRequest{
+		Item:          "Initial Office Renovation",
+		TotalAmount:   decimal.NewFromFloat(10000.00),
+		PaymentMethod: "cash_bank",
+		CashAmount:    &cashInitial,
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: bank1.ID, Amount: decimal.NewFromFloat(3000.00)},
+			{BankAccountID: bank2.ID, Amount: decimal.NewFromFloat(5000.00)},
+		},
+	})
+	require.NoError(t, err)
+
+	// Bank 1: 20k - 3k = 17k
+	b1, _ := bankRepo.GetByID(ctx, tenantID, bank1.ID)
+	assert.True(t, b1.CurrentBalance.Equal(decimal.NewFromFloat(17000.00)))
+	// Bank 2: 20k - 5k = 15k
+	b2, _ := bankRepo.GetByID(ctx, tenantID, bank2.ID)
+	assert.True(t, b2.CurrentBalance.Equal(decimal.NewFromFloat(15000.00)))
+
+	// 2. Update expense to Total ₹8,000 (Cash ₹1,000 + Bank1 ₹7,000, Bank2 removed)
+	newTotal := decimal.NewFromFloat(8000.00)
+	newCash := decimal.NewFromFloat(1000.00)
+	updatedExp, err := svc.UpdateExpense(ctx, tenantID, exp.ID, auth.RoleTenantAdmin, &dto.UpdateExpenseRequest{
+		Item:          "Updated Office Renovation",
+		TotalAmount:   &newTotal,
+		PaymentMethod: "cash_bank",
+		CashAmount:    &newCash,
+		BankPayments: []dto.BankPaymentSplitDTO{
+			{BankAccountID: bank1.ID, Amount: decimal.NewFromFloat(7000.00)},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Office Renovation", updatedExp.Item)
+	assert.True(t, updatedExp.TotalAmount.Equal(decimal.NewFromFloat(8000.00)))
+	require.NotNil(t, updatedExp.PaymentBreakdown)
+	assert.True(t, updatedExp.PaymentBreakdown.CashAmount.Equal(decimal.NewFromFloat(1000.00)))
+	assert.True(t, updatedExp.PaymentBreakdown.BankAmount.Equal(decimal.NewFromFloat(7000.00)))
+	require.Len(t, updatedExp.PaymentBreakdown.Banks, 1)
+
+	// Bank 1: should reflect initial 20k - new 7k = 13k
+	b1, _ = bankRepo.GetByID(ctx, tenantID, bank1.ID)
+	assert.True(t, b1.CurrentBalance.Equal(decimal.NewFromFloat(13000.00)))
+
+	// Bank 2: should be completely restored to 20k (previous 5k refunded)
+	b2, _ = bankRepo.GetByID(ctx, tenantID, bank2.ID)
+	assert.True(t, b2.CurrentBalance.Equal(decimal.NewFromFloat(20000.00)))
+
+	// Financial Summary: Cash 50k - 1,000 = 49k; Bank 100k + 20k + 20k - 7k = 133k
+	summary, err := finSummary.GetByTenantID(ctx, tenantID)
+	require.NoError(t, err)
+	assert.True(t, summary.CashBalance.Equal(decimal.NewFromFloat(49000.00)))
+	assert.True(t, summary.BankBalance.Equal(decimal.NewFromFloat(133000.00)))
+
+	// 3. Delete expense: balances must be completely restored!
+	err = svc.DeleteExpense(ctx, tenantID, exp.ID, auth.RoleTenantAdmin)
+	require.NoError(t, err)
+
+	b1, _ = bankRepo.GetByID(ctx, tenantID, bank1.ID)
+	assert.True(t, b1.CurrentBalance.Equal(decimal.NewFromFloat(20000.00)), "Bank 1 balance must be restored on expense deletion")
+
+	summary, _ = finSummary.GetByTenantID(ctx, tenantID)
+	assert.True(t, summary.CashBalance.Equal(decimal.NewFromFloat(50000.00)), "Cash balance must be restored on expense deletion")
+	assert.True(t, summary.BankBalance.Equal(decimal.NewFromFloat(140000.00)), "Bank balance must be restored on expense deletion")
 }

@@ -185,6 +185,9 @@ func (r *threadSafeBankRepo) List(ctx context.Context, tenantID uuid.UUID, page,
 func (r *threadSafeBankRepo) ListTransactions(ctx context.Context, tenantID, bankID uuid.UUID, page, pageSize int) ([]domain.BankTransaction, int64, error) {
 	return nil, 0, nil
 }
+func (r *threadSafeBankRepo) DeleteTransactionsBySaleID(ctx context.Context, tenantID, saleID uuid.UUID) error {
+	return nil
+}
 
 type threadSafeLineSaleRepo struct {
 	mu    sync.RWMutex
@@ -280,6 +283,9 @@ func (r *threadSafeExpenseRepo) GetByID(ctx context.Context, tenantID, id uuid.U
 	return nil, nil
 }
 func (r *threadSafeExpenseRepo) Update(ctx context.Context, exp *domain.TenantExpense) error {
+	return nil
+}
+func (r *threadSafeExpenseRepo) UpdateWithPayments(ctx context.Context, exp *domain.TenantExpense, payments []domain.TenantExpensePayment) error {
 	return nil
 }
 func (r *threadSafeExpenseRepo) Delete(ctx context.Context, tenantID, id uuid.UUID) error { return nil }

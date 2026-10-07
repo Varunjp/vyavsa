@@ -140,18 +140,80 @@ type TenantPurchasePayment struct {
 	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
+// ExpensePaymentBreakdown represents the detailed payment breakdown for an expense
+type ExpensePaymentBreakdown struct {
+	CashAmount decimal.Decimal        `json:"cash_amount"`
+	BankAmount decimal.Decimal        `json:"bank_amount"`
+	Banks      []ExpenseBankBreakdown `json:"banks"`
+}
+
+// ExpenseBankBreakdown represents individual bank payment breakdown in an expense
+type ExpenseBankBreakdown struct {
+	BankAccountID uuid.UUID       `json:"bank_account_id"`
+	BankName      string          `json:"bank_name"`
+	Amount        decimal.Decimal `json:"amount"`
+}
+
 // TenantExpense represents operating and miscellaneous expenses
 type TenantExpense struct {
-	ID           uuid.UUID              `json:"id"`
-	TenantID     uuid.UUID              `json:"tenant_id"`
-	Item         string                 `json:"item"`
-	Category     string                 `json:"category,omitempty"`
-	EmployeeID   *uuid.UUID             `json:"employee_id,omitempty"`
-	EmployeeName string                 `json:"employee_name,omitempty"`
-	TotalAmount  decimal.Decimal        `json:"total_amount"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	Payments     []TenantExpensePayment `json:"payments,omitempty"`
+	ID               uuid.UUID                `json:"id"`
+	TenantID         uuid.UUID                `json:"tenant_id"`
+	Item             string                   `json:"item"`
+	Category         string                   `json:"category,omitempty"`
+	EmployeeID       *uuid.UUID               `json:"employee_id,omitempty"`
+	EmployeeName     string                   `json:"employee_name,omitempty"`
+	TotalAmount      decimal.Decimal          `json:"total_amount"`
+	Amount           decimal.Decimal          `json:"amount"` // alias for TotalAmount
+	PaymentMethod    string                   `json:"payment_method"`
+	CreatedAt        time.Time                `json:"created_at"`
+	UpdatedAt        time.Time                `json:"updated_at"`
+	Payments         []TenantExpensePayment   `json:"payments,omitempty"`
+	PaymentBreakdown *ExpensePaymentBreakdown `json:"payment_breakdown,omitempty"`
+}
+
+// BuildPaymentBreakdown populates Amount, PaymentBreakdown, and ensures consistent PaymentMethod
+func (e *TenantExpense) BuildPaymentBreakdown() {
+	if e.Amount.IsZero() && !e.TotalAmount.IsZero() {
+		e.Amount = e.TotalAmount
+	} else if e.TotalAmount.IsZero() && !e.Amount.IsZero() {
+		e.TotalAmount = e.Amount
+	}
+
+	var cashAmount, bankAmount decimal.Decimal
+	banks := make([]ExpenseBankBreakdown, 0)
+
+	for _, p := range e.Payments {
+		if p.PaymentMethod == "cash" {
+			cashAmount = cashAmount.Add(p.Amount)
+		} else if p.PaymentMethod == "bank" {
+			bankAmount = bankAmount.Add(p.Amount)
+			var bID uuid.UUID
+			if p.BankID != nil {
+				bID = *p.BankID
+			}
+			banks = append(banks, ExpenseBankBreakdown{
+				BankAccountID: bID,
+				BankName:      p.BankName,
+				Amount:        p.Amount,
+			})
+		}
+	}
+
+	if e.PaymentMethod == "" {
+		if cashAmount.GreaterThan(decimal.Zero) && bankAmount.GreaterThan(decimal.Zero) {
+			e.PaymentMethod = "cash_bank"
+		} else if bankAmount.GreaterThan(decimal.Zero) {
+			e.PaymentMethod = "bank"
+		} else {
+			e.PaymentMethod = "cash"
+		}
+	}
+
+	e.PaymentBreakdown = &ExpensePaymentBreakdown{
+		CashAmount: cashAmount,
+		BankAmount: bankAmount,
+		Banks:      banks,
+	}
 }
 
 // TenantExpensePayment represents payment towards an expense

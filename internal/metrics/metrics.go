@@ -659,6 +659,28 @@ func (m *Metrics) RecordPurchasePaymentFailed(reason string) {
 	}
 }
 
+// RecordExpensePayment records a successful expense payment disbursement
+func (m *Metrics) RecordExpensePayment(method string, amount float64) {
+	if m == nil {
+		return
+	}
+	if method == "cash" && m.cashPaymentCreatedTotal != nil {
+		m.cashPaymentCreatedTotal.Inc()
+	} else if (method == "bank" || method == "upi" || method == "online" || method == "cash_bank") && m.bankPaymentCreatedTotal != nil {
+		m.bankPaymentCreatedTotal.Inc()
+	}
+}
+
+// IncExpenseCreated increments the expenses counter for a given category
+func (m *Metrics) IncExpenseCreated(category string) {
+	if m != nil && m.expensesTotal != nil {
+		if category == "" {
+			category = "general"
+		}
+		m.expensesTotal.WithLabelValues(category).Inc()
+	}
+}
+
 // RegisterDBPoolMetrics registers dynamic PostgreSQL pool metrics collectors
 func (m *Metrics) RegisterDBPoolMetrics(pool *pgxpool.Pool) {
 	collector := &dbPoolCollector{pool: pool}
