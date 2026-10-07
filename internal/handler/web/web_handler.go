@@ -81,3 +81,9 @@ func (h *Handler) ShowPlatformDashboard(c *gin.Context) {
 	setNoCacheHeaders(c)
 	c.HTML(http.StatusOK, "platform_dashboard.html", h.defaultData())
 }
+
+// ShowDailyReport renders the daily business report page (GET /reports/daily)
+func (h *Handler) ShowDailyReport(c *gin.Context) {
+	setNoCacheHeaders(c)
+	c.HTML(http.StatusOK, "daily_report.html", h.defaultData())
+}

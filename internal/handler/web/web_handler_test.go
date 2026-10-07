@@ -31,6 +31,7 @@ func setupTestWebRouter(t *testing.T) (*gin.Engine, *web.Handler) {
 	router.GET("/reset-password", handler.ShowResetPassword)
 	router.GET("/platform/login", handler.ShowPlatformLogin)
 	router.GET("/dashboard", handler.ShowDashboard)
+	router.GET("/reports/daily", handler.ShowDailyReport)
 	router.GET("/platform/dashboard", handler.ShowPlatformDashboard)
 	router.GET("/platform/tenants", handler.ShowPlatformDashboard)
 	router.GET("/platform/tenants/:id", handler.ShowPlatformDashboard)
@@ -222,4 +223,21 @@ func TestWebHandler_ShowPlatformDashboard(t *testing.T) {
 			assert.Contains(t, body, "platform-sidebar")
 		})
 	}
+}
+
+func TestWebHandler_ShowDailyReport(t *testing.T) {
+	router, _ := setupTestWebRouter(t)
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/reports/daily", nil)
+	require.NoError(t, err)
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "Daily Business Report")
+	assert.Contains(t, body, "Report Date:")
+	assert.Contains(t, body, "Download PDF")
+	assert.Contains(t, body, "Total Available Funds")
 }

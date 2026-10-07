@@ -27,6 +27,7 @@ import (
 	"github.com/Varunjp/vyavsa/internal/mailer"
 	"github.com/Varunjp/vyavsa/internal/metrics"
 	"github.com/Varunjp/vyavsa/internal/middleware"
+	"github.com/Varunjp/vyavsa/internal/pdf"
 	"github.com/Varunjp/vyavsa/internal/repository"
 	postgresRepo "github.com/Varunjp/vyavsa/internal/repository/postgres"
 	redisRepo "github.com/Varunjp/vyavsa/internal/repository/redis"
@@ -168,6 +169,7 @@ func (s *Server) setupWebRoutes() {
 	s.router.GET("/reset-password", webHandler.ShowResetPassword)
 	s.router.GET("/platform/login", webHandler.ShowPlatformLogin)
 	s.router.GET("/dashboard", webHandler.ShowDashboard)
+	s.router.GET("/reports/daily", webHandler.ShowDailyReport)
 
 	// Platform Admin Web Views
 	s.router.GET("/platform", func(c *gin.Context) {
@@ -214,6 +216,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	var statsRepo repository.TenantDailyStatsRepository
 	var advRepo repository.EmployeeAdvanceRepository
 	var otRepo repository.EmployeeOvertimeRepository
+	var reportRepo repository.DailyReportRepository
 
 	if s.db != nil && s.db.Pool != nil {
 		platformAdminRepo = postgresRepo.NewPlatformAdminPostgres(s.db.Pool)
@@ -241,6 +244,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		otRepo = postgresRepo.NewEmployeeOvertimePostgres(s.db.Pool)
 		salaryRepo = postgresRepo.NewEmployeeSalaryPostgres(s.db.Pool)
 		statsRepo = postgresRepo.NewTenantDailyStatsPostgres(s.db.Pool)
+		reportRepo = postgresRepo.NewDailyReportPostgres(s.db.Pool)
 	}
 
 	var blacklistRepo repository.TokenBlacklistRepository
@@ -327,12 +331,22 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		opsService.SetLocation(s.cfg.App.Location)
 	}
 
+	reportPDFGen := pdf.NewPDFGenerator()
+	reportService := service.NewDailyReportService(reportRepo, reportPDFGen, s.log.Logger)
+	if s.metrics != nil {
+		reportService.SetMetrics(s.metrics)
+	}
+	if s.cfg.App.Location != nil {
+		reportService.SetLocation(s.cfg.App.Location)
+	}
+
 	// Handlers
 	authHandler := authHandlerPkg.NewHandler(authService)
 	planHandler := platformHandlerPkg.NewPlanHandler(planService)
 	platformTenantHandler := platformHandlerPkg.NewTenantHandler(tenantService)
 	tenantHandler := tenantHandlerPkg.NewTenantHandler(tenantService)
 	opsHandler := tenantHandlerPkg.NewOperationsHandler(opsService)
+	reportHandler := tenantHandlerPkg.NewReportHandler(reportService)
 
 	// 1. Public Endpoints
 	authGroup := apiV1.Group("/auth")
@@ -490,6 +504,10 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 			tenant.GET("/dashboard/overview", opsHandler.GetTodayOverview)
 			tenant.GET("/metrics", opsHandler.GetFinancialMetrics)
 
+			// Daily Financial & Operations Report (JSON & PDF)
+			tenant.GET("/reports/daily", reportHandler.GetDailyReport)
+			tenant.GET("/reports/daily/pdf", reportHandler.DownloadDailyReportPDF)
+
 			// ----------------------------------------------------
 			// Tenant Administrator Only Routes
 			// ----------------------------------------------------
@@ -546,6 +564,15 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 				tenantAdmin.GET("/salaries/:employee_id/payments", opsHandler.ListSalaryPayments)
 				tenantAdmin.GET("/salary-payments", opsHandler.ListSalaryPayments)
 			}
+		}
+
+		// Also support direct /api/v1/reports/daily and /api/v1/reports/daily/pdf endpoints
+		reportsGroup := protected.Group("/reports")
+		reportsGroup.Use(middleware.RequireTenantUser())
+		reportsGroup.Use(middleware.RequireActivePlan(tenantPlanService))
+		{
+			reportsGroup.GET("/daily", reportHandler.GetDailyReport)
+			reportsGroup.GET("/daily/pdf", reportHandler.DownloadDailyReportPDF)
 		}
 	}
 }

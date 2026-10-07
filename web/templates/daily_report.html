@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Business Report — Vyavsa</title>
+  <meta name="description" content="Generate and download authoritative daily business reports with complete line sales, counter sales, purchases, expenses, and bank balances.">
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+
+  <!-- Immediate Auth Guard -->
+  <script>
+    (function() {
+      var t1 = localStorage.getItem('vyavsa_access_token');
+      var t2 = localStorage.getItem('vyavsa_platform_access_token');
+      if (!t1 && !t2) {
+        window.location.replace('/login');
+      } else if (!t1 && t2) {
+        window.location.replace('/platform/dashboard');
+      }
+    })();
+  </script>
+
+  <style>
+    .report-shell {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-color: var(--color-bg);
+      color: var(--color-text-main);
+    }
+    .report-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+      width: 100%;
+    }
+    .report-header-section {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+    }
+    .report-title-group h1 {
+      font-size: 1.75rem;
+      font-weight: 800;
+      color: var(--color-text-main);
+      letter-spacing: -0.025em;
+      margin-bottom: 0.35rem;
+    }
+    .report-title-group p {
+      color: var(--color-text-muted);
+      font-size: 0.9375rem;
+    }
+    .report-ctrl-panel {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-xs);
+      margin-bottom: 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.25rem;
+    }
+    .date-picker-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .date-input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .date-input-wrap input[type="date"] {
+      font-family: var(--font-sans);
+      font-size: 0.9375rem;
+      font-weight: 600;
+      padding: 0.65rem 1rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-surface);
+      color: var(--color-text-main);
+      outline: none;
+      transition: all var(--transition-fast);
+    }
+    .date-input-wrap input[type="date"]:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px var(--color-primary-glow);
+    }
+    .btn-quick-date {
+      padding: 0.55rem 0.85rem;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      background: var(--color-surface-hover);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      color: var(--color-text-muted);
+      transition: all var(--transition-fast);
+    }
+    .btn-quick-date:hover {
+      background: var(--color-surface-active);
+      color: var(--color-text-main);
+    }
+    .report-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .btn-generate {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      color: var(--color-text-main);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .btn-generate:hover:not(:disabled) {
+      background: var(--color-surface-hover);
+      border-color: #cbd5e1;
+    }
+    .btn-download-pdf {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.35rem;
+      font-size: 0.875rem;
+      font-weight: 700;
+      background: var(--color-primary);
+      color: #ffffff;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: all var(--transition-fast);
+    }
+    .btn-download-pdf:hover:not(:disabled) {
+      background: var(--color-primary-hover);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-1px);
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+    .kpi-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .report-kpi-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 1.15rem 1.25rem;
+      box-shadow: var(--shadow-xs);
+      transition: all var(--transition-fast);
+    }
+    .report-kpi-card:hover {
+      box-shadow: var(--shadow-sm);
+      border-color: #cbd5e1;
+    }
+    .report-kpi-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .report-kpi-value {
+      font-size: 1.375rem;
+      font-weight: 800;
+      color: var(--color-text-main);
+      letter-spacing: -0.02em;
+    }
+    .available-funds-card {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #ffffff;
+      border-radius: var(--radius-md);
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2rem;
+      box-shadow: var(--shadow-md);
+    }
+    .available-funds-label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.25rem;
+    }
+    .available-funds-val {
+      font-size: 1.75rem;
+      font-weight: 800;
+      color: #38bdf8;
+      letter-spacing: -0.025em;
+    }
+    .report-table-section {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      margin-bottom: 1.75rem;
+      box-shadow: var(--shadow-xs);
+    }
+    .report-table-header {
+      padding: 1rem 1.25rem;
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .report-table-title {
+      font-size: 0.9375rem;
+      font-weight: 700;
+      color: var(--color-text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .badge-count {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      padding: 0.15rem 0.5rem;
+      border-radius: var(--radius-full);
+      background: var(--color-surface-hover);
+      color: var(--color-text-muted);
+      border: 1px solid var(--color-border);
+    }
+    .report-table-subtotal {
+      font-size: 0.875rem;
+      font-weight: 700;
+      color: var(--color-text-main);
+    }
+    .table-responsive {
+      overflow-x: auto;
+    }
+    .rep-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+    .rep-table th {
+      background: #f8fafc;
+      padding: 0.65rem 1rem;
+      text-align: left;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+      border-bottom: 1px solid var(--color-border);
+      white-space: nowrap;
+    }
+    .rep-table th.text-right, .rep-table td.text-right {
+      text-align: right;
+    }
+    .rep-table th.text-center, .rep-table td.text-center {
+      text-align: center;
+    }
+    .rep-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--color-border-subtle);
+      color: var(--color-text-main);
+      white-space: nowrap;
+    }
+    .rep-table tr:hover td {
+      background-color: #fbfcfe;
+    }
+    .rep-empty {
+      padding: 2rem;
+      text-align: center;
+      color: var(--color-text-subtle);
+      font-size: 0.875rem;
+      font-style: italic;
+    }
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top-color: #ffffff;
+      animation: spin 0.8s linear infinite;
+    }
+    .spinner-dark {
+      border: 2px solid rgba(0,0,0,0.1);
+      border-top-color: var(--color-text-main);
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .banner-alert {
+      padding: 0.875rem 1.25rem;
+      border-radius: var(--radius-sm);
+      margin-bottom: 1.5rem;
+      font-size: 0.875rem;
+      display: none;
+    }
+    .banner-alert.error {
+      background: var(--color-error-bg);
+      border: 1px solid var(--color-error-border);
+      color: var(--color-error-text);
+      display: block;
+    }
+    .banner-alert.success {
+      background: var(--color-success-bg);
+      border: 1px solid var(--color-success-border);
+      color: var(--color-success-text);
+      display: block;
+    }
+  </style>
+</head>
+<body class="report-shell">
+
+  <!-- Top Navigation Bar -->
+  <header class="app-topbar">
+    <div class="topbar-left">
+      <a href="/dashboard" class="topbar-brand" title="Return to Dashboard">
+        <img src="/static/images/logo.svg" alt="Vyavsa" width="28" height="28">
+        <span>Vyavsa</span>
+      </a>
+      <div class="topbar-business-pill">
+        <span class="topbar-business-dot"></span>
+        <span id="topbar-business-name">Business Operations</span>
+      </div>
+      <span id="user-role-badge" class="status-badge paid">Operator</span>
+    </div>
+
+    <div class="topbar-right">
+      <a href="/dashboard" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem;">
+        <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        Back to Dashboard
+      </a>
+      <button type="button" id="logout-btn" class="btn btn-secondary btn-sm">Sign Out</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="report-container">
+    
+    <!-- Header Section -->
+    <div class="report-header-section">
+      <div class="report-title-group">
+        <h1>Daily Business Report</h1>
+        <p>Complete itemized transactions, cash movement, and bank balance breakdown for any calendar date.</p>
+      </div>
+    </div>
+
+    <!-- Alert Banner -->
+    <div id="alert-banner" class="banner-alert"></div>
+
+    <!-- Date Selection & Action Panel -->
+    <div class="report-ctrl-panel">
+      <div class="date-picker-group">
+        <label for="report-date-picker" style="font-weight: 700; font-size: 0.875rem;">Report Date:</label>
+        <div class="date-input-wrap">
+          <input type="date" id="report-date-picker">
+        </div>
+        <button type="button" class="btn-quick-date" id="btn-today">Today</button>
+        <button type="button" class="btn-quick-date" id="btn-yesterday">Yesterday</button>
+      </div>
+
+      <div class="report-actions">
+        <button type="button" class="btn-generate" id="btn-generate-preview">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          <span id="btn-generate-text">Load Report</span>
+        </button>
+        <button type="button" class="btn-download-pdf" id="btn-download-pdf">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          <span id="btn-download-text">Download PDF</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Financial KPI Summary Cards -->
+    <div class="kpi-summary-grid">
+      <div class="report-kpi-card">
+        <div class="report-kpi-label">
+          <span>Line Sales</span>
+          <span style="color: var(--color-primary); font-size: 0.9rem;">●</span>
+        </div>
+        <div class="report-kpi-value" id="kpi-line-sales">₹0.00</div>
+      </div>
+      <div class="report-kpi-card">
+        <div class="report-kpi-label">
+          <span>Counter Sales</span>
+          <span style="color: var(--color-primary); font-size: 0.9rem;">●</span>
+        </div>
+        <div class="report-kpi-value" id="kpi-counter-sales">₹0.00</div>
+      </div>
+      <div class="report-kpi-card">
+        <div class="report-kpi-label">
+          <span>Purchases</span>
+          <span style="color: #e11d48; font-size: 0.9rem;">●</span>
+        </div>
+        <div class="report-kpi-value" id="kpi-purchases">₹0.00</div>
+      </div>
+      <div class="report-kpi-card">
+        <div class="report-kpi-label">
+          <span>Expenses</span>
+          <span style="color: #ea580c; font-size: 0.9rem;">●</span>
+        </div>
+        <div class="report-kpi-value" id="kpi-expenses">₹0.00</div>
+      </div>
+      <div class="report-kpi-card">
+        <div class="report-kpi-label">
+          <span>Closing Cash</span>
+          <span style="color: var(--color-success); font-size: 0.9rem;">●</span>
+        </div>
+        <div class="report-kpi-value" id="kpi-cash-balance">₹0.00</div>
+      </div>
+      <div class="report-kpi-card">
+        <div class="report-kpi-label">
+          <span>Bank Balance</span>
+          <span style="color: #0284c7; font-size: 0.9rem;">●</span>
+        </div>
+        <div class="report-kpi-value" id="kpi-bank-balance">₹0.00</div>
+      </div>
+    </div>
+
+    <!-- Available Funds Card -->
+    <div class="available-funds-card">
+      <div>
+        <div class="available-funds-label">Total Available Funds (Cash + Bank)</div>
+        <div style="font-size: 0.8125rem; color: #cbd5e1;">Consolidated business liquidity position for <span id="report-date-display">Today</span></div>
+      </div>
+      <div class="available-funds-val" id="kpi-available-funds">₹0.00</div>
+    </div>
+
+    <!-- Section 1: Line Sales -->
+    <div class="report-table-section">
+      <div class="report-table-header">
+        <div class="report-table-title">
+          <span>1. Line Sales</span>
+          <span class="badge-count" id="count-line-sales">0</span>
+        </div>
+        <div class="report-table-subtotal" id="subtotal-line-sales">Total: ₹0.00</div>
+      </div>
+      <div class="table-responsive">
+        <table class="rep-table">
+          <thead>
+            <tr>
+              <th class="text-center" style="width: 40px;">#</th>
+              <th class="text-center" style="width: 70px;">Time</th>
+              <th>Invoice</th>
+              <th>Customer</th>
+              <th>Route / Salesman</th>
+              <th class="text-right">Amount</th>
+              <th class="text-right">Cash In</th>
+              <th class="text-right">Bank / UPI</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-line-sales">
+            <tr><td colspan="8" class="rep-empty">No line sales recorded for this date.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 2: Counter Sales -->
+    <div class="report-table-section">
+      <div class="report-table-header">
+        <div class="report-table-title">
+          <span>2. Counter Sales</span>
+          <span class="badge-count" id="count-counter-sales">0</span>
+        </div>
+        <div class="report-table-subtotal" id="subtotal-counter-sales">Total: ₹0.00</div>
+      </div>
+      <div class="table-responsive">
+        <table class="rep-table">
+          <thead>
+            <tr>
+              <th class="text-center" style="width: 40px;">#</th>
+              <th class="text-center" style="width: 70px;">Time</th>
+              <th>Receipt</th>
+              <th>Item</th>
+              <th class="text-right">Amount</th>
+              <th class="text-right">Cash</th>
+              <th class="text-right">Bank / UPI</th>
+              <th class="text-right">Due / Account</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-counter-sales">
+            <tr><td colspan="8" class="rep-empty">No counter sales recorded for this date.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 3: Purchases -->
+    <div class="report-table-section">
+      <div class="report-table-header">
+        <div class="report-table-title">
+          <span>3. Purchases</span>
+          <span class="badge-count" id="count-purchases">0</span>
+        </div>
+        <div class="report-table-subtotal" id="subtotal-purchases">Total: ₹0.00</div>
+      </div>
+      <div class="table-responsive">
+        <table class="rep-table">
+          <thead>
+            <tr>
+              <th class="text-center" style="width: 40px;">#</th>
+              <th class="text-center" style="width: 70px;">Time</th>
+              <th>Reference</th>
+              <th>Supplier</th>
+              <th>Item</th>
+              <th class="text-center">Qty</th>
+              <th class="text-right">Amount</th>
+              <th class="text-right">Paid</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-purchases">
+            <tr><td colspan="8" class="rep-empty">No purchases recorded for this date.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 4: Expenses -->
+    <div class="report-table-section">
+      <div class="report-table-header">
+        <div class="report-table-title">
+          <span>4. Expenses</span>
+          <span class="badge-count" id="count-expenses">0</span>
+        </div>
+        <div class="report-table-subtotal" id="subtotal-expenses">Total: ₹0.00</div>
+      </div>
+      <div class="table-responsive">
+        <table class="rep-table">
+          <thead>
+            <tr>
+              <th class="text-center" style="width: 40px;">#</th>
+              <th class="text-center" style="width: 70px;">Time</th>
+              <th>Reference</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Staff / Mode</th>
+              <th class="text-right">Amount</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-expenses">
+            <tr><td colspan="7" class="rep-empty">No expenses recorded for this date.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 5: Bank Balances -->
+    <div class="report-table-section">
+      <div class="report-table-header">
+        <div class="report-table-title">
+          <span>5. Bank Balances</span>
+          <span class="badge-count" id="count-banks">0</span>
+        </div>
+        <div class="report-table-subtotal" id="subtotal-banks">Total Bank: ₹0.00</div>
+      </div>
+      <div class="table-responsive">
+        <table class="rep-table">
+          <thead>
+            <tr>
+              <th>Bank Name</th>
+              <th class="text-center">Account Number</th>
+              <th class="text-right">Current Balance</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-banks">
+            <tr><td colspan="3" class="rep-empty">No bank accounts found.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script>
+    (function() {
+      // Elements
+      const datePicker = document.getElementById('report-date-picker');
+      const btnToday = document.getElementById('btn-today');
+      const btnYesterday = document.getElementById('btn-yesterday');
+      const btnGenerate = document.getElementById('btn-generate-preview');
+      const btnDownload = document.getElementById('btn-download-pdf');
+      const btnGenerateText = document.getElementById('btn-generate-text');
+      const btnDownloadText = document.getElementById('btn-download-text');
+      const alertBanner = document.getElementById('alert-banner');
+      const logoutBtn = document.getElementById('logout-btn');
+
+      // Helper to format currency
+      function fmtCurrency(val) {
+        const num = parseFloat(val) || 0;
+        return '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
+      function showAlert(msg, isError = false) {
+        alertBanner.textContent = msg;
+        alertBanner.className = isError ? 'banner-alert error' : 'banner-alert success';
+        alertBanner.style.display = 'block';
+        if (!isError) {
+          setTimeout(() => { alertBanner.style.display = 'none'; }, 5000);
+        }
+      }
+
+      function clearAlert() {
+        alertBanner.style.display = 'none';
+        alertBanner.textContent = '';
+      }
+
+      // Format date as YYYY-MM-DD
+      function toDateInputValue(d) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+
+      // Initialize default date to today
+      const today = new Date();
+      datePicker.value = toDateInputValue(today);
+
+      btnToday.addEventListener('click', () => {
+        datePicker.value = toDateInputValue(new Date());
+        loadReport();
+      });
+
+      btnYesterday.addEventListener('click', () => {
+        const y = new Date();
+        y.setDate(y.getDate() - 1);
+        datePicker.value = toDateInputValue(y);
+        loadReport();
+      });
+
+      // Load Profile for Business Name
+      async function loadProfile() {
+        try {
+          const res = await API.get('/tenant/profile');
+          if (res && res.data) {
+            const bName = res.data.name || 'Business Operations';
+            document.getElementById('topbar-business-name').textContent = bName;
+          }
+        } catch (e) {
+          console.error('Failed to load profile', e);
+        }
+      }
+
+      // Load Report Data
+      async function loadReport() {
+        const dateVal = datePicker.value;
+        if (!dateVal) {
+          showAlert('Please select a report date.', true);
+          return;
+        }
+
+        clearAlert();
+        btnGenerate.disabled = true;
+        btnGenerateText.innerHTML = '<span class="spinner spinner-dark"></span> Loading...';
+
+        try {
+          const res = await API.get('/tenant/reports/daily?date=' + encodeURIComponent(dateVal));
+          if (!res || !res.data) {
+            throw new Error(res?.message || 'Failed to retrieve report data');
+          }
+
+          const rep = res.data;
+          renderReport(rep);
+        } catch (err) {
+          console.error(err);
+          showAlert(err.message || 'Error generating report.', true);
+        } finally {
+          btnGenerate.disabled = false;
+          btnGenerateText.textContent = 'Load Report';
+        }
+      }
+
+      function renderReport(rep) {
+        document.getElementById('report-date-display').textContent = rep.formatted_date || rep.date;
+
+        // Financial Summary
+        const s = rep.financial_summary || {};
+        document.getElementById('kpi-line-sales').textContent = fmtCurrency(s.total_line_sales);
+        document.getElementById('kpi-counter-sales').textContent = fmtCurrency(s.total_counter_sales);
+        document.getElementById('kpi-purchases').textContent = fmtCurrency(s.total_purchases);
+        document.getElementById('kpi-expenses').textContent = fmtCurrency(s.total_expenses);
+        document.getElementById('kpi-cash-balance').textContent = fmtCurrency(s.cash_balance);
+        document.getElementById('kpi-bank-balance').textContent = fmtCurrency(s.total_bank_balance);
+        document.getElementById('kpi-available-funds').textContent = fmtCurrency(s.total_available_funds);
+
+        // 1. Line Sales
+        const ls = rep.line_sales || [];
+        document.getElementById('count-line-sales').textContent = ls.length;
+        document.getElementById('subtotal-line-sales').textContent = 'Total: ' + fmtCurrency(s.total_line_sales);
+        const lsBody = document.getElementById('tbody-line-sales');
+        if (ls.length === 0) {
+          lsBody.innerHTML = '<tr><td colspan="8" class="rep-empty">No line sales recorded for this date.</td></tr>';
+        } else {
+          lsBody.innerHTML = ls.map((item, idx) => {
+            const notes = [item.route, item.salesman, item.note].filter(Boolean).join(' • ');
+            return `
+              <tr>
+                <td class="text-center">${idx + 1}</td>
+                <td class="text-center">${item.time || '-'}</td>
+                <td style="font-family: var(--font-mono); font-weight: 600;">${item.invoice_number}</td>
+                <td style="font-weight: 600;">${item.customer_name}</td>
+                <td style="color: var(--color-text-muted);">${notes || '-'}</td>
+                <td class="text-right" style="font-weight: 700;">${fmtCurrency(item.total_amount)}</td>
+                <td class="text-right">${fmtCurrency(item.cash_in)}</td>
+                <td class="text-right">${fmtCurrency(item.bank_amount)}</td>
+              </tr>
+            `;
+          }).join('');
+        }
+
+        // 2. Counter Sales
+        const cs = rep.counter_sales || [];
+        document.getElementById('count-counter-sales').textContent = cs.length;
+        document.getElementById('subtotal-counter-sales').textContent = 'Total: ' + fmtCurrency(s.total_counter_sales);
+        const csBody = document.getElementById('tbody-counter-sales');
+        if (cs.length === 0) {
+          csBody.innerHTML = '<tr><td colspan="8" class="rep-empty">No counter sales recorded for this date.</td></tr>';
+        } else {
+          csBody.innerHTML = cs.map((item, idx) => `
+            <tr>
+              <td class="text-center">${idx + 1}</td>
+              <td class="text-center">${item.time || '-'}</td>
+              <td style="font-family: var(--font-mono); font-weight: 600;">${item.receipt_number}</td>
+              <td style="font-weight: 600;">${item.item}</td>
+              <td class="text-right" style="font-weight: 700;">${fmtCurrency(item.total_amount)}</td>
+              <td class="text-right">${fmtCurrency(item.cash)}</td>
+              <td class="text-right">${fmtCurrency(item.bank_amount)}</td>
+              <td class="text-right">${fmtCurrency(item.account)}</td>
+            </tr>
+          `).join('');
+        }
+
+        // 3. Purchases
+        const pur = rep.purchases || [];
+        document.getElementById('count-purchases').textContent = pur.length;
+        document.getElementById('subtotal-purchases').textContent = 'Total: ' + fmtCurrency(s.total_purchases);
+        const purBody = document.getElementById('tbody-purchases');
+        if (pur.length === 0) {
+          purBody.innerHTML = '<tr><td colspan="8" class="rep-empty">No purchases recorded for this date.</td></tr>';
+        } else {
+          purBody.innerHTML = pur.map((item, idx) => `
+            <tr>
+              <td class="text-center">${idx + 1}</td>
+              <td class="text-center">${item.time || '-'}</td>
+              <td style="font-family: var(--font-mono); font-weight: 600;">${item.reference}</td>
+              <td style="font-weight: 600;">${item.supplier_name}</td>
+              <td>${item.item}</td>
+              <td class="text-center">${item.quantity}</td>
+              <td class="text-right" style="font-weight: 700;">${fmtCurrency(item.total_amount)}</td>
+              <td class="text-right">${fmtCurrency(item.total_paid)}</td>
+            </tr>
+          `).join('');
+        }
+
+        // 4. Expenses
+        const exp = rep.expenses || [];
+        document.getElementById('count-expenses').textContent = exp.length;
+        document.getElementById('subtotal-expenses').textContent = 'Total: ' + fmtCurrency(s.total_expenses);
+        const expBody = document.getElementById('tbody-expenses');
+        if (exp.length === 0) {
+          expBody.innerHTML = '<tr><td colspan="7" class="rep-empty">No expenses recorded for this date.</td></tr>';
+        } else {
+          expBody.innerHTML = exp.map((item, idx) => `
+            <tr>
+              <td class="text-center">${idx + 1}</td>
+              <td class="text-center">${item.time || '-'}</td>
+              <td style="font-family: var(--font-mono); font-weight: 600;">${item.reference}</td>
+              <td><span class="status-badge" style="background:#f1f5f9; color:#475569;">${item.category}</span></td>
+              <td style="font-weight: 600;">${item.description}</td>
+              <td>${item.employee_name || item.payment_method || '-'}</td>
+              <td class="text-right" style="font-weight: 700;">${fmtCurrency(item.amount)}</td>
+            </tr>
+          `).join('');
+        }
+
+        // 5. Banks
+        const banks = rep.bank_balances || [];
+        document.getElementById('count-banks').textContent = banks.length;
+        document.getElementById('subtotal-banks').textContent = 'Total Bank: ' + fmtCurrency(s.total_bank_balance);
+        const bankBody = document.getElementById('tbody-banks');
+        if (banks.length === 0) {
+          bankBody.innerHTML = '<tr><td colspan="3" class="rep-empty">No bank accounts found.</td></tr>';
+        } else {
+          bankBody.innerHTML = banks.map(item => `
+            <tr>
+              <td style="font-weight: 700;">${item.bank_name}</td>
+              <td class="text-center" style="font-family: var(--font-mono); color: var(--color-text-muted);">${item.account_number}</td>
+              <td class="text-right" style="font-weight: 700; color: #0284c7;">${fmtCurrency(item.current_balance)}</td>
+            </tr>
+          `).join('');
+        }
+      }
+
+      // Download PDF function
+      async function downloadPDF() {
+        const dateVal = datePicker.value;
+        if (!dateVal) {
+          showAlert('Please select a report date.', true);
+          return;
+        }
+
+        clearAlert();
+        btnDownload.disabled = true;
+        btnDownloadText.innerHTML = '<span class="spinner"></span> Generating PDF...';
+
+        try {
+          const token = window.Auth ? window.Auth.getAccessToken() : localStorage.getItem('vyavsa_access_token');
+          const res = await fetch('/api/v1/tenant/reports/daily/pdf?date=' + encodeURIComponent(dateVal), {
+            method: 'GET',
+            headers: {
+              'Authorization': 'Bearer ' + token
+            }
+          });
+
+          if (!res.ok) {
+            let errorMsg = 'Failed to generate PDF report.';
+            try {
+              const errJson = await res.json();
+              if (errJson && errJson.message) errorMsg = errJson.message;
+            } catch (_) {}
+            throw new Error(errorMsg);
+          }
+
+          // Extract filename from Content-Disposition header if available
+          let filename = `Daily_Report_${dateVal}.pdf`;
+          const disposition = res.headers.get('Content-Disposition');
+          if (disposition && disposition.indexOf('filename=') !== -1) {
+            const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+            if (matches != null && matches[1]) {
+              filename = matches[1].replace(/['"]/g, '');
+            }
+          }
+
+          const blob = await res.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = downloadUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(downloadUrl);
+          document.body.removeChild(a);
+
+          showAlert('Daily Report PDF downloaded successfully!');
+        } catch (err) {
+          console.error(err);
+          showAlert(err.message || 'Error downloading PDF.', true);
+        } finally {
+          btnDownload.disabled = false;
+          btnDownloadText.textContent = 'Download PDF';
+        }
+      }
+
+      // Event listeners
+      btnGenerate.addEventListener('click', loadReport);
+      btnDownload.addEventListener('click', downloadPDF);
+      if (logoutBtn && window.Auth) {
+        logoutBtn.addEventListener('click', () => window.Auth.logout());
+      }
+
+      // Initial load
+      loadProfile();
+      loadReport();
+    })();
+  </script>
+</body>
+</html>

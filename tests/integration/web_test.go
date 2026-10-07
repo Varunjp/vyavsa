@@ -138,6 +138,17 @@ func TestWebRoutesIntegration(t *testing.T) {
 			},
 		},
 		{
+			name:           "Daily Report GET /reports/daily",
+			path:           "/reports/daily",
+			expectedStatus: http.StatusOK,
+			expectInBody: []string{
+				"Daily Business Report",
+				"Report Date:",
+				"Download PDF",
+				"Total Available Funds",
+			},
+		},
+		{
 			name:           "Platform Dashboard GET /platform/dashboard",
 			path:           "/platform/dashboard",
 			expectedStatus: http.StatusOK,
