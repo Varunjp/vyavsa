@@ -23,6 +23,7 @@ type Config struct {
 	Metrics        MetricsConfig
 	CORS           CORSConfig
 	BootstrapAdmin BootstrapAdminConfig
+	RateLimit      RateLimitConfig
 }
 
 // AppConfig holds HTTP server and general application settings
@@ -111,6 +112,23 @@ type BootstrapAdminConfig struct {
 	Password string
 	Username string
 	Phone    string
+}
+
+// RateLimitConfig holds distributed Redis-backed rate limiting parameters
+type RateLimitConfig struct {
+	Enabled          bool
+	FailOpen         bool
+	AuthFailOpen     bool
+	GeneralRequests  int
+	GeneralWindow    time.Duration
+	TenantRequests   int
+	TenantWindow     time.Duration
+	PlatformRequests int
+	PlatformWindow   time.Duration
+	AuthRequests     int
+	AuthWindow       time.Duration
+	SecurityRequests int
+	SecurityWindow   time.Duration
 }
 
 // ConnectionString returns the PostgreSQL DSN URL
@@ -230,6 +248,21 @@ func Load() (*Config, error) {
 			Username: getEnv("PLATFORM_ADMIN_USERNAME", "platform_admin"),
 			Phone:    getEnv("PLATFORM_ADMIN_PHONE", "+919876543210"),
 		},
+		RateLimit: RateLimitConfig{
+			Enabled:          getBoolEnv("RATE_LIMIT_ENABLED", true),
+			FailOpen:         getBoolEnv("RATE_LIMIT_FAIL_OPEN", true),
+			AuthFailOpen:     getBoolEnv("RATE_LIMIT_AUTH_FAIL_OPEN", false),
+			GeneralRequests:  getIntWithFallbackEnv("RATE_LIMIT_GENERAL_REQUESTS", "RATE_LIMIT_REQUESTS", 100),
+			GeneralWindow:    getSecondsOrDurationWithFallbackEnv("RATE_LIMIT_GENERAL_WINDOW", "RATE_LIMIT_WINDOW_SECONDS", 60*time.Second),
+			TenantRequests:   getIntEnv("RATE_LIMIT_TENANT_REQUESTS", 300),
+			TenantWindow:     getSecondsOrDurationEnv("RATE_LIMIT_TENANT_WINDOW", 60*time.Second),
+			PlatformRequests: getIntEnv("RATE_LIMIT_PLATFORM_REQUESTS", 300),
+			PlatformWindow:   getSecondsOrDurationEnv("RATE_LIMIT_PLATFORM_WINDOW", 60*time.Second),
+			AuthRequests:     getIntEnv("RATE_LIMIT_AUTH_REQUESTS", 20),
+			AuthWindow:       getSecondsOrDurationEnv("RATE_LIMIT_AUTH_WINDOW", 60*time.Second),
+			SecurityRequests: getIntEnv("RATE_LIMIT_SECURITY_REQUESTS", 5),
+			SecurityWindow:   getSecondsOrDurationEnv("RATE_LIMIT_SECURITY_WINDOW", 60*time.Second),
+		},
 	}
 
 	// Default Log Format based on environment if not explicitly set
@@ -280,6 +313,23 @@ func (c *Config) Validate() error {
 		}
 		if c.BootstrapAdmin.Password == "" {
 			return fmt.Errorf("PLATFORM_ADMIN_PASSWORD cannot be empty when bootstrap is enabled")
+		}
+	}
+	if c.RateLimit.Enabled {
+		if c.RateLimit.GeneralRequests <= 0 || c.RateLimit.GeneralWindow <= 0 {
+			return fmt.Errorf("RATE_LIMIT_GENERAL_REQUESTS and RATE_LIMIT_GENERAL_WINDOW must be positive")
+		}
+		if c.RateLimit.AuthRequests <= 0 || c.RateLimit.AuthWindow <= 0 {
+			return fmt.Errorf("RATE_LIMIT_AUTH_REQUESTS and RATE_LIMIT_AUTH_WINDOW must be positive")
+		}
+		if c.RateLimit.SecurityRequests <= 0 || c.RateLimit.SecurityWindow <= 0 {
+			return fmt.Errorf("RATE_LIMIT_SECURITY_REQUESTS and RATE_LIMIT_SECURITY_WINDOW must be positive")
+		}
+		if c.RateLimit.TenantRequests <= 0 || c.RateLimit.TenantWindow <= 0 {
+			return fmt.Errorf("RATE_LIMIT_TENANT_REQUESTS and RATE_LIMIT_TENANT_WINDOW must be positive")
+		}
+		if c.RateLimit.PlatformRequests <= 0 || c.RateLimit.PlatformWindow <= 0 {
+			return fmt.Errorf("RATE_LIMIT_PLATFORM_REQUESTS and RATE_LIMIT_PLATFORM_WINDOW must be positive")
 		}
 	}
 
@@ -356,6 +406,55 @@ func getSliceEnv(key string, fallback []string) []string {
 		}
 		if len(res) > 0 {
 			return res
+		}
+	}
+	return fallback
+}
+
+func getIntWithFallbackEnv(primaryKey, secondaryKey string, fallback int) int {
+	if val := os.Getenv(primaryKey); val != "" {
+		if i, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return i
+		}
+	}
+	if val := os.Getenv(secondaryKey); val != "" {
+		if i, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return i
+		}
+	}
+	return fallback
+}
+
+func getSecondsOrDurationEnv(key string, fallback time.Duration) time.Duration {
+	if val := os.Getenv(key); val != "" {
+		trimmed := strings.TrimSpace(val)
+		if sec, err := strconv.Atoi(trimmed); err == nil {
+			return time.Duration(sec) * time.Second
+		}
+		if d, err := time.ParseDuration(trimmed); err == nil {
+			return d
+		}
+	}
+	return fallback
+}
+
+func getSecondsOrDurationWithFallbackEnv(primaryKey, secondaryKey string, fallback time.Duration) time.Duration {
+	if val := os.Getenv(primaryKey); val != "" {
+		trimmed := strings.TrimSpace(val)
+		if sec, err := strconv.Atoi(trimmed); err == nil {
+			return time.Duration(sec) * time.Second
+		}
+		if d, err := time.ParseDuration(trimmed); err == nil {
+			return d
+		}
+	}
+	if val := os.Getenv(secondaryKey); val != "" {
+		trimmed := strings.TrimSpace(val)
+		if sec, err := strconv.Atoi(trimmed); err == nil {
+			return time.Duration(sec) * time.Second
+		}
+		if d, err := time.ParseDuration(trimmed); err == nil {
+			return d
 		}
 	}
 	return fallback

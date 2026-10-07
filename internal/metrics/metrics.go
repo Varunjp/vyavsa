@@ -71,6 +71,11 @@ type Metrics struct {
 	dailyReportGenerationTotal    *prometheus.CounterVec
 	dailyReportGenerationDuration *prometheus.HistogramVec
 	dailyReportTransactionsTotal  prometheus.Counter
+
+	// Rate Limiting Metrics
+	rateLimitRequestsTotal    *prometheus.CounterVec
+	rateLimitRejectedTotal    *prometheus.CounterVec
+	rateLimitRedisErrorsTotal *prometheus.CounterVec
 }
 
 // New initializes application metrics and registers them with a custom Prometheus registry
@@ -442,6 +447,34 @@ func New() *Metrics {
 				Help:      "Total transactions included across generated daily reports",
 			},
 		),
+
+		rateLimitRequestsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "rate_limit",
+				Name:      "requests_total",
+				Help:      "Total count of rate limit evaluations by tier and outcome status",
+			},
+			[]string{"tier", "status"},
+		),
+		rateLimitRejectedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "rate_limit",
+				Name:      "rejected_total",
+				Help:      "Total count of rejected requests exceeding rate limits by tier and route",
+			},
+			[]string{"tier", "route"},
+		),
+		rateLimitRedisErrorsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "rate_limit",
+				Name:      "redis_errors_total",
+				Help:      "Total count of Redis errors encountered during rate limit evaluation by tier",
+			},
+			[]string{"tier"},
+		),
 	}
 
 	reg.MustRegister(
@@ -486,6 +519,9 @@ func New() *Metrics {
 		m.dailyReportGenerationTotal,
 		m.dailyReportGenerationDuration,
 		m.dailyReportTransactionsTotal,
+		m.rateLimitRequestsTotal,
+		m.rateLimitRejectedTotal,
+		m.rateLimitRedisErrorsTotal,
 	)
 
 	return m
@@ -900,5 +936,31 @@ func (m *Metrics) RecordDailyReportGenerated(format string, d time.Duration, txn
 func (m *Metrics) RecordDailyReportFailed(format string) {
 	if m != nil && m.dailyReportGenerationTotal != nil {
 		m.dailyReportGenerationTotal.WithLabelValues("failure").Inc()
+	}
+}
+
+// IncRateLimitAllowed increments the total allowed rate limit counter for a tier
+func (m *Metrics) IncRateLimitAllowed(tier string) {
+	if m != nil && m.rateLimitRequestsTotal != nil {
+		m.rateLimitRequestsTotal.WithLabelValues(tier, "allowed").Inc()
+	}
+}
+
+// IncRateLimitRejected increments the total rejected rate limit counter and route breakdown
+func (m *Metrics) IncRateLimitRejected(tier, route string) {
+	if m != nil {
+		if m.rateLimitRequestsTotal != nil {
+			m.rateLimitRequestsTotal.WithLabelValues(tier, "rejected").Inc()
+		}
+		if m.rateLimitRejectedTotal != nil {
+			m.rateLimitRejectedTotal.WithLabelValues(tier, route).Inc()
+		}
+	}
+}
+
+// IncRateLimitRedisError increments the rate limit Redis error counter for a tier
+func (m *Metrics) IncRateLimitRedisError(tier string) {
+	if m != nil && m.rateLimitRedisErrorsTotal != nil {
+		m.rateLimitRedisErrorsTotal.WithLabelValues(tier).Inc()
 	}
 }
