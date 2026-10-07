@@ -640,7 +640,7 @@ func (m *mockOpAttendanceRepo) List(ctx context.Context, tenantID uuid.UUID, pag
 func (m *mockOpAttendanceRepo) GetTodaySalaryEarned(ctx context.Context, tenantID uuid.UUID, date string) (decimal.Decimal, error) {
 	var total decimal.Decimal
 	for _, a := range m.attendance {
-		if a.TenantID == tenantID && a.Date == date && a.Status == "present" {
+		if a.TenantID == tenantID && a.Date == date && (a.Status == "present" || a.Status == "half_day") {
 			total = total.Add(a.DailySalary)
 		}
 	}
@@ -1487,6 +1487,114 @@ func TestOperationsService_EmployeeDailySalaryAndAttendance(t *testing.T) {
 	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
 	require.NoError(t, err)
 	assert.True(t, sal.Balance.IsZero(), "Reversing status must reverse salary balance")
+}
+
+func TestOperationsService_AttendanceMultiDaySalaryAccumulation(t *testing.T) {
+	ctx := context.Background()
+	svc, tenantID := setupTestOperationsService()
+
+	// 1. Create Employee with base daily salary rate of 500
+	emp, err := svc.CreateEmployee(ctx, tenantID, &dto.CreateEmployeeRequest{
+		Name:   "Ramesh Sharma",
+		Phone:  "9876543210",
+		Salary: decimal.NewFromFloat(500.00),
+		OTRate: decimal.NewFromFloat(80.00),
+	})
+	require.NoError(t, err)
+
+	// Verify initial salary balance is 0
+	sal, err := svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.IsZero())
+
+	// 2. Mark Attendance for Day 1: "present" -> Salary should reflect 500
+	attDay1, err := svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp.ID,
+		Date:       "2026-10-01",
+		Status:     "present",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "present", attDay1.Status)
+	assert.True(t, attDay1.DailySalary.Equal(decimal.NewFromFloat(500.00)))
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(500.00)), "Day 1 salary should be 500")
+
+	// 3. Mark Attendance for Day 2: "present" -> Salary MUST accumulate to 1000
+	attDay2, err := svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp.ID,
+		Date:       "2026-10-02",
+		Status:     "present",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "present", attDay2.Status)
+	assert.True(t, attDay2.DailySalary.Equal(decimal.NewFromFloat(500.00)))
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(1000.00)), "Day 2 salary must accumulate to 1000")
+
+	// 4. Mark Attendance for Day 3: "half_day" -> Salary should accumulate to 1250
+	attDay3, err := svc.RecordAttendance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAttendanceRequest{
+		EmployeeID: emp.ID,
+		Date:       "2026-10-03",
+		Status:     "half_day",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "half_day", attDay3.Status)
+	assert.True(t, attDay3.DailySalary.Equal(decimal.NewFromFloat(250.00)))
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(1250.00)), "Day 3 half_day must accumulate to 1250")
+
+	// 5. Update Attendance for Day 3: change from "half_day" to "absent" -> Salary balance drops to 1000
+	attUpdated, err := svc.UpdateAttendance(ctx, tenantID, attDay3.ID, auth.RoleTenantAdmin, &dto.UpdateAttendanceRequest{
+		Status: "absent",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "absent", attUpdated.Status)
+	assert.True(t, attUpdated.DailySalary.IsZero())
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(1000.00)), "Changing Day 3 to absent must reduce balance to 1000")
+
+	// 6. Record Overtime: 150 -> Salary balance increases to 1150
+	_, err = svc.RecordOvertime(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordOvertimeRequest{
+		EmployeeID: emp.ID,
+		Date:       "2026-10-01",
+		Amount:     decimal.NewFromFloat(150.00),
+	})
+	require.NoError(t, err)
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(1150.00)), "Overtime must increase salary balance to 1150")
+
+	// 7. Record Advance: 200 -> Salary balance decreases to 950
+	_, err = svc.RecordAdvance(ctx, tenantID, auth.RoleTenantAdmin, &dto.RecordAdvanceRequest{
+		EmployeeID: emp.ID,
+		Date:       "2026-10-02",
+		Amount:     decimal.NewFromFloat(200.00),
+	})
+	require.NoError(t, err)
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(950.00)), "Advance must decrease salary balance to 950")
+
+	// 8. Pay Salary Disbursement: 450 -> Salary balance decreases to 500
+	_, err = svc.PaySalary(ctx, tenantID, emp.ID, &dto.PaySalaryRequest{
+		PaymentMethod: "cash",
+		Amount:        decimal.NewFromFloat(450.00),
+	})
+	require.NoError(t, err)
+
+	sal, err = svc.GetSalaryByEmployeeID(ctx, tenantID, emp.ID)
+	require.NoError(t, err)
+	assert.True(t, sal.Balance.Equal(decimal.NewFromFloat(500.00)), "Payment of 450 must decrease balance to 500")
 }
 
 func TestOperationsService_CustomerBalanceAdjustmentAndTenantIsolation(t *testing.T) {

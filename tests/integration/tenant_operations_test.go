@@ -308,3 +308,70 @@ func TestTenantOperations_ExpenseEndpoints_ValidationAndAuth(t *testing.T) {
 	router.ServeHTTP(wAdminGet, adminGet)
 	assert.NotEqual(t, http.StatusUnauthorized, wAdminGet.Code)
 }
+
+func TestTenantOperations_AttendanceAndSalaryEndpoints_AuthAndRBAC(t *testing.T) {
+	cfg := &config.Config{
+		App: config.AppConfig{
+			Name:            "test-app",
+			Env:             "test",
+			Port:            "8080",
+			ShutdownTimeout: 2 * time.Second,
+		},
+		JWT: config.JWTConfig{
+			Secret:        "integration-test-secret-minimum-32-bytes",
+			AccessExpiry:  15 * time.Minute,
+			RefreshExpiry: 24 * time.Hour,
+		},
+		Metrics: config.MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+		CORS: config.CORSConfig{
+			AllowedOrigins: []string{"*"},
+		},
+	}
+
+	appLogger := logger.Default()
+	appMetrics := metrics.New()
+	srv := server.New(cfg, appLogger, nil, nil, appMetrics)
+	router := srv.Router()
+
+	jwtManager := auth.NewJWTManager(cfg.JWT)
+	tenantID := uuid.New()
+	tenantAdminID := uuid.New()
+	tenantUserID := uuid.New()
+
+	adminToken, err := jwtManager.GenerateTokenPair(tenantAdminID, &tenantID, "admin@business.com", auth.RoleTenantAdmin, auth.UserTypeTenantUser)
+	require.NoError(t, err)
+
+	userToken, err := jwtManager.GenerateTokenPair(tenantUserID, &tenantID, "staff@business.com", auth.RoleTenantUser, auth.UserTypeTenantUser)
+	require.NoError(t, err)
+
+	// 1. Unauthenticated attendance requests return 401
+	unauthPost, _ := http.NewRequest(http.MethodPost, "/api/v1/tenant/attendance", bytes.NewBufferString(`{"employee_id":"`+uuid.New().String()+`","status":"present"}`))
+	unauthPost.Header.Set("Content-Type", "application/json")
+	wUnauthPost := httptest.NewRecorder()
+	router.ServeHTTP(wUnauthPost, unauthPost)
+	assert.Equal(t, http.StatusUnauthorized, wUnauthPost.Code)
+
+	unauthPut, _ := http.NewRequest(http.MethodPut, "/api/v1/tenant/attendance/"+uuid.New().String(), bytes.NewBufferString(`{"status":"present"}`))
+	unauthPut.Header.Set("Content-Type", "application/json")
+	wUnauthPut := httptest.NewRecorder()
+	router.ServeHTTP(wUnauthPut, unauthPut)
+	assert.Equal(t, http.StatusUnauthorized, wUnauthPut.Code)
+
+	// 2. Salaries are Admin-only: Tenant User returns 403 Forbidden
+	userSalariesReq, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/salaries", nil)
+	userSalariesReq.Header.Set("Authorization", "Bearer "+userToken.AccessToken)
+	wUserSalaries := httptest.NewRecorder()
+	router.ServeHTTP(wUserSalaries, userSalariesReq)
+	assert.Equal(t, http.StatusForbidden, wUserSalaries.Code)
+
+	// 3. Admin can access salaries endpoint without 401 or 403
+	adminSalariesReq, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/salaries", nil)
+	adminSalariesReq.Header.Set("Authorization", "Bearer "+adminToken.AccessToken)
+	wAdminSalaries := httptest.NewRecorder()
+	router.ServeHTTP(wAdminSalaries, adminSalariesReq)
+	assert.NotEqual(t, http.StatusUnauthorized, wAdminSalaries.Code)
+	assert.NotEqual(t, http.StatusForbidden, wAdminSalaries.Code)
+}
