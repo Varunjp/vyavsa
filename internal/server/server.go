@@ -49,6 +49,7 @@ type Server struct {
 	httpSrv          *http.Server
 	emailWorker      *worker.EmailWorker
 	dailyStatsWorker *worker.DailyStatsWorker
+	rateLimiter      service.RateLimiterService
 }
 
 // New creates and configures a new Server instance
@@ -96,6 +97,11 @@ func (s *Server) Router() *gin.Engine {
 	return s.router
 }
 
+// RateLimiter returns the active rate limiter service instance
+func (s *Server) RateLimiter() service.RateLimiterService {
+	return s.rateLimiter
+}
+
 func (s *Server) setupMiddlewares() {
 	s.router.Use(
 		middleware.RequestID(),
@@ -126,11 +132,6 @@ func (s *Server) setupRoutes() {
 	// Base API v1 group
 	apiV1 := s.router.Group("/api/v1")
 	{
-		// Ping / heartbeat inside API v1
-		apiV1.GET("/ping", func(c *gin.Context) {
-			response.Success(c, gin.H{"pong": true}, "API v1 is active")
-		})
-
 		// Wire Core Feature Routes (Auth, Platform Admin, Tenant Onboarding & Management)
 		s.setupAPIRoutes(apiV1)
 	}
@@ -250,11 +251,17 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	var blacklistRepo repository.TokenBlacklistRepository
 	var passwordResetRepo repository.PasswordResetRepository
 	var planCache repository.TenantPlanCacheRepository
+	var rateLimitRepo repository.RateLimitRepository
 	if s.redis != nil {
 		blacklistRepo = redisRepo.NewTokenBlacklistRedis(s.redis)
 		passwordResetRepo = redisRepo.NewPasswordResetRedis(s.redis)
 		planCache = redisRepo.NewTenantPlanCacheRedis(s.redis)
+		rateLimitRepo = redisRepo.NewRateLimitRedis(s.redis)
 	}
+
+	rateLimiterService := service.NewRateLimiterService(rateLimitRepo, s.cfg.RateLimit, s.metrics, s.log.Logger)
+	s.rateLimiter = rateLimiterService
+	rlMiddleware := middleware.NewRateLimiterMiddleware(rateLimiterService, s.metrics, s.log)
 
 	rawMailer := mailer.NewMailer(s.cfg.Mailer, s.log.Logger)
 	s.emailWorker = worker.NewEmailWorker(rawMailer, s.redis, s.metrics, s.log.Logger, 3)
@@ -348,47 +355,55 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	opsHandler := tenantHandlerPkg.NewOperationsHandler(opsService)
 	reportHandler := tenantHandlerPkg.NewReportHandler(reportService)
 
+	// Ping / heartbeat inside API v1
+	apiV1.GET("/ping", rlMiddleware.RequireGeneralLimit(), func(c *gin.Context) {
+		response.Success(c, gin.H{"pong": true}, "API v1 is active")
+	})
+
 	// 1. Public Endpoints
 	authGroup := apiV1.Group("/auth")
+	authGroup.Use(rlMiddleware.RequireAuthLimit())
 	{
 		authGroup.POST("/platform/login", authHandler.PlatformLogin)
 		authGroup.POST("/tenant/login", authHandler.TenantLogin)
 		authGroup.POST("/tenant/register", tenantHandler.Register)
 		authGroup.POST("/refresh", authHandler.RefreshToken)
 		authGroup.POST("/revoke", authHandler.Revoke)
-		authGroup.POST("/forgot-password", authHandler.ForgotPassword)
-		authGroup.POST("/verify-reset-otp", authHandler.VerifyResetOTP)
-		authGroup.POST("/reset-password", authHandler.ResetPassword)
+		authGroup.POST("/forgot-password", rlMiddleware.RequireSecurityLimit(), authHandler.ForgotPassword)
+		authGroup.POST("/verify-reset-otp", rlMiddleware.RequireSecurityLimit(), authHandler.VerifyResetOTP)
+		authGroup.POST("/reset-password", rlMiddleware.RequireSecurityLimit(), authHandler.ResetPassword)
 	}
 
 	// Also support root /auth paths directly
 	rootAuth := s.router.Group("/auth")
+	rootAuth.Use(rlMiddleware.RequireAuthLimit())
 	{
 		rootAuth.POST("/refresh", authHandler.RefreshToken)
 		rootAuth.POST("/revoke", authHandler.Revoke)
-		rootAuth.POST("/forgot-password", authHandler.ForgotPassword)
-		rootAuth.POST("/verify-reset-otp", authHandler.VerifyResetOTP)
-		rootAuth.POST("/reset-password", authHandler.ResetPassword)
+		rootAuth.POST("/forgot-password", rlMiddleware.RequireSecurityLimit(), authHandler.ForgotPassword)
+		rootAuth.POST("/verify-reset-otp", rlMiddleware.RequireSecurityLimit(), authHandler.VerifyResetOTP)
+		rootAuth.POST("/reset-password", rlMiddleware.RequireSecurityLimit(), authHandler.ResetPassword)
 	}
 
 	// Public Tenant Self-Registration (also accessible under /api/v1/tenants/register)
-	apiV1.POST("/tenants/register", tenantHandler.Register)
+	apiV1.POST("/tenants/register", rlMiddleware.RequireAuthLimit(), tenantHandler.Register)
 
 	// Public Subscription Plans Catalog (viewable without authentication)
-	apiV1.GET("/plans", planHandler.List)
+	apiV1.GET("/plans", rlMiddleware.RequireGeneralLimit(), planHandler.List)
 
 	// 2. Protected Endpoints (Requires valid JWT)
 	protected := apiV1.Group("")
 	protected.Use(middleware.Authenticate(jwtManager, blacklistRepo))
 	{
-		protected.POST("/auth/logout", authHandler.Logout)
-		protected.GET("/auth/me", authHandler.GetMe)
+		protected.POST("/auth/logout", rlMiddleware.RequireGeneralLimit(), authHandler.Logout)
+		protected.GET("/auth/me", rlMiddleware.RequireGeneralLimit(), authHandler.GetMe)
 
 		// ----------------------------------------------------
 		// Platform Administrator Gated Routes
 		// ----------------------------------------------------
 		platform := protected.Group("/platform")
 		platform.Use(middleware.RequirePlatformAdmin())
+		platform.Use(rlMiddleware.RequirePlatformAdminLimit())
 		{
 			platform.GET("/ping", func(c *gin.Context) {
 				claims, _ := auth.GetClaims(c)
@@ -427,6 +442,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		// ----------------------------------------------------
 		tenant := protected.Group("/tenant")
 		tenant.Use(middleware.RequireTenantUser())
+		tenant.Use(rlMiddleware.RequireTenantLimit())
 		tenant.Use(middleware.RequireActivePlan(tenantPlanService))
 		{
 			tenant.GET("/ping", func(c *gin.Context) {
@@ -569,6 +585,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 		// Also support direct /api/v1/reports/daily and /api/v1/reports/daily/pdf endpoints
 		reportsGroup := protected.Group("/reports")
 		reportsGroup.Use(middleware.RequireTenantUser())
+		reportsGroup.Use(rlMiddleware.RequireTenantLimit())
 		reportsGroup.Use(middleware.RequireActivePlan(tenantPlanService))
 		{
 			reportsGroup.GET("/daily", reportHandler.GetDailyReport)
