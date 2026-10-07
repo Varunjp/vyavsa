@@ -15,6 +15,8 @@ const Operations = (() => {
   let lineSaleBankRowCount = 0;
   let counterSaleBankRowCount = 0;
   let purchaseBankRowCount = 0;
+  let expenseBankRowCount = 0;
+  let editExpenseBankRowCount = 0;
   let activeStatementCustomerID = null;
   let supplierPaymentTarget = { customerId: null, purchaseId: null, pending: 0, customerName: '', item: '' };
 
@@ -102,6 +104,9 @@ const Operations = (() => {
     if (el) {
       el.style.display = 'flex';
       document.body.style.overflow = 'hidden';
+      if (modalId === 'modal-add-expense') {
+        handleExpensePaymentMethodChange('cash');
+      }
     }
   }
 
@@ -144,6 +149,18 @@ const Operations = (() => {
         supplierPaymentTarget = { customerId: null, purchaseId: null, pending: 0, customerName: '', item: '' };
         const warn = document.getElementById('supp-pay-warning');
         if (warn) warn.style.display = 'none';
+      } else if (modalId === 'modal-add-expense') {
+        const bankContainer = document.getElementById('exp-bank-payments-container');
+        if (bankContainer) bankContainer.innerHTML = '';
+        const warn = document.getElementById('exp-bank-duplicate-warning');
+        if (warn) warn.style.display = 'none';
+        handleExpensePaymentMethodChange('cash');
+      } else if (modalId === 'modal-edit-expense') {
+        const bankContainer = document.getElementById('edit-exp-bank-payments-container');
+        if (bankContainer) bankContainer.innerHTML = '';
+        const warn = document.getElementById('edit-exp-bank-duplicate-warning');
+        if (warn) warn.style.display = 'none';
+        handleEditExpensePaymentMethodChange('cash');
       }
     }
   }
@@ -900,7 +917,7 @@ const Operations = (() => {
     if (!res.ok || !Array.isArray(res.data) || res.data.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="4">
+          <td colspan="5">
             <div class="empty-state-box">
               <div class="empty-state-icon">⚡</div>
               <div class="empty-state-title">No expenses recorded for this date</div>
@@ -916,6 +933,17 @@ const Operations = (() => {
     tbody.innerHTML = res.data.map(e => {
       const isAdmin = currentRole === 'admin';
       const isAdvance = e.category === 'employee_advance';
+      let pmBadge = '<span class="status-badge paid" style="font-size:0.75rem;">Cash</span>';
+      if (e.payment_method === 'bank') {
+        const banksCount = e.payment_breakdown?.banks?.length || 1;
+        const bankLabel = banksCount > 1 ? `Bank (${banksCount} accounts)` : (e.payment_breakdown?.banks?.[0]?.bank_name ? `Bank: ${escapeHTML(e.payment_breakdown.banks[0].bank_name)}` : 'Bank');
+        pmBadge = `<span class="status-badge cleared" style="font-size:0.75rem;">${bankLabel}</span>`;
+      } else if (e.payment_method === 'cash_bank') {
+        const banksCount = e.payment_breakdown?.banks?.length || 1;
+        const bankSuffix = banksCount > 1 ? ` (${banksCount} banks)` : '';
+        pmBadge = `<span class="status-badge pending" style="font-size:0.75rem; background: rgba(147, 51, 234, 0.1); color: #7e22ce; border: 1px solid rgba(147, 51, 234, 0.2);">Cash + Bank${bankSuffix}</span>`;
+      }
+
       return `
         <tr>
           <td>
@@ -923,13 +951,15 @@ const Operations = (() => {
             ${isAdvance ? `<span class="badge" style="margin-left: 0.375rem; font-size: 0.7rem; background: rgba(239, 68, 68, 0.1); color: var(--color-error); font-weight: 700;">${escapeHTML(e.employee_name ? 'STAFF ADVANCE: ' + e.employee_name : 'STAFF ADVANCE')}</span>` : (e.category && e.category !== 'general' ? `<span class="badge" style="margin-left: 0.375rem; font-size: 0.7rem; background: rgba(99, 102, 241, 0.1); color: #6366f1;">${escapeHTML(e.category.replace('_', ' ').toUpperCase())}</span>` : '')}
           </td>
           <td>${formatDate(e.created_at)}</td>
+          <td>${pmBadge}</td>
           <td style="font-weight:700;color:var(--color-error);">${formatCurrency(e.total_amount)}</td>
           <td style="text-align:right;">
             <div style="display:inline-flex;gap:0.375rem;justify-content:flex-end;">
+              <button class="btn btn-sm btn-secondary" onclick="Operations.viewExpense('${e.id}')">View</button>
               ${isAdmin ? `
                 <button class="btn btn-sm btn-secondary" onclick="Operations.openEditExpense('${e.id}')">Edit</button>
                 <button class="btn btn-sm btn-secondary" onclick="Operations.deleteExpense('${e.id}')" style="color:var(--color-error);">Delete</button>
-              ` : '<span style="color:var(--color-text-subtle);font-size:0.75rem;">Recorded</span>'}
+              ` : ''}
             </div>
           </td>
         </tr>
@@ -2783,6 +2813,390 @@ const Operations = (() => {
     }
   }
 
+  // Expense: Payment Breakdown & Bank Row Helpers
+  function handleExpensePaymentMethodChange(method) {
+    const cashSection = document.getElementById('exp-cash-section');
+    const bankSection = document.getElementById('exp-bank-section');
+    const cashInput = document.getElementById('exp-form-cash');
+    const totalAmount = parseFloat(document.getElementById('exp-form-amount')?.value) || 0;
+    const cashHint = document.getElementById('exp-cash-hint');
+
+    document.querySelectorAll('#modal-add-expense .payment-method-option').forEach(el => {
+      const radio = el.querySelector('input[type="radio"]');
+      if (radio && radio.value === method) {
+        radio.checked = true;
+        el.classList.add('active');
+      } else {
+        el.classList.remove('active');
+      }
+    });
+
+    if (method === 'cash') {
+      if (cashSection) cashSection.style.display = 'block';
+      if (bankSection) bankSection.style.display = 'none';
+      if (cashHint) cashHint.textContent = 'Full expense amount settled via cash in drawer.';
+      if (cashInput) cashInput.value = totalAmount > 0 ? totalAmount.toFixed(2) : '0.00';
+      const container = document.getElementById('exp-bank-payments-container');
+      if (container) container.innerHTML = '';
+      const warn = document.getElementById('exp-bank-duplicate-warning');
+      if (warn) warn.style.display = 'none';
+    } else if (method === 'bank') {
+      if (cashSection) cashSection.style.display = 'none';
+      if (bankSection) bankSection.style.display = 'block';
+      if (cashInput) cashInput.value = '0.00';
+      const container = document.getElementById('exp-bank-payments-container');
+      if (container && container.children.length === 0) {
+        addExpenseBankRow('', totalAmount > 0 ? totalAmount.toFixed(2) : '');
+      }
+    } else if (method === 'cash_bank') {
+      if (cashSection) cashSection.style.display = 'block';
+      if (bankSection) bankSection.style.display = 'block';
+      if (cashHint) cashHint.textContent = 'Portion settled via cash in drawer.';
+      const container = document.getElementById('exp-bank-payments-container');
+      if (container && container.children.length === 0) {
+        addExpenseBankRow('', '');
+      }
+    }
+    calcExpenseBreakdown();
+  }
+
+  function addExpenseBankRow(bankId = '', amount = '') {
+    const container = document.getElementById('exp-bank-payments-container');
+    if (!container) return;
+    expenseBankRowCount++;
+    const rowId = `exp-bank-row-${expenseBankRowCount}`;
+
+    const row = document.createElement('div');
+    row.id = rowId;
+    row.className = 'bank-payment-row';
+    row.innerHTML = `
+      <select class="form-control select-bank exp-bank-select" required onchange="Operations.validateExpenseBanks(); Operations.calcExpenseBreakdown();">
+        ${renderBankSelectOptions(bankId)}
+      </select>
+      <input type="number" step="0.01" class="form-control bank-amount-input exp-bank-amount" min="0.01" required placeholder="Amount (₹)" value="${amount}" oninput="Operations.calcExpenseBreakdown();">
+      <button type="button" class="btn-remove-bank" title="Remove Bank Payment" onclick="Operations.removeExpenseBankRow('${rowId}')">✕</button>
+    `;
+    container.appendChild(row);
+    validateExpenseBanks();
+    calcExpenseBreakdown();
+  }
+
+  function removeExpenseBankRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) row.remove();
+    validateExpenseBanks();
+    calcExpenseBreakdown();
+  }
+
+  function validateExpenseBanks() {
+    const selects = document.querySelectorAll('#exp-bank-payments-container .exp-bank-select');
+    const warning = document.getElementById('exp-bank-duplicate-warning');
+    const selected = [];
+    let hasDuplicate = false;
+
+    selects.forEach(s => {
+      const val = s.value;
+      if (val) {
+        if (selected.includes(val)) {
+          hasDuplicate = true;
+          s.style.borderColor = 'var(--color-error)';
+        } else {
+          selected.push(val);
+          s.style.borderColor = '';
+        }
+      } else {
+        s.style.borderColor = '';
+      }
+    });
+
+    if (warning) warning.style.display = hasDuplicate ? 'block' : 'none';
+    return !hasDuplicate;
+  }
+
+  function calcExpenseBreakdown() {
+    const totalAmount = parseFloat(document.getElementById('exp-form-amount')?.value) || 0;
+    const method = document.querySelector('input[name="exp-payment-method"]:checked')?.value || 'cash';
+    const cashInput = document.getElementById('exp-form-cash');
+    const warnEl = document.getElementById('exp-calc-warning');
+    const submitBtn = document.getElementById('btn-submit-expense');
+
+    let cashPaid = 0;
+    let bankPaid = 0;
+
+    if (method === 'cash') {
+      cashPaid = totalAmount;
+      if (cashInput && document.activeElement !== cashInput) {
+        cashInput.value = totalAmount > 0 ? totalAmount.toFixed(2) : '0.00';
+      }
+    } else if (method === 'bank') {
+      cashPaid = 0;
+      document.querySelectorAll('#exp-bank-payments-container .exp-bank-amount').forEach(inp => {
+        bankPaid += parseFloat(inp.value) || 0;
+      });
+    } else if (method === 'cash_bank') {
+      cashPaid = parseFloat(cashInput?.value) || 0;
+      document.querySelectorAll('#exp-bank-payments-container .exp-bank-amount').forEach(inp => {
+        bankPaid += parseFloat(inp.value) || 0;
+      });
+    }
+
+    const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
+    const diff = Math.round((totalAmount - totalPaid) * 100) / 100;
+
+    const totalEl = document.getElementById('exp-calc-total');
+    const cashEl = document.getElementById('exp-calc-cash');
+    const bankEl = document.getElementById('exp-calc-bank');
+    const paidEl = document.getElementById('exp-calc-paid');
+    const remEl = document.getElementById('exp-calc-remaining');
+    const cashRow = document.getElementById('exp-calc-cash-row');
+    const bankRow = document.getElementById('exp-calc-bank-row');
+
+    if (totalEl) totalEl.textContent = formatCurrency(totalAmount);
+    if (cashEl) cashEl.textContent = formatCurrency(cashPaid);
+    if (bankEl) bankEl.textContent = formatCurrency(bankPaid);
+    if (paidEl) paidEl.textContent = formatCurrency(totalPaid);
+    if (remEl) remEl.textContent = formatCurrency(diff);
+
+    if (cashRow) cashRow.style.display = (method === 'bank') ? 'none' : 'flex';
+    if (bankRow) bankRow.style.display = (method === 'cash') ? 'none' : 'flex';
+
+    const hasDuplicate = !validateExpenseBanks();
+    const isMismatch = Math.abs(diff) > 0.005;
+    const hasZeroTotal = totalAmount <= 0;
+
+    let hasEmptyBank = false;
+    if (method === 'bank' || method === 'cash_bank') {
+      const bankRows = document.querySelectorAll('#exp-bank-payments-container .bank-payment-row');
+      if (bankRows.length === 0) {
+        hasEmptyBank = true;
+      } else {
+        bankRows.forEach(r => {
+          const sel = r.querySelector('.exp-bank-select')?.value;
+          const amt = parseFloat(r.querySelector('.exp-bank-amount')?.value) || 0;
+          if (!sel || amt <= 0) hasEmptyBank = true;
+        });
+      }
+    }
+
+    if (warnEl) {
+      if (hasZeroTotal) {
+        warnEl.textContent = '⚠️ Please enter an expense amount.';
+        warnEl.style.display = 'block';
+      } else if (hasDuplicate) {
+        warnEl.textContent = '⚠️ Each bank account can only be selected once per expense.';
+        warnEl.style.display = 'block';
+      } else if (hasEmptyBank) {
+        warnEl.textContent = '⚠️ Please select a bank account and enter a valid amount for all bank rows.';
+        warnEl.style.display = 'block';
+      } else if (isMismatch) {
+        warnEl.textContent = `⚠️ Payment breakdown must equal the expense amount (${formatCurrency(totalAmount)}).`;
+        warnEl.style.display = 'block';
+      } else {
+        warnEl.style.display = 'none';
+      }
+    }
+
+    if (remEl) {
+      remEl.style.color = isMismatch ? 'var(--color-error)' : 'var(--color-success)';
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = hasZeroTotal || hasDuplicate || hasEmptyBank || isMismatch;
+    }
+  }
+
+  // Edit Expense: Helpers
+  function handleEditExpensePaymentMethodChange(method) {
+    const cashSection = document.getElementById('edit-exp-cash-section');
+    const bankSection = document.getElementById('edit-exp-bank-section');
+    const cashInput = document.getElementById('edit-exp-form-cash');
+    const totalAmount = parseFloat(document.getElementById('edit-exp-amount')?.value) || 0;
+    const cashHint = document.getElementById('edit-exp-cash-hint');
+
+    document.querySelectorAll('#modal-edit-expense .payment-method-option').forEach(el => {
+      const radio = el.querySelector('input[type="radio"]');
+      if (radio && radio.value === method) {
+        radio.checked = true;
+        el.classList.add('active');
+      } else {
+        el.classList.remove('active');
+      }
+    });
+
+    if (method === 'cash') {
+      if (cashSection) cashSection.style.display = 'block';
+      if (bankSection) bankSection.style.display = 'none';
+      if (cashHint) cashHint.textContent = 'Full expense amount settled via cash in drawer.';
+      if (cashInput) cashInput.value = totalAmount > 0 ? totalAmount.toFixed(2) : '0.00';
+      const container = document.getElementById('edit-exp-bank-payments-container');
+      if (container) container.innerHTML = '';
+      const warn = document.getElementById('edit-exp-bank-duplicate-warning');
+      if (warn) warn.style.display = 'none';
+    } else if (method === 'bank') {
+      if (cashSection) cashSection.style.display = 'none';
+      if (bankSection) bankSection.style.display = 'block';
+      if (cashInput) cashInput.value = '0.00';
+      const container = document.getElementById('edit-exp-bank-payments-container');
+      if (container && container.children.length === 0) {
+        addEditExpenseBankRow('', totalAmount > 0 ? totalAmount.toFixed(2) : '');
+      }
+    } else if (method === 'cash_bank') {
+      if (cashSection) cashSection.style.display = 'block';
+      if (bankSection) bankSection.style.display = 'block';
+      if (cashHint) cashHint.textContent = 'Portion settled via cash in drawer.';
+      const container = document.getElementById('edit-exp-bank-payments-container');
+      if (container && container.children.length === 0) {
+        addEditExpenseBankRow('', '');
+      }
+    }
+    calcEditExpenseBreakdown();
+  }
+
+  function addEditExpenseBankRow(bankId = '', amount = '') {
+    const container = document.getElementById('edit-exp-bank-payments-container');
+    if (!container) return;
+    editExpenseBankRowCount++;
+    const rowId = `edit-exp-bank-row-${editExpenseBankRowCount}`;
+
+    const row = document.createElement('div');
+    row.id = rowId;
+    row.className = 'bank-payment-row';
+    row.innerHTML = `
+      <select class="form-control select-bank edit-exp-bank-select" required onchange="Operations.validateEditExpenseBanks(); Operations.calcEditExpenseBreakdown();">
+        ${renderBankSelectOptions(bankId)}
+      </select>
+      <input type="number" step="0.01" class="form-control bank-amount-input edit-exp-bank-amount" min="0.01" required placeholder="Amount (₹)" value="${amount}" oninput="Operations.calcEditExpenseBreakdown();">
+      <button type="button" class="btn-remove-bank" title="Remove Bank Payment" onclick="Operations.removeEditExpenseBankRow('${rowId}')">✕</button>
+    `;
+    container.appendChild(row);
+    validateEditExpenseBanks();
+    calcEditExpenseBreakdown();
+  }
+
+  function removeEditExpenseBankRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) row.remove();
+    validateEditExpenseBanks();
+    calcEditExpenseBreakdown();
+  }
+
+  function validateEditExpenseBanks() {
+    const selects = document.querySelectorAll('#edit-exp-bank-payments-container .edit-exp-bank-select');
+    const warning = document.getElementById('edit-exp-bank-duplicate-warning');
+    const selected = [];
+    let hasDuplicate = false;
+
+    selects.forEach(s => {
+      const val = s.value;
+      if (val) {
+        if (selected.includes(val)) {
+          hasDuplicate = true;
+          s.style.borderColor = 'var(--color-error)';
+        } else {
+          selected.push(val);
+          s.style.borderColor = '';
+        }
+      } else {
+        s.style.borderColor = '';
+      }
+    });
+
+    if (warning) warning.style.display = hasDuplicate ? 'block' : 'none';
+    return !hasDuplicate;
+  }
+
+  function calcEditExpenseBreakdown() {
+    const totalAmount = parseFloat(document.getElementById('edit-exp-amount')?.value) || 0;
+    const method = document.querySelector('input[name="edit-exp-payment-method"]:checked')?.value || 'cash';
+    const cashInput = document.getElementById('edit-exp-form-cash');
+    const warnEl = document.getElementById('edit-exp-calc-warning');
+    const submitBtn = document.getElementById('btn-submit-edit-exp');
+
+    let cashPaid = 0;
+    let bankPaid = 0;
+
+    if (method === 'cash') {
+      cashPaid = totalAmount;
+      if (cashInput && document.activeElement !== cashInput) {
+        cashInput.value = totalAmount > 0 ? totalAmount.toFixed(2) : '0.00';
+      }
+    } else if (method === 'bank') {
+      cashPaid = 0;
+      document.querySelectorAll('#edit-exp-bank-payments-container .edit-exp-bank-amount').forEach(inp => {
+        bankPaid += parseFloat(inp.value) || 0;
+      });
+    } else if (method === 'cash_bank') {
+      cashPaid = parseFloat(cashInput?.value) || 0;
+      document.querySelectorAll('#edit-exp-bank-payments-container .edit-exp-bank-amount').forEach(inp => {
+        bankPaid += parseFloat(inp.value) || 0;
+      });
+    }
+
+    const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
+    const diff = Math.round((totalAmount - totalPaid) * 100) / 100;
+
+    const totalEl = document.getElementById('edit-exp-calc-total');
+    const cashEl = document.getElementById('edit-exp-calc-cash');
+    const bankEl = document.getElementById('edit-exp-calc-bank');
+    const paidEl = document.getElementById('edit-exp-calc-paid');
+    const remEl = document.getElementById('edit-exp-calc-remaining');
+    const cashRow = document.getElementById('edit-exp-calc-cash-row');
+    const bankRow = document.getElementById('edit-exp-calc-bank-row');
+
+    if (totalEl) totalEl.textContent = formatCurrency(totalAmount);
+    if (cashEl) cashEl.textContent = formatCurrency(cashPaid);
+    if (bankEl) bankEl.textContent = formatCurrency(bankPaid);
+    if (paidEl) paidEl.textContent = formatCurrency(totalPaid);
+    if (remEl) remEl.textContent = formatCurrency(diff);
+
+    if (cashRow) cashRow.style.display = (method === 'bank') ? 'none' : 'flex';
+    if (bankRow) bankRow.style.display = (method === 'cash') ? 'none' : 'flex';
+
+    const hasDuplicate = !validateEditExpenseBanks();
+    const isMismatch = Math.abs(diff) > 0.005;
+    const hasZeroTotal = totalAmount <= 0;
+
+    let hasEmptyBank = false;
+    if (method === 'bank' || method === 'cash_bank') {
+      const bankRows = document.querySelectorAll('#edit-exp-bank-payments-container .bank-payment-row');
+      if (bankRows.length === 0) {
+        hasEmptyBank = true;
+      } else {
+        bankRows.forEach(r => {
+          const sel = r.querySelector('.edit-exp-bank-select')?.value;
+          const amt = parseFloat(r.querySelector('.edit-exp-bank-amount')?.value) || 0;
+          if (!sel || amt <= 0) hasEmptyBank = true;
+        });
+      }
+    }
+
+    if (warnEl) {
+      if (hasZeroTotal) {
+        warnEl.textContent = '⚠️ Please enter an expense amount.';
+        warnEl.style.display = 'block';
+      } else if (hasDuplicate) {
+        warnEl.textContent = '⚠️ Each bank account can only be selected once per expense.';
+        warnEl.style.display = 'block';
+      } else if (hasEmptyBank) {
+        warnEl.textContent = '⚠️ Please select a bank account and enter a valid amount for all bank rows.';
+        warnEl.style.display = 'block';
+      } else if (isMismatch) {
+        warnEl.textContent = `⚠️ Payment breakdown must equal the expense amount (${formatCurrency(totalAmount)}).`;
+        warnEl.style.display = 'block';
+      } else {
+        warnEl.style.display = 'none';
+      }
+    }
+
+    if (remEl) {
+      remEl.style.color = isMismatch ? 'var(--color-error)' : 'var(--color-success)';
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = hasZeroTotal || hasDuplicate || hasEmptyBank || isMismatch;
+    }
+  }
+
   // Expense: Create
   async function submitAddExpense(e) {
     e.preventDefault();
@@ -2790,17 +3204,70 @@ const Operations = (() => {
     setButtonLoading(btn, true);
 
     const amount = parseFloat(document.getElementById('exp-form-amount').value) || 0;
-    const method = document.getElementById('exp-form-method').value;
-    const bankID = document.getElementById('exp-form-bank').value || null;
     const category = document.getElementById('exp-form-category')?.value || 'general';
     const employeeID = (category === 'employee_advance') ? (document.getElementById('exp-form-emp')?.value || null) : null;
     const refID = document.getElementById('exp-form-ref')?.value?.trim() || null;
     const date = document.getElementById('exp-form-date')?.value || null;
+    const method = document.querySelector('input[name="exp-payment-method"]:checked')?.value || 'cash';
+
+    if (amount <= 0) {
+      setButtonLoading(btn, false);
+      showModalError('modal-add-expense', 'Please enter a valid expense amount greater than zero.');
+      return;
+    }
 
     if (category === 'employee_advance' && !employeeID) {
       setButtonLoading(btn, false);
       showModalError('modal-add-expense', 'Please select a staff member for the advance payment.');
       return;
+    }
+
+    let cashAmount = 0;
+    const bankPayments = [];
+
+    if (method === 'cash') {
+      cashAmount = amount;
+    } else if (method === 'bank') {
+      cashAmount = 0;
+      const bankRows = document.querySelectorAll('#exp-bank-payments-container .bank-payment-row');
+      if (bankRows.length === 0) {
+        setButtonLoading(btn, false);
+        showModalError('modal-add-expense', 'Please add at least one bank account payment.');
+        return;
+      }
+      for (const r of bankRows) {
+        const bankId = r.querySelector('.exp-bank-select')?.value;
+        const bAmt = parseFloat(r.querySelector('.exp-bank-amount')?.value) || 0;
+        if (!bankId || bAmt <= 0) {
+          setButtonLoading(btn, false);
+          showModalError('modal-add-expense', 'Please ensure all bank payment entries have an account and a positive amount.');
+          return;
+        }
+        bankPayments.push({ bank_account_id: bankId, amount: bAmt });
+      }
+    } else if (method === 'cash_bank') {
+      cashAmount = parseFloat(document.getElementById('exp-form-cash')?.value) || 0;
+      if (cashAmount <= 0) {
+        setButtonLoading(btn, false);
+        showModalError('modal-add-expense', 'Cash amount must be greater than zero for Cash + Bank payment method.');
+        return;
+      }
+      const bankRows = document.querySelectorAll('#exp-bank-payments-container .bank-payment-row');
+      if (bankRows.length === 0) {
+        setButtonLoading(btn, false);
+        showModalError('modal-add-expense', 'Please add at least one bank account payment.');
+        return;
+      }
+      for (const r of bankRows) {
+        const bankId = r.querySelector('.exp-bank-select')?.value;
+        const bAmt = parseFloat(r.querySelector('.exp-bank-amount')?.value) || 0;
+        if (!bankId || bAmt <= 0) {
+          setButtonLoading(btn, false);
+          showModalError('modal-add-expense', 'Please ensure all bank payment entries have an account and a positive amount.');
+          return;
+        }
+        bankPayments.push({ bank_account_id: bankId, amount: bAmt });
+      }
     }
 
     const payload = {
@@ -2809,9 +3276,11 @@ const Operations = (() => {
       employee_id: employeeID,
       reference_id: refID,
       payment_date: date,
+      amount: amount,
       total_amount: amount,
       payment_method: method,
-      bank_id: bankID
+      cash_amount: cashAmount,
+      bank_payments: bankPayments
     };
 
     const res = await window.API.post('/tenant/expenses', payload);
@@ -2828,6 +3297,7 @@ const Operations = (() => {
     loadSalaries();
     loadAttendance();
     loadDashboardMetrics();
+    loadCashBank();
   }
 
   // Expense: Edit
@@ -2840,7 +3310,50 @@ const Operations = (() => {
     const e = res.data;
     document.getElementById('edit-exp-id').value = e.id;
     document.getElementById('edit-exp-item').value = e.item || '';
-    document.getElementById('edit-exp-amount').value = e.total_amount || '0';
+    if (document.getElementById('edit-exp-category')) {
+      document.getElementById('edit-exp-category').value = e.category || 'general';
+    }
+    const totalAmount = parseFloat(e.total_amount) || 0;
+    document.getElementById('edit-exp-amount').value = totalAmount > 0 ? totalAmount : '0';
+
+    const method = e.payment_method || 'cash';
+    const radio = document.querySelector(`input[name="edit-exp-payment-method"][value="${method}"]`);
+    if (radio) radio.checked = true;
+
+    const container = document.getElementById('edit-exp-bank-payments-container');
+    if (container) container.innerHTML = '';
+
+    handleEditExpensePaymentMethodChange(method);
+
+    if (method === 'cash') {
+      const cashInp = document.getElementById('edit-exp-form-cash');
+      if (cashInp) cashInp.value = totalAmount.toFixed(2);
+    } else if (method === 'bank') {
+      const banks = e.payment_breakdown?.banks || [];
+      if (container) container.innerHTML = '';
+      if (banks.length > 0) {
+        banks.forEach(b => {
+          addEditExpenseBankRow(b.bank_account_id, parseFloat(b.amount) || '');
+        });
+      } else {
+        addEditExpenseBankRow('', totalAmount > 0 ? totalAmount.toFixed(2) : '');
+      }
+    } else if (method === 'cash_bank') {
+      const cashInp = document.getElementById('edit-exp-form-cash');
+      const cashAmt = parseFloat(e.payment_breakdown?.cash_amount) || 0;
+      if (cashInp) cashInp.value = cashAmt.toFixed(2);
+      const banks = e.payment_breakdown?.banks || [];
+      if (container) container.innerHTML = '';
+      if (banks.length > 0) {
+        banks.forEach(b => {
+          addEditExpenseBankRow(b.bank_account_id, parseFloat(b.amount) || '');
+        });
+      } else {
+        addEditExpenseBankRow('', '');
+      }
+    }
+
+    calcEditExpenseBreakdown();
     openModal('modal-edit-expense');
   }
 
@@ -2851,10 +3364,71 @@ const Operations = (() => {
     setButtonLoading(btn, true);
 
     const amount = parseFloat(document.getElementById('edit-exp-amount').value) || 0;
+    const category = document.getElementById('edit-exp-category')?.value || 'general';
+    const method = document.querySelector('input[name="edit-exp-payment-method"]:checked')?.value || 'cash';
+
+    if (amount <= 0) {
+      setButtonLoading(btn, false);
+      showModalError('modal-edit-expense', 'Please enter a valid expense amount greater than zero.');
+      return;
+    }
+
+    let cashAmount = 0;
+    const bankPayments = [];
+
+    if (method === 'cash') {
+      cashAmount = amount;
+    } else if (method === 'bank') {
+      cashAmount = 0;
+      const bankRows = document.querySelectorAll('#edit-exp-bank-payments-container .bank-payment-row');
+      if (bankRows.length === 0) {
+        setButtonLoading(btn, false);
+        showModalError('modal-edit-expense', 'Please add at least one bank account payment.');
+        return;
+      }
+      for (const r of bankRows) {
+        const bankId = r.querySelector('.edit-exp-bank-select')?.value;
+        const bAmt = parseFloat(r.querySelector('.edit-exp-bank-amount')?.value) || 0;
+        if (!bankId || bAmt <= 0) {
+          setButtonLoading(btn, false);
+          showModalError('modal-edit-expense', 'Please ensure all bank payment entries have an account and a positive amount.');
+          return;
+        }
+        bankPayments.push({ bank_account_id: bankId, amount: bAmt });
+      }
+    } else if (method === 'cash_bank') {
+      cashAmount = parseFloat(document.getElementById('edit-exp-form-cash')?.value) || 0;
+      if (cashAmount <= 0) {
+        setButtonLoading(btn, false);
+        showModalError('modal-edit-expense', 'Cash amount must be greater than zero for Cash + Bank payment method.');
+        return;
+      }
+      const bankRows = document.querySelectorAll('#edit-exp-bank-payments-container .bank-payment-row');
+      if (bankRows.length === 0) {
+        setButtonLoading(btn, false);
+        showModalError('modal-edit-expense', 'Please add at least one bank account payment.');
+        return;
+      }
+      for (const r of bankRows) {
+        const bankId = r.querySelector('.edit-exp-bank-select')?.value;
+        const bAmt = parseFloat(r.querySelector('.edit-exp-bank-amount')?.value) || 0;
+        if (!bankId || bAmt <= 0) {
+          setButtonLoading(btn, false);
+          showModalError('modal-edit-expense', 'Please ensure all bank payment entries have an account and a positive amount.');
+          return;
+        }
+        bankPayments.push({ bank_account_id: bankId, amount: bAmt });
+      }
+    }
 
     const payload = {
       item: document.getElementById('edit-exp-item').value.trim(),
-      total_amount: amount
+      category: category,
+      amount: amount,
+      total_amount: amount,
+      payment_method: method,
+      cash_amount: cashAmount,
+      bank_payments: bankPayments
     };
 
     const res = await window.API.put(`/tenant/expenses/${id}`, payload);
@@ -2869,6 +3443,80 @@ const Operations = (() => {
     showToast('Expense updated successfully');
     loadExpenses();
     loadDashboardMetrics();
+    loadCashBank();
+  }
+
+  // Expense: View Details Modal
+  async function viewExpense(id) {
+    const res = await window.API.get(`/tenant/expenses/${id}`);
+    if (!res.ok || !res.data) {
+      showToast(res.error || 'Failed to load expense details', 'error');
+      return;
+    }
+    const e = res.data;
+    const isAdvance = e.category === 'employee_advance';
+    const breakdown = e.payment_breakdown || {};
+    const method = e.payment_method || 'cash';
+
+    let methodBadge = '<span class="status-badge paid">Cash</span>';
+    if (method === 'bank') {
+      methodBadge = '<span class="status-badge cleared">Bank Only</span>';
+    } else if (method === 'cash_bank') {
+      methodBadge = '<span class="status-badge pending" style="background: rgba(147, 51, 234, 0.1); color: #7e22ce;">Cash + Bank</span>';
+    }
+
+    let paymentsHtml = '';
+    if (method === 'cash') {
+      paymentsHtml = `
+        <li style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--color-border-subtle);">
+          <span>Cash in Drawer</span>
+          <strong style="font-family:var(--font-mono);">${formatCurrency(e.total_amount)}</strong>
+        </li>
+      `;
+    } else if (method === 'bank') {
+      const banks = breakdown.banks || [];
+      paymentsHtml = banks.map(b => `
+        <li style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--color-border-subtle);">
+          <span>${escapeHTML(b.bank_name || 'Bank Account')}</span>
+          <strong style="font-family:var(--font-mono);">${formatCurrency(b.amount)}</strong>
+        </li>
+      `).join('');
+    } else if (method === 'cash_bank') {
+      const banks = breakdown.banks || [];
+      const cashAmt = breakdown.cash_amount || 0;
+      paymentsHtml = `
+        <li style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--color-border-subtle);">
+          <span>Cash in Drawer</span>
+          <strong style="font-family:var(--font-mono);">${formatCurrency(cashAmt)}</strong>
+        </li>
+      ` + banks.map(b => `
+        <li style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--color-border-subtle);">
+          <span>${escapeHTML(b.bank_name || 'Bank Account')}</span>
+          <strong style="font-family:var(--font-mono);">${formatCurrency(b.amount)}</strong>
+        </li>
+      `).join('');
+    }
+
+    document.getElementById('view-details-title').textContent = `Expense Details - ${e.item || 'Expense'}`;
+    document.getElementById('view-details-content').innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:0.75rem;font-size:0.875rem;">
+        <div><strong>Item / Purpose:</strong> ${escapeHTML(e.item)}</div>
+        <div><strong>Category:</strong> <span class="badge" style="font-size:0.75rem;background:rgba(99,102,241,0.1);color:#6366f1;">${escapeHTML((e.category || 'general').replace('_', ' ').toUpperCase())}</span></div>
+        ${isAdvance ? `<div><strong>Staff Member:</strong> <span style="font-weight:600;color:var(--color-error);">${escapeHTML(e.employee_name || 'Employee')}</span></div>` : ''}
+        <div><strong>Date Recorded:</strong> ${formatDateTime(e.created_at)}</div>
+        <div><strong>Payment Method:</strong> ${methodBadge}</div>
+        <div style="font-size:1.125rem;font-weight:700;color:var(--color-text-main);margin-top:0.25rem;">
+          Total Amount: <span style="color:var(--color-error);">${formatCurrency(e.total_amount)}</span>
+        </div>
+        <div style="margin-top:0.5rem;border-top:1px solid var(--color-border);padding-top:0.5rem;">
+          <strong style="display:block;margin-bottom:0.35rem;">Payment Breakdown:</strong>
+          <ul style="margin:0;padding:0;list-style:none;">
+            ${paymentsHtml}
+          </ul>
+        </div>
+      </div>
+    `;
+    openModal('modal-view-details');
   }
 
   // Attendance: Mark
@@ -4150,6 +4798,7 @@ const Operations = (() => {
     openEditPurchase,
     openEditExpense,
     openEditAttendance,
+    viewExpense,
     viewLineSale,
     viewCounterSale,
     viewEmployee,
@@ -4163,6 +4812,16 @@ const Operations = (() => {
     addPurchaseBankRow,
     removePurchaseBankRow,
     validatePurchaseBanks,
+    handleExpensePaymentMethodChange,
+    addExpenseBankRow,
+    removeExpenseBankRow,
+    validateExpenseBanks,
+    calcExpenseBreakdown,
+    handleEditExpensePaymentMethodChange,
+    addEditExpenseBankRow,
+    removeEditExpenseBankRow,
+    validateEditExpenseBanks,
+    calcEditExpenseBreakdown,
     openCustomerStatement,
     openMakePaymentFromStatement,
     openMakePaymentModal,

@@ -39,6 +39,7 @@ type TenantBankRepository interface {
 	AdjustBalance(ctx context.Context, tenantID, id uuid.UUID, delta decimal.Decimal) error
 	CreateTransaction(ctx context.Context, tx *domain.BankTransaction) error
 	ListTransactions(ctx context.Context, tenantID, bankID uuid.UUID, page, pageSize int) ([]domain.BankTransaction, int64, error)
+	DeleteTransactionsBySaleID(ctx context.Context, tenantID, saleID uuid.UUID) error
 	Delete(ctx context.Context, tenantID, id uuid.UUID) error
 	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, search, status string) ([]domain.TenantBank, int64, error)
 }
@@ -88,6 +89,7 @@ type TenantExpenseRepository interface {
 	Create(ctx context.Context, expense *domain.TenantExpense, payments []domain.TenantExpensePayment) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TenantExpense, error)
 	Update(ctx context.Context, expense *domain.TenantExpense) error
+	UpdateWithPayments(ctx context.Context, expense *domain.TenantExpense, payments []domain.TenantExpensePayment) error
 	Delete(ctx context.Context, tenantID, id uuid.UUID) error
 	List(ctx context.Context, tenantID uuid.UUID, page, pageSize int, date string, search string) ([]domain.TenantExpense, int64, error)
 }

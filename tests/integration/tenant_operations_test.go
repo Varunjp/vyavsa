@@ -228,3 +228,83 @@ func TestTenantOperations_TodayOverviewEndpoint(t *testing.T) {
 	assert.Equal(t, http.StatusOK, wMetrics.Code)
 	assert.Contains(t, wMetrics.Body.String(), `"today_overview"`)
 }
+
+func TestTenantOperations_ExpenseEndpoints_ValidationAndAuth(t *testing.T) {
+	cfg := &config.Config{
+		App: config.AppConfig{
+			Name:            "test-app",
+			Env:             "test",
+			Port:            "8080",
+			ShutdownTimeout: 2 * time.Second,
+		},
+		JWT: config.JWTConfig{
+			Secret:        "integration-test-secret-minimum-32-bytes",
+			AccessExpiry:  15 * time.Minute,
+			RefreshExpiry: 24 * time.Hour,
+		},
+		Metrics: config.MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+		CORS: config.CORSConfig{
+			AllowedOrigins: []string{"*"},
+		},
+	}
+
+	appLogger := logger.Default()
+	appMetrics := metrics.New()
+	srv := server.New(cfg, appLogger, nil, nil, appMetrics)
+	router := srv.Router()
+
+	jwtManager := auth.NewJWTManager(cfg.JWT)
+	tenantID := uuid.New()
+	tenantAdminID := uuid.New()
+	tenantUserID := uuid.New()
+
+	adminToken, err := jwtManager.GenerateTokenPair(tenantAdminID, &tenantID, "admin@business.com", auth.RoleTenantAdmin, auth.UserTypeTenantUser)
+	require.NoError(t, err)
+
+	userToken, err := jwtManager.GenerateTokenPair(tenantUserID, &tenantID, "staff@business.com", auth.RoleTenantUser, auth.UserTypeTenantUser)
+	require.NoError(t, err)
+
+	// 1. Unauthenticated requests to expense endpoints return 401
+	unauthPost, _ := http.NewRequest(http.MethodPost, "/api/v1/tenant/expenses", bytes.NewBufferString(`{"item":"Office Rent","total_amount":5000}`))
+	unauthPost.Header.Set("Content-Type", "application/json")
+	wUnauthPost := httptest.NewRecorder()
+	router.ServeHTTP(wUnauthPost, unauthPost)
+	assert.Equal(t, http.StatusUnauthorized, wUnauthPost.Code)
+
+	unauthGet, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/expenses", nil)
+	wUnauthGet := httptest.NewRecorder()
+	router.ServeHTTP(wUnauthGet, unauthGet)
+	assert.Equal(t, http.StatusUnauthorized, wUnauthGet.Code)
+
+	unauthGetByID, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/expenses/"+uuid.New().String(), nil)
+	wUnauthGetByID := httptest.NewRecorder()
+	router.ServeHTTP(wUnauthGetByID, unauthGetByID)
+	assert.Equal(t, http.StatusUnauthorized, wUnauthGetByID.Code)
+
+	unauthPut, _ := http.NewRequest(http.MethodPut, "/api/v1/tenant/expenses/"+uuid.New().String(), bytes.NewBufferString(`{"item":"New Rent"}`))
+	unauthPut.Header.Set("Content-Type", "application/json")
+	wPutUnauth := httptest.NewRecorder()
+	router.ServeHTTP(wPutUnauth, unauthPut)
+	assert.Equal(t, http.StatusUnauthorized, wPutUnauth.Code)
+
+	unauthDel, _ := http.NewRequest(http.MethodDelete, "/api/v1/tenant/expenses/"+uuid.New().String(), nil)
+	wDelUnauth := httptest.NewRecorder()
+	router.ServeHTTP(wDelUnauth, unauthDel)
+	assert.Equal(t, http.StatusUnauthorized, wDelUnauth.Code)
+
+	// 2. Authenticated Tenant User and Admin can access expenses list without 401
+	userGet, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/expenses", nil)
+	userGet.Header.Set("Authorization", "Bearer "+userToken.AccessToken)
+	wUserGet := httptest.NewRecorder()
+	router.ServeHTTP(wUserGet, userGet)
+	assert.NotEqual(t, http.StatusUnauthorized, wUserGet.Code)
+
+	adminGet, _ := http.NewRequest(http.MethodGet, "/api/v1/tenant/expenses", nil)
+	adminGet.Header.Set("Authorization", "Bearer "+adminToken.AccessToken)
+	wAdminGet := httptest.NewRecorder()
+	router.ServeHTTP(wAdminGet, adminGet)
+	assert.NotEqual(t, http.StatusUnauthorized, wAdminGet.Code)
+}

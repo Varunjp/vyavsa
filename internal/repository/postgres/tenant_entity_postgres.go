@@ -745,3 +745,13 @@ func (r *TenantBankPostgres) ListTransactions(ctx context.Context, tenantID, ban
 	}
 	return txs, total, nil
 }
+
+func (r *TenantBankPostgres) DeleteTransactionsBySaleID(ctx context.Context, tenantID, saleID uuid.UUID) error {
+	query := `DELETE FROM tenant_bank_transactions WHERE tenant_id = $1 AND sale_id = $2`
+	exec := GetExecutor(ctx, r.pool)
+	_, err := exec.Exec(ctx, query, tenantID, saleID)
+	if err != nil {
+		return appErrors.NewDatabase(fmt.Errorf("failed to delete bank transactions by sale_id: %w", err))
+	}
+	return nil
+}
