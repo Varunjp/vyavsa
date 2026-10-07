@@ -41,6 +41,13 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 	var oldAdvance decimal.Decimal
 	if existing != nil {
 		oldDailySalary = existing.DailySalary
+		if oldDailySalary.IsZero() {
+			if existing.Status == "present" {
+				oldDailySalary = emp.Salary
+			} else if existing.Status == "half_day" {
+				oldDailySalary = emp.Salary.Div(decimal.NewFromInt(2))
+			}
+		}
 		oldAdvance = existing.Advance
 	}
 
@@ -76,6 +83,10 @@ func (s *TenantOperationsService) RecordAttendance(ctx context.Context, tenantID
 		OT:          req.OT,
 		OTAmount:    newOTAmount,
 		Advance:     req.Advance,
+	}
+	if existing != nil {
+		att.ID = existing.ID
+		att.CreatedAt = existing.CreatedAt
 	}
 
 	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -347,29 +358,115 @@ func (s *TenantOperationsService) UpdateAttendance(ctx context.Context, tenantID
 		return nil, err
 	}
 
+	emp, err := s.empRepo.GetByID(ctx, tenantID, att.EmployeeID)
+	if err != nil {
+		return nil, appErrors.NewBadRequest("invalid employee for tenant")
+	}
+
+	oldDailySalary := att.DailySalary
+	if oldDailySalary.IsZero() {
+		if att.Status == "present" {
+			oldDailySalary = emp.Salary
+		} else if att.Status == "half_day" {
+			oldDailySalary = emp.Salary.Div(decimal.NewFromInt(2))
+		}
+	}
+
 	if req.Status != "" {
 		att.Status = req.Status
 	}
+
+	var newDailySalary decimal.Decimal
+	if att.Status == "present" {
+		newDailySalary = emp.Salary
+	} else if att.Status == "half_day" {
+		newDailySalary = emp.Salary.Div(decimal.NewFromInt(2))
+	} else {
+		newDailySalary = decimal.Zero
+	}
+	att.DailySalary = newDailySalary
+
+	oldOTAmount := att.OTAmount
 	if req.OT != nil {
 		att.OT = *req.OT
 	}
 	if req.OTAmount != nil {
 		att.OTAmount = *req.OTAmount
 	} else if req.OT != nil {
-		emp, err := s.empRepo.GetByID(ctx, tenantID, att.EmployeeID)
-		if err == nil {
-			att.OTAmount = req.OT.Mul(emp.OTRate)
-		}
+		att.OTAmount = req.OT.Mul(emp.OTRate)
 	}
+
+	oldAdvance := att.Advance
 	if req.Advance != nil {
 		att.Advance = *req.Advance
 	}
 
-	if err := s.attRepo.Update(ctx, att); err != nil {
+	salaryDelta := newDailySalary.Sub(oldDailySalary)
+	otDelta := att.OTAmount.Sub(oldOTAmount)
+	advanceDelta := att.Advance.Sub(oldAdvance)
+
+	err = s.transactor.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.attRepo.Update(txCtx, att); err != nil {
+			return err
+		}
+
+		if !otDelta.IsZero() {
+			if otDelta.GreaterThan(decimal.Zero) {
+				otRecord := &domain.EmployeeOvertime{
+					TenantID:     tenantID,
+					EmployeeID:   att.EmployeeID,
+					EmployeeName: emp.Name,
+					Amount:       otDelta,
+					OvertimeDate: att.Date,
+					Notes:        "Updated attendance overtime",
+				}
+				if err := s.otRepo.Create(txCtx, otRecord); err != nil {
+					return fmt.Errorf("failed to create overtime transaction: %w", err)
+				}
+			}
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, att.EmployeeID, otDelta); err != nil {
+				return fmt.Errorf("failed to adjust salary balance for overtime: %w", err)
+			}
+		}
+
+		if !salaryDelta.IsZero() {
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, att.EmployeeID, salaryDelta); err != nil {
+				return fmt.Errorf("failed to adjust employee salary balance: %w", err)
+			}
+		}
+
+		if !advanceDelta.IsZero() {
+			if s.summaryRepo != nil {
+				if err := s.summaryRepo.AdjustBalances(txCtx, tenantID, advanceDelta.Neg(), decimal.Zero, decimal.Zero, decimal.Zero); err != nil {
+					return fmt.Errorf("failed to adjust financial summary for advance: %w", err)
+				}
+			}
+			if advanceDelta.GreaterThan(decimal.Zero) {
+				advRecord := &domain.EmployeeAdvance{
+					TenantID:      tenantID,
+					EmployeeID:    att.EmployeeID,
+					EmployeeName:  emp.Name,
+					Amount:        advanceDelta,
+					PaymentMethod: "cash",
+					AdvanceDate:   att.Date,
+					Notes:         "Updated attendance cash advance",
+				}
+				if err := s.advRepo.Create(txCtx, advRecord); err != nil {
+					return fmt.Errorf("failed to create advance transaction: %w", err)
+				}
+			}
+			if err := s.salaryRepo.AdjustBalance(txCtx, tenantID, att.EmployeeID, advanceDelta.Neg()); err != nil {
+				return fmt.Errorf("failed to adjust salary balance for advance: %w", err)
+			}
+		}
+
+		_, _ = s.salaryRepo.RecalculateBalance(txCtx, tenantID, att.EmployeeID)
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	_, _ = s.salaryRepo.RecalculateBalance(ctx, tenantID, att.EmployeeID)
 	s.enqueueDailyStats(ctx, tenantID, att.Date)
 	return att, nil
 }

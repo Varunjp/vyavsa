@@ -232,10 +232,10 @@ func (r *AttendancePostgres) List(ctx context.Context, tenantID uuid.UUID, page,
 
 func (r *AttendancePostgres) GetTodaySalaryEarned(ctx context.Context, tenantID uuid.UUID, date string) (decimal.Decimal, error) {
 	query := `
-		SELECT COALESCE(SUM(COALESCE(a.daily_salary, e.salary)), 0)
+		SELECT COALESCE(SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END), 0.00)
 		FROM attendance a
 		JOIN tenant_employees e ON e.id = a.employee_id
-		WHERE a.tenant_id = $1 AND a.date = $2::date AND a.status = 'present'
+		WHERE a.tenant_id = $1 AND a.date = $2::date AND a.status IN ('present', 'half_day')
 	`
 	exec := GetExecutor(ctx, r.pool)
 	var total decimal.Decimal
@@ -571,10 +571,16 @@ func (r *EmployeeSalaryPostgres) GetByEmployeeID(ctx context.Context, tenantID, 
 		       e.tenant_id, e.id as employee_id, e.name as employee_name,
 		       e.salary as salary_rate, e.ot_rate,
 		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		        COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
 		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
 		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
+		       COALESCE(s.balance,
+		        (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		         COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		         COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		         COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00))
+		       ) as balance,
 		       COALESCE(s.created_at, NOW()) as created_at,
 		       COALESCE(s.updated_at, NOW()) as updated_at
 		FROM tenant_employees e
@@ -611,7 +617,13 @@ func (r *EmployeeSalaryPostgres) GetByEmployeeIDForUpdate(ctx context.Context, t
 	exec := GetExecutor(ctx, r.pool)
 	initQuery := `
 		INSERT INTO employee_salary (tenant_id, employee_id, balance)
-		VALUES ($1, $2, 0.00)
+		VALUES (
+			$1, $2,
+			(COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a JOIN tenant_employees e ON e.id = a.employee_id WHERE a.tenant_id = $1 AND a.employee_id = $2), 0.00) +
+			 COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = $1 AND employee_id = $2), 0.00) -
+			 COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = $1 AND employee_id = $2), 0.00) -
+			 COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = $1 AND employee_id = $2), 0.00))
+		)
 		ON CONFLICT (tenant_id, employee_id) DO NOTHING
 	`
 	if _, err := exec.Exec(ctx, initQuery, tenantID, employeeID); err != nil {
@@ -622,10 +634,11 @@ func (r *EmployeeSalaryPostgres) GetByEmployeeIDForUpdate(ctx context.Context, t
 		SELECT s.id, e.tenant_id, e.id as employee_id, e.name as employee_name,
 		       e.salary as salary_rate, e.ot_rate,
 		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		        COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
 		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
 		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
+		       s.balance as balance,
 		       s.created_at, s.updated_at
 		FROM tenant_employees e
 		JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
@@ -699,7 +712,7 @@ func (r *EmployeeSalaryPostgres) RecalculateBalance(ctx context.Context, tenantI
 			SELECT
 				e.tenant_id,
 				e.id as employee_id,
-				(e.salary +
+				(COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
 				 COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
 				 COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
 				 COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)
@@ -762,10 +775,16 @@ func (r *EmployeeSalaryPostgres) List(ctx context.Context, tenantID uuid.UUID, p
 		       e.tenant_id, e.id as employee_id, e.name as employee_name,
 		       e.salary as salary_rate, e.ot_rate,
 		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		        COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
 		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
 		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
+		       COALESCE(s.balance,
+		        (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		         COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		         COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		         COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00))
+		       ) as balance,
 		       COALESCE(s.created_at, e.created_at) as created_at,
 		       COALESCE(s.updated_at, e.updated_at) as updated_at
 		FROM tenant_employees e
@@ -821,7 +840,12 @@ func (r *EmployeeSalaryPostgres) ListPending(ctx context.Context, tenantID uuid.
 		SELECT COUNT(*)
 		FROM tenant_employees e
 		LEFT JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
-		WHERE e.tenant_id = $1 AND (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) > 0
+		WHERE e.tenant_id = $1 AND COALESCE(s.balance,
+		  (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		   COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		   COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		   COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00))
+		) > 0
 	`
 	exec := GetExecutor(ctx, r.pool)
 	var total int64
@@ -834,15 +858,26 @@ func (r *EmployeeSalaryPostgres) ListPending(ctx context.Context, tenantID uuid.
 		       e.tenant_id, e.id as employee_id, e.name as employee_name,
 		       e.salary as salary_rate, e.ot_rate,
 		       COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_overtime,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
+		       (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		        COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as gross_salary,
 		       COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_advances,
 		       COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) as total_paid,
-		       (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) as balance,
+		       COALESCE(s.balance,
+		        (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		         COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		         COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		         COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00))
+		       ) as balance,
 		       COALESCE(s.created_at, e.created_at) as created_at,
 		       COALESCE(s.updated_at, e.updated_at) as updated_at
 		FROM tenant_employees e
 		LEFT JOIN employee_salary s ON s.tenant_id = e.tenant_id AND s.employee_id = e.id
-		WHERE e.tenant_id = $1 AND (e.salary + COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) - COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00)) > 0
+		WHERE e.tenant_id = $1 AND COALESCE(s.balance,
+		  (COALESCE((SELECT SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END) FROM attendance a WHERE a.tenant_id = e.tenant_id AND a.employee_id = e.id), 0.00) +
+		   COALESCE((SELECT SUM(amount) FROM employee_overtime WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		   COALESCE((SELECT SUM(amount) FROM employee_advances WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00) -
+		   COALESCE((SELECT SUM(amount) FROM employee_salary_payment WHERE tenant_id = e.tenant_id AND employee_id = e.id), 0.00))
+		) > 0
 		ORDER BY balance DESC, e.name ASC
 		LIMIT $2 OFFSET $3
 	`
@@ -1385,13 +1420,13 @@ func (r *TenantDailyStatsPostgres) ComputeAndSyncDailyStats(ctx context.Context,
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating attendance: %w", err))
 	}
 
-	// 7. Today's Employee Salary (earned for present employees)
+	// 7. Today's Employee Salary (earned for present/half_day employees)
 	var todayEmpSalary decimal.Decimal
 	salaryEarnedQuery := `
-		SELECT COALESCE(SUM(COALESCE(a.daily_salary, e.salary)), 0)
+		SELECT COALESCE(SUM(CASE WHEN a.daily_salary > 0 THEN a.daily_salary WHEN a.status = 'present' THEN e.salary WHEN a.status = 'half_day' THEN ROUND(e.salary / 2, 2) ELSE 0.00 END), 0.00)
 		FROM attendance a
 		JOIN tenant_employees e ON e.id = a.employee_id
-		WHERE a.tenant_id = $1 AND a.date = $2::date AND a.status = 'present'
+		WHERE a.tenant_id = $1 AND a.date = $2::date AND a.status IN ('present', 'half_day')
 	`
 	if err := exec.QueryRow(ctx, salaryEarnedQuery, tenantID, date).Scan(&todayEmpSalary); err != nil {
 		return nil, appErrors.NewDatabase(fmt.Errorf("failed aggregating today's employee salary: %w", err))
