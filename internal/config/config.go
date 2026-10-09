@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/mail"
 	"net/url"
 	"os"
 	"strconv"
@@ -78,14 +79,16 @@ type PasswordResetConfig struct {
 	RateLimitWindow  time.Duration
 }
 
-// MailerConfig holds SMTP email dispatch settings
+// MailerConfig holds email dispatch settings for SMTP and Resend providers
 type MailerConfig struct {
-	Host     string
-	Port     int
-	Username string
-	Password string
-	From     string
-	FromName string
+	Provider     string
+	Host         string
+	Port         int
+	Username     string
+	Password     string
+	From         string
+	FromName     string
+	ResendAPIKey string
 }
 
 // LogConfig holds structured logging settings
@@ -222,14 +225,39 @@ func Load() (*Config, error) {
 			MaxIPRequests:    getIntEnv("PASSWORD_RESET_MAX_IP_REQUESTS", 10),
 			RateLimitWindow:  getDurationEnv("PASSWORD_RESET_RATE_LIMIT_WINDOW", 15*time.Minute),
 		},
-		Mailer: MailerConfig{
-			Host:     getEnv("SMTP_HOST", ""),
-			Port:     getIntEnv("SMTP_PORT", 587),
-			Username: getEnv("SMTP_USERNAME", ""),
-			Password: getEnv("SMTP_PASSWORD", ""),
-			From:     getEnv("SMTP_FROM", "no-reply@vyavsa.com"),
-			FromName: getEnv("SMTP_FROM_NAME", "Vyavsa"),
-		},
+		Mailer: func() MailerConfig {
+			provider := strings.ToLower(strings.TrimSpace(getEnv("EMAIL_PROVIDER", "")))
+			env := getEnv("APP_ENV", "development")
+			if provider == "" && env != "production" {
+				if getEnv("SMTP_HOST", "") != "" {
+					provider = "smtp"
+				} else {
+					provider = "log"
+				}
+			}
+
+			emailFrom := getEnvWithFallback("EMAIL_FROM", "SMTP_FROM", "no-reply@vyavsa.com")
+			emailFromName := getEnvWithFallback("EMAIL_FROM_NAME", "SMTP_FROM_NAME", "Vyavsa Support")
+
+			// If emailFrom is formatted as RFC 5322 "Name <email@domain.com>", parse and split components
+			if parsedAddr, err := mail.ParseAddress(emailFrom); err == nil && parsedAddr.Address != "" {
+				emailFrom = parsedAddr.Address
+				if parsedAddr.Name != "" && os.Getenv("EMAIL_FROM_NAME") == "" && os.Getenv("SMTP_FROM_NAME") == "" {
+					emailFromName = parsedAddr.Name
+				}
+			}
+
+			return MailerConfig{
+				Provider:     provider,
+				Host:         getEnv("SMTP_HOST", ""),
+				Port:         getIntEnv("SMTP_PORT", 587),
+				Username:     getEnv("SMTP_USERNAME", ""),
+				Password:     getEnv("SMTP_PASSWORD", ""),
+				From:         emailFrom,
+				FromName:     emailFromName,
+				ResendAPIKey: getEnv("RESEND_API_KEY", ""),
+			}
+		}(),
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
 			Format: getEnv("LOG_FORMAT", ""), // Defaults to json in prod, text in dev
@@ -331,6 +359,43 @@ func (c *Config) Validate() error {
 		if c.RateLimit.PlatformRequests <= 0 || c.RateLimit.PlatformWindow <= 0 {
 			return fmt.Errorf("RATE_LIMIT_PLATFORM_REQUESTS and RATE_LIMIT_PLATFORM_WINDOW must be positive")
 		}
+	}
+
+	// Email provider validation
+	switch strings.ToLower(strings.TrimSpace(c.Mailer.Provider)) {
+	case "":
+		if c.App.Env == "production" {
+			return fmt.Errorf("EMAIL_PROVIDER must be explicitly configured in production (e.g. 'resend')")
+		}
+	case "resend":
+		if strings.TrimSpace(c.Mailer.ResendAPIKey) == "" {
+			return fmt.Errorf("RESEND_API_KEY cannot be empty when EMAIL_PROVIDER=resend")
+		}
+		if strings.TrimSpace(c.Mailer.From) == "" {
+			return fmt.Errorf("EMAIL_FROM cannot be empty when EMAIL_PROVIDER=resend")
+		}
+	case "smtp":
+		if c.App.Env == "production" {
+			return fmt.Errorf("EMAIL_PROVIDER 'smtp' conflicts with production environment policy; 'resend' is required for production email delivery")
+		}
+		if strings.TrimSpace(c.Mailer.Host) == "" {
+			return fmt.Errorf("SMTP_HOST cannot be empty when EMAIL_PROVIDER=smtp")
+		}
+		if c.Mailer.Port <= 0 {
+			return fmt.Errorf("SMTP_PORT must be greater than 0 when EMAIL_PROVIDER=smtp")
+		}
+		if strings.TrimSpace(c.Mailer.Username) == "" || strings.TrimSpace(c.Mailer.Password) == "" {
+			return fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD cannot be empty when EMAIL_PROVIDER=smtp")
+		}
+		if strings.TrimSpace(c.Mailer.From) == "" {
+			return fmt.Errorf("EMAIL_FROM cannot be empty when EMAIL_PROVIDER=smtp")
+		}
+	case "log":
+		if c.App.Env == "production" {
+			return fmt.Errorf("EMAIL_PROVIDER 'log' is not permitted in production")
+		}
+	default:
+		return fmt.Errorf("unsupported EMAIL_PROVIDER %q; valid options are 'resend', 'smtp', or 'log'", c.Mailer.Provider)
 	}
 
 	return nil
@@ -456,6 +521,16 @@ func getSecondsOrDurationWithFallbackEnv(primaryKey, secondaryKey string, fallba
 		if d, err := time.ParseDuration(trimmed); err == nil {
 			return d
 		}
+	}
+	return fallback
+}
+
+func getEnvWithFallback(primaryKey, secondaryKey, fallback string) string {
+	if val := os.Getenv(primaryKey); val != "" {
+		return strings.TrimSpace(val)
+	}
+	if val := os.Getenv(secondaryKey); val != "" {
+		return strings.TrimSpace(val)
 	}
 	return fallback
 }

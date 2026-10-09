@@ -205,6 +205,18 @@ func (w *EmailWorker) processWithRetry(ctx context.Context, job EmailJob) {
 			return
 		}
 
+		// Check if error is permanent (e.g. invalid recipient, bad authentication)
+		if mailer.IsPermanentError(err) {
+			w.log.ErrorContext(ctx, "permanent email delivery failure, skipping retries",
+				slog.String("to", job.ToEmail),
+				slog.String("error", err.Error()),
+			)
+			if w.metrics != nil {
+				w.metrics.IncEmailWorkerFailure()
+			}
+			return
+		}
+
 		if w.metrics != nil {
 			w.metrics.IncEmailWorkerRetry()
 		}

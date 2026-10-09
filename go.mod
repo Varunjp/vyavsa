@@ -8,6 +8,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/prometheus/client_golang v1.24.1
+	github.com/resend/resend-go/v2 v2.28.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/crypto v0.54.0
 )

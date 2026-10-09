@@ -263,7 +263,7 @@ func (s *Server) setupAPIRoutes(apiV1 *gin.RouterGroup) {
 	s.rateLimiter = rateLimiterService
 	rlMiddleware := middleware.NewRateLimiterMiddleware(rateLimiterService, s.metrics, s.log)
 
-	rawMailer := mailer.NewMailer(s.cfg.Mailer, s.log.Logger)
+	rawMailer := mailer.NewMailerWithMetrics(s.cfg.Mailer, s.metrics, s.log.Logger)
 	s.emailWorker = worker.NewEmailWorker(rawMailer, s.redis, s.metrics, s.log.Logger, 3)
 	appMailer := mailer.NewAsyncMailer(s.emailWorker)
 

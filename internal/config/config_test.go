@@ -155,4 +155,230 @@ func TestConfigValidation(t *testing.T) {
 		err := cfg.Validate()
 		assert.NoError(t, err)
 	})
+
+	t.Run("Email Provider - Resend validates successfully in production", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "production",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			JWT: JWTConfig{
+				Secret: "super-secret-key-that-is-at-least-32-bytes-long",
+			},
+			Mailer: MailerConfig{
+				Provider:     "resend",
+				ResendAPIKey: "re_prod_test_key_12345",
+				From:         "noreply@vyavsa.com",
+			},
+		}
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("Email Provider - Missing Resend API key fails fast", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "production",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			JWT: JWTConfig{
+				Secret: "super-secret-key-that-is-at-least-32-bytes-long",
+			},
+			Mailer: MailerConfig{
+				Provider:     "resend",
+				ResendAPIKey: "", // missing
+				From:         "noreply@vyavsa.com",
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "RESEND_API_KEY cannot be empty")
+	})
+
+	t.Run("Email Provider - SMTP validates successfully in development", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "development",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			Mailer: MailerConfig{
+				Provider: "smtp",
+				Host:     "smtp.gmail.com",
+				Port:     587,
+				Username: "user@gmail.com",
+				Password: "app-password",
+				From:     "user@gmail.com",
+			},
+		}
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("Email Provider - Missing SMTP credentials fails fast", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "development",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			Mailer: MailerConfig{
+				Provider: "smtp",
+				Host:     "smtp.gmail.com",
+				Port:     587,
+				Username: "", // missing credentials
+				Password: "",
+				From:     "user@gmail.com",
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "SMTP_USERNAME and SMTP_PASSWORD cannot be empty")
+	})
+
+	t.Run("Email Provider - Missing SMTP host fails fast", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "development",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			Mailer: MailerConfig{
+				Provider: "smtp",
+				Host:     "", // missing
+				Port:     587,
+				Username: "user",
+				Password: "password",
+				From:     "user@gmail.com",
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "SMTP_HOST cannot be empty")
+	})
+
+	t.Run("Email Provider - Unsupported provider fails clearly", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "development",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			Mailer: MailerConfig{
+				Provider: "sendgrid",
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported EMAIL_PROVIDER \"sendgrid\"")
+	})
+
+	t.Run("Email Provider - Production cannot silently fall back to development SMTP", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "production",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			JWT: JWTConfig{
+				Secret: "super-secret-key-that-is-at-least-32-bytes-long",
+			},
+			Mailer: MailerConfig{
+				Provider: "", // unconfigured in production
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "EMAIL_PROVIDER must be explicitly configured in production")
+	})
+
+	t.Run("Email Provider - Production rejects development SMTP provider", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "production",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			JWT: JWTConfig{
+				Secret: "super-secret-key-that-is-at-least-32-bytes-long",
+			},
+			Mailer: MailerConfig{
+				Provider: "smtp",
+				Host:     "smtp.gmail.com",
+				Port:     587,
+				Username: "user",
+				Password: "password",
+				From:     "user@gmail.com",
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicts with production environment policy")
+	})
+
+	t.Run("Email Provider - Production rejects simulated log provider", func(t *testing.T) {
+		cfg := &Config{
+			App: AppConfig{
+				Name: "test",
+				Port: "8080",
+				Env:  "production",
+			},
+			Database: DatabaseConfig{
+				Name:     "db",
+				User:     "user",
+				MaxConns: 10,
+			},
+			JWT: JWTConfig{
+				Secret: "super-secret-key-that-is-at-least-32-bytes-long",
+			},
+			Mailer: MailerConfig{
+				Provider: "log",
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "EMAIL_PROVIDER 'log' is not permitted in production")
+	})
 }

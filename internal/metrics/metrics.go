@@ -66,6 +66,8 @@ type Metrics struct {
 	emailWorkerJobsTotal          prometheus.Counter
 	emailWorkerFailuresTotal      prometheus.Counter
 	emailWorkerRetryTotal         prometheus.Counter
+	emailDeliveryTotal            *prometheus.CounterVec
+	emailDeliveryDuration         *prometheus.HistogramVec
 
 	// Daily Report Metrics
 	dailyReportGenerationTotal    *prometheus.CounterVec
@@ -420,6 +422,25 @@ func New() *Metrics {
 				Help:      "Total email background worker retries",
 			},
 		),
+		emailDeliveryTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "billbook",
+				Subsystem: "email",
+				Name:      "delivery_total",
+				Help:      "Total number of email delivery attempts by provider and status",
+			},
+			[]string{"provider", "status"},
+		),
+		emailDeliveryDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "billbook",
+				Subsystem: "email",
+				Name:      "delivery_duration_seconds",
+				Help:      "Email delivery latency by provider in seconds",
+				Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15},
+			},
+			[]string{"provider"},
+		),
 		dailyReportGenerationTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "billbook",
@@ -516,6 +537,8 @@ func New() *Metrics {
 		m.emailWorkerJobsTotal,
 		m.emailWorkerFailuresTotal,
 		m.emailWorkerRetryTotal,
+		m.emailDeliveryTotal,
+		m.emailDeliveryDuration,
 		m.dailyReportGenerationTotal,
 		m.dailyReportGenerationDuration,
 		m.dailyReportTransactionsTotal,
@@ -914,6 +937,20 @@ func (m *Metrics) IncEmailWorkerFailure() {
 func (m *Metrics) IncEmailWorkerRetry() {
 	if m != nil && m.emailWorkerRetryTotal != nil {
 		m.emailWorkerRetryTotal.Inc()
+	}
+}
+
+// IncEmailDelivery increments the counter for email delivery attempts by provider and status
+func (m *Metrics) IncEmailDelivery(provider, status string) {
+	if m != nil && m.emailDeliveryTotal != nil {
+		m.emailDeliveryTotal.WithLabelValues(provider, status).Inc()
+	}
+}
+
+// ObserveEmailDeliveryDuration records email delivery duration by provider
+func (m *Metrics) ObserveEmailDeliveryDuration(provider string, durationSeconds float64) {
+	if m != nil && m.emailDeliveryDuration != nil {
+		m.emailDeliveryDuration.WithLabelValues(provider).Observe(durationSeconds)
 	}
 }
 

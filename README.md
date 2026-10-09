@@ -141,9 +141,20 @@ make migrate-down
 
 ---
 
+## 📧 Transactional Email Delivery
+
+Vyavsa routes transactional emails (password reset OTPs, notifications) through a provider-agnostic interface:
+- **Development**: Gmail SMTP (`EMAIL_PROVIDER=smtp`) or simulated logger (`EMAIL_PROVIDER=log`).
+- **Production**: Resend (`EMAIL_PROVIDER=resend`) with domain verification, fail-safe startup checks, and Prometheus metrics tracking.
+
+Detailed configuration and domain verification guide: [Production Email Delivery with Resend](docs/email-delivery-resend.md).
+
+---
+
 ## 📖 Architecture Decision Records (ADRs)
 - [ADR-001: Modular Monolith Architecture](docs/architecture/ADR-001-modular-monolith.md)
 - [ADR-002: PostgreSQL as Single Source of Truth](docs/architecture/ADR-002-postgresql-source-of-truth.md)
 - [ADR-003: Redis Usage & Graceful Degradation](docs/architecture/ADR-003-redis-usage.md)
 - [ADR-004: Observability-First Architecture](docs/architecture/ADR-004-observability-first.md)
 - [ADR-005: Schema Refinements & Multi-Tenancy](docs/architecture/ADR-005-schema-and-multi-tenancy.md)
+
