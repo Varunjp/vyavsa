@@ -138,6 +138,44 @@ func TestEmailWorker_PermanentFailureHandling(t *testing.T) {
 	}
 }
 
+type permanentErrMockMailer struct {
+	calls int32
+}
+
+type mockPermError struct{}
+
+func (e *mockPermError) Error() string {
+	return "permanent delivery failure (invalid recipient or auth)"
+}
+func (e *mockPermError) IsPermanent() bool { return true }
+
+func (m *permanentErrMockMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp string, expiry time.Duration) error {
+	atomic.AddInt32(&m.calls, 1)
+	return &mockPermError{}
+}
+
+func TestEmailWorker_PermanentErrorFastAbort(t *testing.T) {
+	mailerMock := &permanentErrMockMailer{}
+	w := worker.NewEmailWorker(mailerMock, nil, nil, nil, 3)
+
+	ctx := context.Background()
+	w.Start(ctx)
+	defer w.Stop()
+
+	err := w.EnqueueEmail(ctx, "unrecoverable@example.com", "111222", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected enqueue error: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Since error was permanent, it should not have retried 3 times; exactly 1 attempt
+	calls := atomic.LoadInt32(&mailerMock.calls)
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 attempt for permanent error (no retries), got %d", calls)
+	}
+}
+
 func TestEmailWorker_GracefulShutdown(t *testing.T) {
 	mailerMock := &mockMailer{}
 	w := worker.NewEmailWorker(mailerMock, nil, nil, nil, 3)

@@ -2,89 +2,140 @@ package mailer
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/smtp"
 	"strings"
 	"time"
 
 	"github.com/Varunjp/vyavsa/internal/config"
+	"github.com/Varunjp/vyavsa/internal/metrics"
 )
 
-// Mailer defines email sending contracts
+// Mailer defines high-level business email sending contracts
 type Mailer interface {
 	SendPasswordResetOTP(ctx context.Context, toEmail, otp string, expiry time.Duration) error
 }
 
-// NewMailer creates an appropriate Mailer implementation based on configuration
-func NewMailer(cfg config.MailerConfig, log *slog.Logger) Mailer {
+// NewSender initializes an EmailSender based on configuration
+func NewSender(cfg config.MailerConfig, log *slog.Logger) (EmailSender, error) {
+	return NewSenderWithMetrics(cfg, nil, log)
+}
+
+// NewSenderWithMetrics initializes an EmailSender with Prometheus metrics recording
+func NewSenderWithMetrics(cfg config.MailerConfig, m *metrics.Metrics, log *slog.Logger) (EmailSender, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+
 	cfg.Host = strings.TrimSpace(cfg.Host)
 	cfg.Username = strings.TrimSpace(cfg.Username)
 	cfg.Password = strings.TrimSpace(cfg.Password)
 	cfg.From = strings.Trim(strings.TrimSpace(cfg.From), "\"")
 	cfg.FromName = strings.Trim(strings.TrimSpace(cfg.FromName), "\"")
+	cfg.ResendAPIKey = strings.TrimSpace(cfg.ResendAPIKey)
 
-	if cfg.Host != "" && cfg.Port > 0 {
-		log.Info("SMTP mailer active",
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	switch provider {
+	case "resend":
+		if cfg.ResendAPIKey == "" {
+			return nil, fmt.Errorf("RESEND_API_KEY is required when EMAIL_PROVIDER=resend")
+		}
+		log.Info("initializing Resend email provider",
+			slog.String("from", cfg.From),
+			slog.String("from_name", cfg.FromName),
+		)
+		return NewResendSenderWithMetrics(cfg, m, log), nil
+
+	case "smtp":
+		if cfg.Host == "" || cfg.Port <= 0 {
+			return nil, fmt.Errorf("SMTP_HOST and valid SMTP_PORT are required when EMAIL_PROVIDER=smtp")
+		}
+		log.Info("initializing SMTP email provider",
 			slog.String("host", cfg.Host),
 			slog.Int("port", cfg.Port),
 			slog.String("from", cfg.From),
 			slog.String("user", cfg.Username),
 		)
-		return NewSMTPMailer(cfg, log)
-	}
-	log.Warn("SMTP host or port not configured; fallback to simulated LogMailer (emails logged, not delivered)")
-	return NewLogMailer(log)
-}
+		return NewSMTPSenderWithMetrics(cfg, m, log), nil
 
-// LogMailer logs email dispatch without printing sensitive OTP values
-type LogMailer struct {
-	log *slog.Logger
-}
+	case "log":
+		log.Info("initializing Log email provider (simulated delivery)")
+		return NewLogSenderWithMetrics(m, log), nil
 
-// NewLogMailer creates a development/test logger-based mailer
-func NewLogMailer(log *slog.Logger) *LogMailer {
-	return &LogMailer{log: log}
-}
+	case "":
+		// Fallback for tests or legacy callers: check Host/Port
+		if cfg.Host != "" && cfg.Port > 0 {
+			log.Info("SMTP host configured without explicit provider, defaulting to SMTP",
+				slog.String("host", cfg.Host),
+				slog.Int("port", cfg.Port),
+			)
+			return NewSMTPSenderWithMetrics(cfg, m, log), nil
+		}
+		log.Info("email provider unconfigured; defaulting to simulated Log provider")
+		return NewLogSenderWithMetrics(m, log), nil
 
-// SendPasswordResetOTP simulates sending an email by logging recipient metadata
-func (m *LogMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp string, expiry time.Duration) error {
-	m.log.InfoContext(ctx, "simulating password recovery email dispatch",
-		slog.String("to", toEmail),
-		slog.Duration("expiry", expiry),
-		slog.String("service", "Vyavsa Small Business Bill Book"),
-	)
-	return nil
-}
-
-// SMTPMailer delivers emails over standard SMTP
-type SMTPMailer struct {
-	cfg config.MailerConfig
-	log *slog.Logger
-}
-
-// NewSMTPMailer creates a production SMTP mailer
-func NewSMTPMailer(cfg config.MailerConfig, log *slog.Logger) *SMTPMailer {
-	return &SMTPMailer{
-		cfg: cfg,
-		log: log,
+	default:
+		return nil, fmt.Errorf("unsupported email provider %q; valid options are 'resend', 'smtp', or 'log'", cfg.Provider)
 	}
 }
 
-// SendPasswordResetOTP sends a branded password reset email containing the single-use OTP
-func (m *SMTPMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp string, expiry time.Duration) error {
+// NewMailer creates an appropriate Mailer implementation based on configuration
+func NewMailer(cfg config.MailerConfig, log *slog.Logger) Mailer {
+	return NewMailerWithMetrics(cfg, nil, log)
+}
+
+// NewMailerWithMetrics creates a Mailer with metrics recording
+func NewMailerWithMetrics(cfg config.MailerConfig, m *metrics.Metrics, log *slog.Logger) Mailer {
+	if log == nil {
+		log = slog.Default()
+	}
+
+	sender, err := NewSenderWithMetrics(cfg, m, log)
+	if err != nil {
+		log.Error("failed to initialize configured email sender, email sending will fail",
+			slog.String("provider", cfg.Provider),
+			slog.String("error", err.Error()),
+		)
+		return NewEmailService(newErrorSender(err), cfg, m, log)
+	}
+
+	return NewEmailService(sender, cfg, m, log)
+}
+
+// EmailService implements Mailer by rendering business email templates and dispatching via EmailSender
+type EmailService struct {
+	sender  EmailSender
+	cfg     config.MailerConfig
+	metrics *metrics.Metrics
+	log     *slog.Logger
+}
+
+// NewEmailService constructs a new business email service
+func NewEmailService(
+	sender EmailSender,
+	cfg config.MailerConfig,
+	m *metrics.Metrics,
+	log *slog.Logger,
+) *EmailService {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &EmailService{
+		sender:  sender,
+		cfg:     cfg,
+		metrics: m,
+		log:     log,
+	}
+}
+
+// Sender returns the underlying EmailSender
+func (s *EmailService) Sender() EmailSender {
+	return s.sender
+}
+
+// SendPasswordResetOTP renders and dispatches a branded password reset OTP email
+func (s *EmailService) SendPasswordResetOTP(ctx context.Context, toEmail, otp string, expiry time.Duration) error {
 	subject := "Reset your Vyavsa password"
-	from := m.cfg.From
-	if from == "" {
-		from = "no-reply@vyavsa.com"
-	}
-
-	fromName := m.cfg.FromName
-	if fromName == "" {
-		fromName = "Vyavsa Support"
-	}
 
 	expiryMinutes := int(expiry.Minutes())
 	if expiryMinutes <= 0 {
@@ -143,118 +194,45 @@ func (m *SMTPMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp stri
 </body>
 </html>`, otp, expiryMinutes)
 
-	msg := strings.Builder{}
-	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", fromName, from))
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", toEmail))
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
-	msg.WriteString("MIME-Version: 1.0\r\n")
-	boundary := "vyavsa_boundary_part"
-	msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", boundary))
-
-	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
-	msg.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n\r\n")
-	msg.WriteString(plainBody)
-	msg.WriteString("\r\n\r\n")
-
-	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
-	msg.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n")
-	msg.WriteString(htmlBody)
-	msg.WriteString("\r\n\r\n")
-	msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
-
-	err := m.sendMail(ctx, from, toEmail, []byte(msg.String()))
-	if err != nil {
-		m.log.ErrorContext(ctx, "failed to send password reset email via SMTP",
-			slog.String("to", toEmail),
-			slog.String("error", err.Error()),
-		)
-		return fmt.Errorf("failed to send password recovery email: %w", err)
-	}
-
-	m.log.InfoContext(ctx, "password reset email sent successfully via SMTP",
-		slog.String("to", toEmail),
-	)
-
-	return nil
+	return s.sender.SendEmail(ctx, toEmail, subject, htmlBody, plainBody)
 }
 
-func (m *SMTPMailer) sendMail(ctx context.Context, from, toEmail string, msg []byte) error {
-	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
+// -----------------------------------------------------------------------------
+// Backward-Compatibility Adapters
+// -----------------------------------------------------------------------------
 
-	var auth smtp.Auth
-	if m.cfg.Username != "" && m.cfg.Password != "" {
-		auth = smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)
+// LogMailer preserves the legacy LogMailer type for existing tests and callers
+type LogMailer struct {
+	service *EmailService
+}
+
+// NewLogMailer creates a development/test logger-based mailer
+func NewLogMailer(log *slog.Logger) *LogMailer {
+	sender := NewLogSender(log)
+	return &LogMailer{
+		service: NewEmailService(sender, config.MailerConfig{Provider: "log"}, nil, log),
 	}
+}
 
-	dialer := &net.Dialer{
-		Timeout: 15 * time.Second,
+// SendPasswordResetOTP simulates sending an email by logging recipient metadata
+func (m *LogMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp string, expiry time.Duration) error {
+	return m.service.SendPasswordResetOTP(ctx, toEmail, otp, expiry)
+}
+
+// SMTPMailer preserves the legacy SMTPMailer type for existing tests and callers
+type SMTPMailer struct {
+	service *EmailService
+}
+
+// NewSMTPMailer creates an SMTP mailer
+func NewSMTPMailer(cfg config.MailerConfig, log *slog.Logger) *SMTPMailer {
+	sender := NewSMTPSender(cfg, log)
+	return &SMTPMailer{
+		service: NewEmailService(sender, cfg, nil, log),
 	}
+}
 
-	var conn net.Conn
-	var err error
-
-	if m.cfg.Port == 465 {
-		tlsConfig := &tls.Config{
-			ServerName: m.cfg.Host,
-			MinVersion: tls.VersionTLS12,
-		}
-		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", addr)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to connect to SMTP server %s: %w", addr, err)
-	}
-	defer conn.Close()
-
-	client, err := smtp.NewClient(conn, m.cfg.Host)
-	if err != nil {
-		return fmt.Errorf("failed to create SMTP client: %w", err)
-	}
-	defer client.Close()
-
-	if m.cfg.Port != 465 {
-		if ok, _ := client.Extension("STARTTLS"); ok {
-			tlsConfig := &tls.Config{
-				ServerName: m.cfg.Host,
-				MinVersion: tls.VersionTLS12,
-			}
-			if err := client.StartTLS(tlsConfig); err != nil {
-				return fmt.Errorf("failed to start TLS: %w", err)
-			}
-		}
-	}
-
-	if auth != nil {
-		if ok, _ := client.Extension("AUTH"); ok {
-			if err := client.Auth(auth); err != nil {
-				return fmt.Errorf("SMTP authentication failed: %w", err)
-			}
-		}
-	}
-
-	if err := client.Mail(from); err != nil {
-		return fmt.Errorf("SMTP MAIL command failed: %w", err)
-	}
-
-	if err := client.Rcpt(toEmail); err != nil {
-		return fmt.Errorf("SMTP RCPT command failed for %s: %w", toEmail, err)
-	}
-
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("SMTP DATA command failed: %w", err)
-	}
-
-	if _, err := w.Write(msg); err != nil {
-		_ = w.Close()
-		return fmt.Errorf("failed to write email body: %w", err)
-	}
-
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("failed to finalize email message: %w", err)
-	}
-
-	_ = client.Quit()
-	return nil
+// SendPasswordResetOTP sends a branded password reset email via SMTP
+func (m *SMTPMailer) SendPasswordResetOTP(ctx context.Context, toEmail, otp string, expiry time.Duration) error {
+	return m.service.SendPasswordResetOTP(ctx, toEmail, otp, expiry)
 }
